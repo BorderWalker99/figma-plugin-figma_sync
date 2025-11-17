@@ -1,0 +1,1762 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>iPhone 截图同步 · Apple 风格</title>
+  <style>
+    /*========================
+      Apple-like Visual System
+    ========================*/
+    :root {
+      --bg: #f5f5f7;
+      /* macOS / iOS background gray */
+      --surface: #ffffff;
+      /* card surface */
+      --text: #000000;
+      /* primary text */
+      --subtext: #6e6e73;
+      /* secondary text */
+      --separator: #e5e5ea;
+      /* separator lines */
+      --accent: #0a84ff;
+      /* iOS system blue */
+      --accent-hover: #0066d6;
+      /* hover blue */
+      --success-bg: #e6f7ec0a;
+      --success-fg: #1d7a41;
+      --warn-bg: #fff6e60a;
+      --warn-fg: #9f5b00;
+      --info-bg: #e7f1ff0a;
+      --info-fg: #0b66c3;
+      --danger: #ff3b30;
+      --radius: 12px;
+      /* rounded corners */
+      --radius-lg: 16px;
+      --shadow-sm: 0 1px 2px rgba(0, 0, 0, .06), 0 1px 1px rgba(0, 0, 0, .04);
+      --shadow-md: 0 10px 30px rgba(0, 0, 0, .08);
+      --shadow-focus: 0 0 0 4px rgba(10, 132, 255, .18);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #000000;
+        --surface: #1c1c1e;
+        --text: #ffffff;
+        --subtext: #9a9aa0;
+        --separator: #2c2c2e;
+        --accent: #0a84ff;
+        --accent-hover: #0a6ed1;
+        --success-bg: rgba(52, 199, 89, 0.2);
+        --success-fg: #34c759;
+        --warn-bg: rgba(255, 159, 10, .2);
+        --warn-fg: #ff9f0a;
+        --info-bg: rgba(10, 132, 255, .2);
+        --info-fg: #0a84ff;
+        --danger: #ff453a;
+        --shadow-sm: 0 1px 2px rgba(0, 0, 0, .5);
+        --shadow-md: 0 10px 30px rgba(0, 0, 0, .6);
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      height: auto;
+      min-height: 0;
+    }
+
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      letter-spacing: .02em;
+    }
+
+    /* App Frame */
+    .app {
+      max-width: 880px;
+      margin: 32px auto;
+      padding: 0 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    /* 最小化状态 */
+    .app.minimized .mode-selection,
+    .app.minimized .work-area {
+      display: none;
+    }
+
+    .app.minimized {
+      margin: 0;
+      padding: 0;
+      gap: 0;
+    }
+
+    .app.minimized .toolbar {
+      margin: 0;
+      border-radius: 0;
+      border-left: none;
+      border-right: none;
+      border-top: none;
+    }
+
+    /* Toolbar */
+    .toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 16px;
+      background: var(--surface);
+      border: 1px solid var(--separator);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-sm);
+      z-index: 2;
+      backdrop-filter: saturate(180%) blur(20px);
+    }
+
+    .title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 700;
+      font-size: 17px;
+      flex-wrap: wrap;
+    }
+
+    .subtitle-top {
+      color: var(--subtext);
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .pill {
+      padding: 6px 10px;
+      border: 1px solid var(--separator);
+      border-radius: 999px;
+      font-size: 12px;
+      color: var(--subtext);
+    }
+
+    /* Card */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--separator);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-md);
+    }
+
+    .section {
+      padding: 20px;
+    }
+
+    .section+.section {
+      border-top: 1px solid var(--separator);
+    }
+
+    /* Mode selection */
+    .mode-selection {
+      display: block;
+    }
+
+    .mode-selection.hidden {
+      display: none;
+    }
+
+    .mode-head {
+      padding: 20px;
+    }
+
+    .modeTitleContainer {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 700;
+      font-size: 17px;
+      flex-wrap: wrap;
+    }
+
+    #modeTitle {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    #modeTitle .mode-icon {
+      width: 20px;
+      height: 20px;
+      margin-bottom: 0;
+    }
+
+    .mode-subtitle {
+      font-size: 13px;
+      color: var(--subtext);
+    }
+
+    .mode-grid {
+      padding: 0px 20px 20px 20px;
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 16px;
+    }
+
+    @media (min-width: 640px) {
+      .mode-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    .mode-button {
+      width: 100%;
+      padding: 16px;
+      border: 1px solid var(--separator);
+      border-radius: var(--radius);
+      cursor: pointer;
+      transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease, background .16s ease;
+      background: linear-gradient(180deg,
+          color-mix(in srgb, var(--surface) 90%, white 10%) 0%,
+          color-mix(in srgb, var(--surface) 90%, white 10%) 100%);
+      text-align: left;
+      box-shadow: var(--shadow-sm);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .mode-button:hover {
+      border-color: var(--accent);
+      box-shadow: 0 8px 24px rgba(10, 132, 255, .12);
+      transform: translateY(-1px);
+    }
+
+    .mode-button:active {
+      transform: translateY(0);
+    }
+
+    .mode-button:focus-visible {
+      outline: none;
+      box-shadow: var(--shadow-focus);
+    }
+
+    .mode-button.selected {
+      border-color: var(--accent);
+      background: linear-gradient(180deg,
+          color-mix(in srgb, var(--accent) 8%, var(--surface) 92%) 0%,
+          color-mix(in srgb, var(--accent) 8%, var(--surface) 92%) 100%);
+      box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.15), var(--shadow-sm);
+    }
+
+    .mode-button.selected:hover {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.2), 0 8px 24px rgba(10, 132, 255, .12);
+    }
+
+    .mode-icon {
+      width: 68px;
+      height: 68px;
+      position: absolute;
+      bottom: -8px;
+      right: -8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0.3;
+      pointer-events: none;
+    }
+
+    .mode-icon img {
+      width: 100%;
+      height: 100%;
+      display: block;
+      object-fit: contain;
+    }
+
+    .logo-icon {
+      width: 20px;
+      height: 20px;
+      display: inline-flex;
+      align-items: center;
+      vertical-align: middle;
+    }
+
+    .logo-icon svg,
+    .logo-icon img {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    /* 图标主题适配 - 单色图标在 dark mode 下反转颜色 */
+    .text-link img,
+    .logo-icon img {
+      transition: filter 0.2s ease;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      /* 单色图标在 dark mode 下反转为白色 */
+      .text-link img:not(.no-invert),
+      .logo-icon img:not(.no-invert) {
+        filter: invert(1) brightness(1);
+      }
+    }
+
+    .mode-button-title {
+      font-size: 16px;
+      font-weight: 700;
+      margin-bottom: 4px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .mode-button-desc {
+      font-size: 13px;
+      color: var(--subtext);
+      line-height: 1.55;
+      position: relative;
+      z-index: 1;
+    }
+
+    /* Work area */
+    .work-area {
+      display: none;
+    }
+
+    .work-area.active {
+      display: block;
+    }
+
+    h2 {
+      font-size: 17px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+
+    .subtitle {
+      font-size: 13px;
+      color: var(--subtext);
+      margin-bottom: 12px;
+    }
+
+    .status {
+      padding: 6px 10px;
+      border: 1px solid var(--separator);
+      border-radius: 999px;
+      font-size: 12px;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--surface);
+    }
+
+    .status.connected {
+      background: var(--success-bg);
+      color: var(--success-fg);
+      border-color: transparent;
+    }
+
+    .status.waiting {
+      background: var(--warn-bg);
+      color: var(--warn-fg);
+      border-color: transparent;
+    }
+
+    .status.syncing {
+      background: var(--info-bg);
+      color: var(--info-fg);
+      border-color: transparent;
+    }
+
+    .stats {
+      background: var(--surface);
+      border: 1px solid var(--separator);
+      padding: 16px;
+      border-radius: var(--radius);
+      margin: 12px 0;
+      text-align: center;
+    }
+
+    .stat-value {
+      font-size: 28px;
+      font-weight: 800;
+      color: var(--accent);
+      letter-spacing: .02em;
+    }
+
+    .stat-label {
+      font-size: 12px;
+      color: var(--subtext);
+      margin-top: 4px;
+    }
+
+    .info-box {
+      background: var(--info-bg);
+      color: var(--info-fg);
+      border: 1px solid transparent;
+      border-left: 4px solid var(--accent);
+      padding: 12px 14px;
+      margin: 12px 0 6px;
+      font-size: 13px;
+      border-radius: 10px;
+    }
+
+    .info-box strong {
+      display: block;
+      margin-bottom: 6px;
+      color: inherit;
+    }
+
+    .log-container {
+      margin: 12px 0;
+    }
+
+    .log-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 12px;
+      background: var(--surface);
+      border: 1px solid var(--separator);
+      border-radius: var(--radius) var(--radius) 0 0;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .log-header:hover {
+      background: var(--bg);
+    }
+
+    .log-header-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .log-toggle {
+      font-size: 12px;
+      color: var(--subtext);
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .log-toggle-icon {
+      display: inline-block;
+      font-size: 10px;
+    }
+
+    .log {
+      background: var(--surface);
+      border: 1px solid var(--separator);
+      border-top: none;
+      padding: 12px 12px 10px;
+      border-radius: 0 0 var(--radius) var(--radius);
+      max-height: 220px;
+      overflow: auto;
+      font-size: 12px;
+      line-height: 1.55;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      white-space: pre-wrap;
+      transition: max-height 0.3s ease, padding 0.3s ease;
+    }
+
+    .log-container.collapsed .log {
+      max-height: 0;
+      padding: 0 12px;
+      overflow: hidden;
+      border: none;
+    }
+
+    /* Buttons */
+    button {
+      width: 100%;
+      padding: 12px 14px;
+      border: 1px solid var(--separator);
+      border-radius: 11px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+      background: var(--surface);
+      color: var(--text);
+      transition: box-shadow .16s ease, border-color .16s ease, transform .06s ease;
+      box-shadow: var(--shadow-sm);
+    }
+
+    button:hover {
+      border-color: var(--accent);
+    }
+
+    button:focus-visible {
+      outline: none;
+      box-shadow: var(--shadow-focus);
+    }
+
+    button:active {
+      transform: translateY(1px);
+    }
+
+    .btn-primary {
+      background: linear-gradient(180deg, #0a84ff, #0071eb);
+      color: #fff;
+      border-color: transparent;
+    }
+
+    .btn-primary:hover {
+      background: linear-gradient(180deg, #0a7aee, #0066d6);
+    }
+
+    .btn-success {
+      background: linear-gradient(180deg, #34c759, #2cab4d);
+      color: #fff;
+      border-color: transparent;
+      margin-bottom: 12px;
+    }
+
+    .btn-success:hover {
+      background: linear-gradient(180deg, #30b851, #279b44);
+    }
+
+    .btn-danger {
+      background: linear-gradient(180deg, #ff3b30, #e13228);
+      color: #fff;
+      border-color: transparent;
+      margin-bottom: 12px;
+    }
+
+    .btn-danger:hover {
+      background: linear-gradient(180deg, #f4352a, #d12d24);
+    }
+
+    .btn-secondary {
+      background: linear-gradient(180deg,
+          color-mix(in srgb, var(--surface) 90%, white 10%) 0%,
+          color-mix(in srgb, var(--surface) 90%, white 10%) 100%);
+    }
+    
+
+    /* Footer tips */
+    .footnote {
+      text-align: center;
+      color: var(--subtext);
+      font-size: 12px;
+      margin-top: 12px;
+    }
+
+    /* Small helper for hidden elements */
+    .hidden {
+      display: none !important;
+    }
+
+    /* Text link */
+    .text-link {
+      color: var(--text);
+      cursor: pointer;
+      text-decoration: none;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 4px;
+      border-radius: 4px;
+      transition: background-color 0.2s ease, opacity 0.2s ease;
+    }
+
+    .text-link:hover {
+      color: var(--text);
+      opacity: 0.7;
+      background-color: rgba(0, 0, 0, 0.05);
+      text-decoration: none;
+    }
+
+    .text-link svg {
+      width: 16px;
+      height: 16px;
+      fill: currentColor;
+      flex-shrink: 0;
+    }
+
+    .text-link:hover svg {
+      fill: currentColor;
+    }
+
+    /* Modal */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, .75);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 10;
+    }
+
+    .modal-overlay.hidden {
+      display: none;
+    }
+
+    .modal {
+      width: min(600px, calc(100% - 24px));
+      max-width: calc(100vw - 24px);
+      background: var(--surface);
+      border: 1px solid var(--separator);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-md);
+      position: relative;
+      padding: 20px;
+      max-height: calc(100vh - 40px);
+      overflow-y: auto;
+    }
+
+    .modal-title {
+      font-size: 17px;
+      font-weight: 700;
+      margin-top: 0;
+      margin-bottom: 20px;
+    }
+
+    /* Align mode title style with modal title */
+    .mode-title {
+      font-size: 17px;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+
+    .modal-content {
+      color: var(--subtext);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    .modal-close {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      width: 28px;
+      height: 28px;
+      border-radius: 8px;
+      border: 1px solid var(--separator);
+      background: var(--surface);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .modal-close:hover {
+      border-color: var(--accent);
+    }
+  </style>
+  <script>
+    // GitHub 图片资源基础 URL
+    const IMAGE_BASE_URL = 'https://raw.githubusercontent.com/BorderWalker99/figma-plugin-figma_sync/refs/heads/main/images/';
+    
+    // 根据主题获取二维码（使用 GitHub URL）
+    function getQRCodeURI(isDark) {
+      return {
+        google: IMAGE_BASE_URL + (isDark ? 'qr-google-white.png' : 'qr-google-black.png'),
+        googleScreenshot: IMAGE_BASE_URL + (isDark ? 'qr-google-white.png' : 'qr-google-black.png'),
+        googleAlbum: IMAGE_BASE_URL + (isDark ? 'qr-google-album-white.png' : 'qr-google-album-black.png'),
+        icloud: IMAGE_BASE_URL + (isDark ? 'qr-icloud-white.png' : 'qr-icloud-black.png'),
+        icloudScreenshot: IMAGE_BASE_URL + (isDark ? 'qr-icloud-white.png' : 'qr-icloud-black.png'),
+        icloudAlbum: IMAGE_BASE_URL + (isDark ? 'qr-icloud-album-white.png' : 'qr-icloud-album-black.png')
+      };
+    }
+    
+
+  </script>
+  
+</head>
+
+<body>
+  <div class="app">
+    <!-- Top Toolbar -->
+    <div class="toolbar card">
+      <div class="title">
+        <span class="logo-icon"><img class="no-invert" src="https://raw.githubusercontent.com/BorderWalker99/figma-plugin-figma_sync/refs/heads/main/images/logo.svg" alt="Figma Sync" width="20" height="20" /></span>
+        Figma Sync <span class="pill" id="toolbarPill">未连接</span>
+      </div>
+      <div class="subtitle-top">
+        <a id="viewUseCases" class="text-link" title="使用 tips">
+          <img src="https://raw.githubusercontent.com/BorderWalker99/figma-plugin-figma_sync/refs/heads/main/images/document.svg" alt="使用 tips" width="16" height="16" />
+        </a>
+        <a id="openSettings" class="text-link" title="设置">
+          <img src="https://raw.githubusercontent.com/BorderWalker99/figma-plugin-figma_sync/refs/heads/main/images/settings.svg" alt="设置" width="16" height="16" />
+        </a>
+        <a id="toggleMinimize" class="text-link" title="最小化">
+          <img id="minimizeIcon" src="https://raw.githubusercontent.com/BorderWalker99/figma-plugin-figma_sync/refs/heads/main/images/minimize.svg" alt="最小化" width="16" height="16" />
+        </a>
+      </div>
+    </div>
+
+    <!-- 模式选择界面 -->
+    <div class="mode-selection card" id="modeSelection">
+      <div class="mode-head">
+        <div class="mode-title">选择同步模式</div>
+        <div class="mode-subtitle">选择适合的工作方式，同步后自动删除源文件以节省空间</div>
+      </div>
+      <div class="mode-grid">
+        <button class="mode-button" id="realtimeBtn" aria-label="选择实时同步模式">
+          <div class="mode-icon"><img class="no-invert" src="https://raw.githubusercontent.com/BorderWalker99/figma-plugin-figma_sync/refs/heads/main/images/mode-realtime.svg" alt="实时同步" width="68" height="68" /></div>
+          <div class="mode-button-title">实时同步模式</div>
+          <div class="mode-button-desc">自动检测新截图并立即同步到画板</div>
+        </button>
+
+        <button class="mode-button" id="manualBtn" aria-label="选择手动同步模式">
+          <div class="mode-icon"><img class="no-invert" src="https://raw.githubusercontent.com/BorderWalker99/figma-plugin-figma_sync/refs/heads/main/images/mode-manual.svg" alt="手动同步" width="68" height="68" /></div>
+          <div class="mode-button-title">手动同步模式</div>
+          <div class="mode-button-desc">批量同步存储的所有截图</div>
+        </button>
+      </div>
+    </div>
+
+    <!-- 工作界面 -->
+    <div class="work-area card" id="workArea">
+      <div class="section">
+        <div class="modeTitleContainer">
+          <div id="modeTitle">
+            <span class="logo-icon"><img class="no-invert" src="https://raw.githubusercontent.com/BorderWalker99/figma-plugin-figma_sync/refs/heads/main/images/logo.svg" alt="Figma Sync" width="20" height="20" /></span>
+            Figma Sync
+          </div>
+          <div id="status" class="status waiting">等待连接</div>
+        </div>
+        <div class="subtitle" id="modeSubtitle"></div>
+
+        <div class="stats">
+          <div class="stat-value" id="count">0</div>
+          <div class="stat-label">已同步截图</div>
+        </div>
+
+        <div class="info-box" id="infoBox"></div>
+        <div class="log-container" id="logContainer">
+          <div class="log-header" id="logHeader">
+            <span class="log-header-title">日志</span>
+            <span class="log-toggle">
+              <span class="log-toggle-icon">▲</span>
+              <span id="logToggleText">收起</span>
+            </span>
+          </div>
+        <div class="log" id="log"></div>
+        </div>
+
+        <button class="btn-success" id="syncBtn" style="display:none;">立即同步所有截图</button>
+        <button class="btn-danger" id="stopBtn" style="display:none;">停止实时同步</button>
+        <button class="btn-secondary" id="locateFrameBtn" style="display:none;">定位画板</button>
+        <button class="btn-secondary" id="backBtn">返回选择模式</button>
+
+        <!-- <div class="footnote">提示：支持系统深色模式 · ⌘/Ctrl + L 聚焦日志（浏览器）</div> -->
+      </div>
+    </div>
+  </div>
+
+  <!-- 使用场景 Modal -->
+  <div id="useCaseOverlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="useCaseTitle">
+    <div class="modal">
+      <button id="useCaseClose" class="modal-close" aria-label="关闭">
+        ✕
+      </button>
+      <h3 id="useCaseTitle" class="modal-title">使用 tips</h3>
+      <div class="modal-content" id="useCaseContent" style="white-space: normal;">
+        <div style="display: flex; flex-direction: column; gap: 16px;">
+          <div>
+            <div style="font-weight: 600; color: var(--text); margin-bottom: 8px;">1. 启动服务</div>
+            <div style="font-size: 12px; color: var(--subtext); line-height: 1.6;">
+              每次使用前，前往启动台打开终端，分别运行以下两行命令:
+              <div style="background: var(--surface); padding: 8px 12px; border-radius: 6px; margin-top: 6px; margin-bottom: 6px; font-family: monospace; font-size: 11px; border: 1px solid var(--separator);">
+                cd <span style="color: var(--accent);">[FigmaSync-UserPackage 文件夹路径]</span>
+              </div>
+              <div style="background: var(--surface); padding: 8px 12px; border-radius: 6px; margin-top: 6px; margin-bottom: 6px; font-family: monospace; font-size: 11px; border: 1px solid var(--separator);">
+                npm start
+              </div>
+              <div style="margin-top: 8px; margin-bottom: 8px;">
+                <img src="https://raw.githubusercontent.com/BorderWalker99/figma-plugin-figma_sync/refs/heads/main/images/start-demo.gif" alt="步骤2" style="max-width: 100%; border-radius: 6px; border: 1px solid var(--separator);" />
+              </div>
+              使用插件期间保持终端窗口打开，不要关闭。
+            </div>
+          </div>
+          
+          <div>
+            <div style="font-weight: 600; color: var(--text); margin-bottom: 8px;">2. 配置 iPhone 快捷指令</div>
+            <div style="font-size: 12px; color: var(--subtext); line-height: 1.6;">
+              <div style="margin-bottom: 12px;">
+                按需扫描下方二维码下载快捷指令:
+              </div>
+              <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-bottom: 16px;">
+                <div style="display: flex; flex-direction: column; align-items: center; gap: 8px;">
+                  <img id="qrGoogleScreenshot" alt="Google Drive 直接截图上传二维码" 
+                       style="width: 120px; height: 120px; color: var(--text);">
+                  <div style="font-size: 11px; color: var(--subtext); text-align: center;">Google Drive<br>直接截图上传</div>
+                </div>
+                <div style="display: flex; flex-direction: column; align-items: center; gap: 8px;">
+                  <img id="qrGoogleAlbum" alt="Google Drive 相册上传二维码" 
+                       style="width: 120px; height: 120px; color: var(--text);">
+                  <div style="font-size: 11px; color: var(--subtext); text-align: center;">Google Drive<br>相册上传 (支持录屏)</div>
+                </div>
+                <div style="display: flex; flex-direction: column; align-items: center; gap: 8px;">
+                  <img id="qrIcloudScreenshot" alt="iCloud 直接截图上传二维码" 
+                       style="width: 120px; height: 120px; color: var(--text);">
+                  <div style="font-size: 11px; color: var(--subtext); text-align: center;">iCloud<br>直接截图上传</div>
+                </div>
+                <div style="display: flex; flex-direction: column; align-items: center; gap: 8px;">
+                  <img id="qrIcloudAlbum" alt="iCloud 相册上传二维码" 
+                       style="width: 120px; height: 120px; color: var(--text);">
+                  <div style="font-size: 11px; color: var(--subtext); text-align: center;">iCloud<br>相册上传 (支持录屏)</div>
+                </div>
+              </div>
+              <div style="margin-top: 12px; font-size: 12px; color: var(--subtext); line-height: 2.4;">
+                使用 Google Drive 模式时，需在快捷指令的「获取URL内容」中填入 <span style="color: var(--accent);">x-user-id</span> (在 Mac 终端运行 <code style="background: var(--surface); padding: 6px 10px; margin-left: 4px; margin-right: 4px; border-radius: 4px; font-family: monospace; font-size: 11px; border: 1px solid var(--separator);">./get-user-id.sh</code> 获取)
+              </div>
+            </div>
+          </div>
+  
+          <div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 设置 Modal -->
+  <div id="settingsOverlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+    <div class="modal">
+      <button id="settingsClose" class="modal-close" aria-label="关闭">
+        ✕
+      </button>
+      <h3 id="settingsTitle" class="modal-title">上传模式设置</h3>
+      <div class="modal-content" id="settingsContent">
+        <div style="margin-bottom: 16px;">
+          <div style="display: flex; flex-direction: column; gap: 16px;">
+            <button class="mode-button" id="switchToDrive" style="text-align: left; padding: 16px;">
+              <div class="mode-icon"><img class="no-invert" src="https://raw.githubusercontent.com/BorderWalker99/figma-plugin-figma_sync/refs/heads/main/images/google.svg" alt="Google Drive" width="68" height="68" /></div>
+              <div class="mode-button-title">Google Drive 上传</div>
+              <div class="mode-button-desc">上传至 Google Drive 公共云，无需 iCloud</div>
+            </button>
+            <button class="mode-button" id="switchToAliyun" style="text-align: left; padding: 16px;">
+              <div class="mode-icon"><img class="no-invert" src="https://raw.githubusercontent.com/BorderWalker99/figma-plugin-figma_sync/refs/heads/main/images/google.svg" alt="阿里云 OSS" width="68" height="68" /></div>
+              <div class="mode-button-title">阿里云 OSS 上传</div>
+              <div class="mode-button-desc">上传至阿里云 OSS，适合中国大陆用户，网络更稳定</div>
+            </button>
+            <button class="mode-button" id="switchToIcloud" style="text-align: left; padding: 16px;">
+              <div class="mode-icon"><img class="no-invert" src="https://raw.githubusercontent.com/BorderWalker99/figma-plugin-figma_sync/refs/heads/main/images/icloud.svg" alt="iCloud" width="68" height="68" /></div>
+              <div class="mode-button-title">iCloud 上传</div>
+              <div class="mode-button-desc">上传至 iCloud 个人云，需手机电脑共用 iCloud 账号且空间充足</div>
+            </button>
+          </div>
+        </div>
+        <div id="switchStatus" style="margin-top: 16px; font-size: 13px; color: var(--subtext);"></div>
+        
+        <!-- 尺寸设置 -->
+        <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--separator);">
+          <div style="font-size: 17px; font-weight: 700; color: var(--text); margin-bottom: 4px;">
+            截图尺寸设置
+          </div>
+          <div style="font-size: 13px; color: var(--subtext); margin-bottom: 20px;">
+            设置固定宽高，另一边会按比例自动计算；不填则默认取设备屏幕尺寸
+          </div>
+          <div style="display: flex; gap: 12px; align-items: center;">
+            <div style="flex: 1;">
+              <label style="display: block; font-size: 12px; color: var(--subtext); margin-bottom: 6px;">宽度 (px)</label>
+              <input type="number" id="imageWidthInput" placeholder="请输入宽度" 
+                     style="width: 100%; padding: 8px 12px; border: 1px solid var(--separator); border-radius: 6px; background: var(--surface); color: var(--text); font-size: 13px;"
+                     min="1" step="1">
+            </div>
+            <div style="flex: 1;">
+              <label style="display: block; font-size: 12px; color: var(--subtext); margin-bottom: 6px;">高度 (px)</label>
+              <input type="number" id="imageHeightInput" placeholder="请输入高度"
+                     style="width: 100%; padding: 8px 12px; border: 1px solid var(--separator); border-radius: 6px; background: var(--surface); color: var(--text); font-size: 13px;"
+                     min="1" step="1">
+            </div>
+          </div>
+          <div style="margin-top: 12px; display: flex; gap: 12px;">
+            <button id="saveSizeSettings" style="flex: 1; padding: 8px 16px; background: var(--accent); color: white; border: none; border-radius: 6px; font-size: 13px; cursor: pointer;">
+              保存
+            </button>
+            <button id="clearSizeSettings" style="flex: 1; padding: 8px 16px; background: transparent; color: var(--subtext); border: 1px solid var(--separator); border-radius: 6px; font-size: 13px; cursor: pointer;">
+              清除
+            </button>
+          </div>
+          <div id="sizeSettingsStatus" style="margin-top: 8px; font-size: 12px; color: var(--subtext);"></div>
+        </div>
+        
+        <!-- 画板布局设置 -->
+        <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--separator);">
+          <div style="font-size: 17px; font-weight: 700; color: var(--text); margin-bottom: 4px;">
+            画板布局设置
+          </div>
+          <div style="font-size: 13px; color: var(--subtext); margin-bottom: 20px;">
+            设置每行显示多少张截图，不填则默认一直横着排（不换行）
+          </div>
+          <div>
+            <label style="display: block; font-size: 12px; color: var(--subtext); margin-bottom: 6px;">每行显示 (张)</label>
+            <input type="number" id="frameColumnsInput" placeholder="不填则一直横着排" 
+                   style="width: 100%; padding: 8px 12px; border: 1px solid var(--separator); border-radius: 6px; background: var(--surface); color: var(--text); font-size: 13px;"
+                   min="1" step="1">
+          </div>
+          <div style="margin-top: 12px; display: flex; gap: 12px;">
+            <button id="saveLayoutSettings" style="flex: 1; padding: 8px 16px; background: var(--accent); color: white; border: none; border-radius: 6px; font-size: 13px; cursor: pointer;">
+              保存
+            </button>
+            <button id="clearLayoutSettings" style="flex: 1; padding: 8px 16px; background: transparent; color: var(--subtext); border: 1px solid var(--separator); border-radius: 6px; font-size: 13px; cursor: pointer;">
+              清除
+            </button>
+          </div>
+          <div id="layoutSettingsStatus" style="margin-top: 8px; font-size: 12px; color: var(--subtext);"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ========== 全局变量 ==========
+    const SERVER_URL = 'ws://localhost:8888';
+    const connectionId = 'sync-session-1';
+    
+    let ws = null;
+    let screenshotCount = 0;
+    let manualDragCount = 0; // 需要手动导入的文件数量（MP4 + 大于150MB的GIF）
+    let heartbeatTimer = null;
+    let currentMode = null; // 'realtime' 或 'manual'
+    let currentSyncMode = null; // 'drive'、'aliyun'/'oss' 或 'icloud'，从服务器获取
+    let isMinimized = false; // 是否最小化
+
+    // ========== 日志函数 ==========
+    function log(msg) {
+      console.log(msg);
+      const logEl = document.getElementById('log');
+      const time = new Date().toLocaleTimeString();
+      logEl.innerHTML = `[${time}] ${msg}\n` + logEl.innerHTML;
+
+      const lines = logEl.innerText.split('\n');
+      if (lines.length > 200) {
+        // 保留前 200 条
+        logEl.innerText = lines.slice(0, 200).join('\n');
+      }
+    }
+
+    // ========== WebSocket连接 ==========
+    function setToolbarPill(text) {
+      const pill = document.getElementById('toolbarPill');
+      pill.textContent = text;
+    }
+
+    function connect() {
+      updateStatus('waiting', '连接中');
+      setToolbarPill('连接中');
+
+      ws = new WebSocket(SERVER_URL + '?id=' + connectionId + '&type=figma');
+
+      ws.onopen = function () {
+        log('✅ 已连接');
+        updateStatus('connected', '已连接');
+        setToolbarPill('已连接');
+
+        // 启动心跳（保留功能逻辑不变）
+        if (heartbeatTimer) clearInterval(heartbeatTimer);
+        heartbeatTimer = setInterval(function () {
+          if (ws.readyState === 1) {
+            ws.send(JSON.stringify({ type: 'ping' }));
+          }
+        }, 5000);
+      };
+
+      ws.onmessage = function (event) {
+        var data = JSON.parse(event.data);
+
+        if (data.type === 'pong') { return; }
+
+        if (data.type === 'screenshot') {
+          handleScreenshot(data);
+        } else if (data.type === 'file-skipped') {
+          // 文件需要手动导入（MP4/MOV 视频或大于100MB的GIF）
+          manualDragCount++;
+          let reasonText = 'GIF过大';
+          if (data.reason === 'mp4' || data.reason === 'video') {
+            const ext = (data.filename || '').toLowerCase();
+            if (ext.endsWith('.mov')) {
+              reasonText = 'MOV视频';
+            } else {
+              reasonText = 'MP4视频';
+            }
+          } else if (data.reason === 'gif-too-large') {
+            reasonText = 'GIF过大';
+          }
+          log(`⚠️  ${data.filename} 需手动导入（${reasonText}）`);
+          
+          // 通过 WebSocket 通知服务器，不要删除源文件（iCloud 模式需要）
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            try {
+              ws.send(JSON.stringify({
+                type: 'screenshot-failed',
+                filename: data.filename,
+                error: reasonText,
+                keepFile: true // 标记保留文件
+              }));
+            } catch (error) {
+              console.error('发送失败消息失败:', error);
+            }
+          }
+          
+          // 更新状态显示，只显示手动导入的文件数量（不显示同步完成信息）
+          updateStatus('connected', '');
+        } else if (data.type === 'manual-sync-complete') {
+          // 如果有文件需要手动导入，不显示"同步完成"，只显示手动导入提示
+          if (manualDragCount > 0) {
+            // 有文件需要手动导入，不显示同步完成
+            log(`⚠️  有 ${manualDragCount} 个文件需手动导入`);
+            // 将状态从 syncing 更新为 connected，显示"需手动导入"的提示
+            // updateStatus('connected', '') 会在没有新状态文本时自动显示手动导入提示
+            updateStatus('connected', '');
+            return; // 提前返回，不处理同步完成消息
+          }
+          
+          // 没有需要手动导入的文件，正常显示同步完成
+          // 只要成功同步了至少一张（count > 0），就不弹窗
+          // 只有确实没有文件需要同步（count === 0 且 total === 0）时才弹出提示
+          if (data.count > 0) {
+            log(`✅ 同步完成：${data.count} 张截图`);
+            // 更新状态，显示同步完成信息
+            updateStatus('connected', '同步完成 共' + data.count + '张');
+          } else if (data.total === 0) {
+            // 确实没有文件
+            log('ℹ️  文件夹中没有截图');
+            alert('文件夹中没有截图需要同步');
+            updateStatus('connected', '同步完成');
+          } else {
+            // 有文件但处理失败的情况（count === 0 但 total > 0）
+            log(`⚠️  同步完成，但 ${data.total} 张截图处理失败`);
+            updateStatus('connected', '同步完成');
+          }
+        } else if (data.type === 'sync-mode-changed') {
+          currentSyncMode = data.mode;
+          updateSyncModeDisplay();
+          log('✅ 上传模式已切换');
+        } else if (data.type === 'sync-mode-info') {
+          currentSyncMode = data.mode;
+          updateSyncModeDisplay();
+        } else if (data.type === 'switch-sync-mode-result') {
+          const statusEl = document.getElementById('switchStatus');
+          if (data.success) {
+            statusEl.textContent = '✅ ' + data.message;
+            statusEl.style.color = 'var(--success-fg)';
+            currentSyncMode = data.mode;
+            updateSyncModeDisplay();
+            
+            // 停止实时模式并返回主界面
+            stopRealtimeSync();
+            showModeSelection();
+            
+            // 2秒后关闭设置窗口
+            setTimeout(() => {
+              closeSettings();
+            }, 2000);
+          } else {
+            statusEl.textContent = '❌ ' + data.message;
+            statusEl.style.color = 'var(--danger)';
+          }
+        }
+      };
+
+      ws.onerror = function () {
+        log('❌ 连接失败');
+        updateStatus('waiting', '连接失败');
+        setToolbarPill('连接失败');
+      };
+
+      ws.onclose = function () {
+        log('⚠️ 连接断开，正在重连...');
+        updateStatus('waiting', '连接断开');
+        setToolbarPill('未连接');
+        if (heartbeatTimer) clearInterval(heartbeatTimer);
+        setTimeout(connect, 3000);
+      };
+    }
+
+    // 保存最近处理的文件的 driveFileId（用于失败时取消删除）
+    let currentDriveFileId = null;
+
+    function handleScreenshot(data) {
+      // 先不增加计数，等待 Figma 处理成功后再增加
+      // 这样可以避免在文件需要手动导入或处理失败时错误地增加计数
+      log(`📸 ${data.filename || '截图'}`);
+
+      // 保存 driveFileId（如果存在）
+      currentDriveFileId = data.driveFileId || null;
+
+      try {
+      // 发送到Figma主线程
+      parent.postMessage({
+        pluginMessage: {
+          type: 'add-screenshot',
+          bytes: data.bytes,
+          timestamp: data.timestamp,
+          filename: data.filename,
+          driveFileId: data.driveFileId // 传递 driveFileId 给 code.js
+        }
+      }, '*');
+        } catch (error) {
+        log('❌ 处理失败: ' + error.message);
+        console.error('发送失败:', error);
+        }
+
+      // 注意：不在这里立即发送确认消息
+      // 确认消息将在 code.js 处理成功后发送（在 screenshot-added 成功消息处理中）
+    }
+
+    // ========== UI更新 ==========
+    function updateStatus(type, text) {
+      const statusEl = document.getElementById('status');
+      const pill = document.getElementById('toolbarPill');
+
+      // 更新主状态显示区域
+      statusEl.className = 'status ' + type;
+      
+      // 优先显示新传入的状态文本（完全替换旧状态）
+      if (text && text !== '') {
+        // 有新状态文本时，完全显示新状态，不追加警告
+        // 这样可以确保新状态能够替换掉"需手动导入"的警告
+      statusEl.textContent = text;
+        // 恢复默认样式（通过CSS类设置）
+        statusEl.style.color = '';
+        statusEl.style.background = '';
+        statusEl.style.borderColor = '';
+      } else if (manualDragCount > 0 && type === 'connected') {
+        // 没有新状态文本，但有需要手动导入的文件，显示警告
+        const warningText = `需手动导入 ${manualDragCount} 段录屏`;
+        statusEl.textContent = warningText;
+        // 只修改颜色和背景色，其他样式保持与status.connected一致
+        statusEl.style.color = '#ff9500'; // 黄色警示色
+        statusEl.style.background = 'rgba(255, 149, 0, 0.1)'; // 浅黄色背景
+        statusEl.style.borderColor = 'transparent'; // 保持与status.connected一致的透明边框
+      } else {
+        // 没有新状态文本，也没有需要手动导入的文件，显示空文本或默认文本
+        statusEl.textContent = text || '';
+        // 恢复默认样式（通过CSS类设置）
+        statusEl.style.color = '';
+        statusEl.style.background = '';
+        statusEl.style.borderColor = '';
+      }
+
+      // 同步顶部标签样式（保持绿色，不变黄色）
+      if (type === 'connected') {
+        pill.textContent = '已连接';
+        pill.style.background = 'rgba(52, 199, 89, 0.05)';  // 绿色背景
+        pill.style.color = '#1d7a41';       // 深绿色文字
+        pill.style.borderColor = 'rgba(52, 199, 89, 0.3)';
+      } else if (type === 'waiting' || type === 'syncing') {
+        pill.textContent = '未连接';
+        pill.style.background = 'rgba(255, 255, 255, 0.05)';  // 灰色背景
+        pill.style.color = '#6e6e73';       // 灰色文字
+        pill.style.borderColor = 'rgba(255, 255, 255, 0.3)';
+      }
+    }
+
+    function showWorkArea(mode) {
+      currentMode = mode;
+      document.getElementById('modeSelection').classList.add('hidden');
+      document.getElementById('workArea').classList.add('active');
+      
+      // 进入模式时自动收起日志
+      collapseLog();
+
+      if (mode === 'realtime') {
+        document.getElementById('modeTitle').innerHTML = '<span class="mode-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0.00 0.00 512.00 512.00" width="20" height="20"><path fill="#ffcf4a" d="M 400.39 0.00 Q 406.46 1.42 407.76 6.51 Q 408.80 10.63 407.10 13.33 Q 354.52 96.58 295.73 189.53 Q 293.22 193.50 293.01 195.71 C 292.55 200.60 296.74 205.58 301.51 205.58 Q 403.17 205.65 405.47 205.57 C 410.18 205.43 414.68 206.67 416.22 211.27 Q 418.13 217.00 414.94 220.44 Q 366.28 272.98 149.12 507.37 Q 145.54 511.24 141.80 512.00 L 140.09 512.00 Q 133.33 510.39 132.18 505.27 Q 131.50 502.28 133.92 494.56 Q 154.89 427.39 186.53 325.52 C 188.52 319.11 184.20 313.29 177.53 313.29 Q 113.93 313.24 110.15 313.32 Q 101.28 313.52 99.28 311.96 C 94.32 308.09 94.61 304.57 96.24 298.17 Q 98.55 289.09 167.92 12.79 C 169.65 5.89 170.15 1.66 176.88 0.00 L 400.39 0.00 Z"/></svg></span> 实时同步模式';
+        document.getElementById('modeSubtitle').textContent = '自动检测并同步新截图';
+        document.getElementById('stopBtn').style.display = 'block';
+        document.getElementById('syncBtn').style.display = 'none';
+        document.getElementById('infoBox').style.display = 'none';
+
+        // 通知Mac端启动实时模式
+        if (ws && ws.readyState === 1) {
+          ws.send(JSON.stringify({ type: 'start-realtime' }));
+          log('⚡ 实时同步已启动');
+          updateStatus('connected', '实时监听中');
+        }
+      } else {
+        document.getElementById('modeTitle').innerHTML = '<span class="mode-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="20" height="20"><g><path d="m214.2 107-40.2-29.9c-9.5-7-20.9-10.8-32.7-10.8h-110.2c-16.6 0-30 13.4-30 30v349.5h404.1c15.2 0 27.4-12.3 27.4-27.4v-270.6c0-16.6-13.4-30-30-30h-155.6c-11.8 0-23.3-3.8-32.8-10.8z" fill="#f6c012"/><g><path d="m76.9 143.7h300c8.3 0 15 6.7 15 15v200c0 8.3-6.7 15-15 15h-300c-8.3 0-15-6.7-15-15v-200c0-8.3 6.7-15 15-15z" fill="#ffeac5"/><path d="m56.9 163.7h300c8.3 0 15 6.7 15 15v200c0 8.3-6.7 15-15 15h-300c-8.3 0-15-6.7-15-15v-200c0-8.3 6.7-15 15-15z" fill="#fff7e6"/></g><path d="m85.2 220.1-84.1 225.6h410.8c12.5 0 23.7-7.8 28.1-19.5l69-185.2c7.3-19.6-7.2-40.5-28.1-40.5h-367.6c-12.5.1-23.7 7.8-28.1 19.6z" fill="#fbd87c"/></g></svg></span> 手动同步模式';
+        document.getElementById('modeSubtitle').textContent = '批量同步存储的所有截图';
+        document.getElementById('syncBtn').style.display = 'block';
+        document.getElementById('stopBtn').style.display = 'none';
+        document.getElementById('infoBox').style.display = 'none';
+        updateStatus('connected', '已连接');
+      }
+    }
+
+    function showModeSelection() {
+      // 停止实时模式
+      if (currentMode === 'realtime' && ws && ws.readyState === 1) {
+        ws.send(JSON.stringify({ type: 'stop-realtime' }));
+        log('⏸️  实时同步已停止');
+      }
+
+      // 清零已同步截图计数和手动导入计数
+      screenshotCount = 0;
+      manualDragCount = 0;
+      document.getElementById('count').textContent = '0';
+
+      currentMode = null;
+      document.getElementById('workArea').classList.remove('active');
+      document.getElementById('modeSelection').classList.remove('hidden');
+      updateStatus('waiting', '已返回模式选择');
+    }
+
+    // ========== 按钮事件 ==========
+    document.getElementById('realtimeBtn').onclick = function () { showWorkArea('realtime'); };
+    document.getElementById('manualBtn').onclick = function () { showWorkArea('manual'); };
+
+    document.getElementById('syncBtn').onclick = function () {
+      log('🫳🏻 开始同步...');
+      updateStatus('syncing', '正在同步');
+      
+      // 清零手动拖入计数，开始新的同步周期
+      manualDragCount = 0;
+
+      if (ws && ws.readyState === 1) {
+        ws.send(JSON.stringify({ type: 'manual-sync' }));
+      } else {
+        log('❌ 未连接');
+        updateStatus('waiting', '连接失败');
+      }
+    };
+
+    document.getElementById('stopBtn').onclick = function () {
+      if (confirm('确定要停止实时同步吗？')) { showModeSelection(); }
+    };
+
+    // 停止实时同步的通用函数
+    function stopRealtimeSync() {
+      if (currentMode === 'realtime' && ws && ws.readyState === 1) {
+        ws.send(JSON.stringify({ type: 'stop-realtime' }));
+        log('⏸️  实时同步已停止');
+      }
+    }
+
+    document.getElementById('locateFrameBtn').onclick = function () {
+      parent.postMessage({ pluginMessage: { type: 'locate-frame' } }, '*');
+    };
+
+    document.getElementById('backBtn').onclick = function () { 
+      stopRealtimeSync();
+      showModeSelection(); 
+    };
+
+    // ========== 加载二维码图片 ==========
+    // 根据主题动态选择二维码
+    function setQRCodeImages() {
+      const qrGoogleScreenshot = document.getElementById('qrGoogleScreenshot');
+      const qrGoogleAlbum = document.getElementById('qrGoogleAlbum');
+      const qrIcloudScreenshot = document.getElementById('qrIcloudScreenshot');
+      const qrIcloudAlbum = document.getElementById('qrIcloudAlbum');
+      
+      // 检测当前主题（dark 或 light）
+      const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      const uris = getQRCodeURI(isDark);
+      
+      // 设置二维码图片
+      if (qrGoogleScreenshot) qrGoogleScreenshot.src = uris.googleScreenshot || uris.google;
+      if (qrGoogleAlbum) qrGoogleAlbum.src = uris.googleAlbum || uris.google;
+      if (qrIcloudScreenshot) qrIcloudScreenshot.src = uris.icloudScreenshot || uris.icloud;
+      if (qrIcloudAlbum) qrIcloudAlbum.src = uris.icloudAlbum || uris.icloud;
+    }
+
+    // ========== 更新图标颜色以适配主题 ==========
+    function updateIconColors() {
+      const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      
+      // 获取所有需要适配的单色图标（排除彩色图标）
+      const monochromeIcons = document.querySelectorAll('.text-link img, .logo-icon img');
+      
+      monochromeIcons.forEach(icon => {
+        // 如果图标有 no-invert 类，跳过（用于彩色图标）
+        if (icon.classList.contains('no-invert')) {
+          return;
+        }
+        
+        // 在 dark mode 下反转颜色，在 light mode 下恢复
+        if (isDark) {
+          icon.style.filter = 'invert(1) brightness(1)';
+        } else {
+          icon.style.filter = 'none';
+        }
+      });
+    }
+
+    // 主题变化处理函数
+    function handleThemeChange() {
+      setQRCodeImages();
+      updateIconColors();
+    }
+    
+    // DOM 加载完成后设置二维码图片和图标颜色
+    if (document.readyState === 'loading') {
+      window.addEventListener('DOMContentLoaded', function() {
+        handleThemeChange();
+      });
+    } else {
+      handleThemeChange();
+    }
+    
+    // 监听主题变化
+    const themeMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    themeMediaQuery.addEventListener('change', handleThemeChange);
+
+    // ========== 使用场景 Modal ==========
+    const useCaseOverlay = document.getElementById('useCaseOverlay');
+    const viewUseCases = document.getElementById('viewUseCases');
+    const useCaseClose = document.getElementById('useCaseClose');
+
+    function openUseCases() {
+      // 如果当前是最小化状态，先恢复
+      if (isMinimized) {
+        toggleMinimize();
+      }
+      useCaseOverlay.classList.remove('hidden');
+    }
+
+    function closeUseCases() {
+      useCaseOverlay.classList.add('hidden');
+    }
+
+    viewUseCases.onclick = openUseCases;
+    useCaseClose.onclick = closeUseCases;
+    useCaseOverlay.addEventListener('click', function (e) {
+      if (e.target === useCaseOverlay) closeUseCases();
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && !useCaseOverlay.classList.contains('hidden')) {
+        closeUseCases();
+      }
+    });
+
+    // ========== 设置 Modal ==========
+    const settingsOverlay = document.getElementById('settingsOverlay');
+    const openSettingsBtn = document.getElementById('openSettings');
+    const settingsClose = document.getElementById('settingsClose');
+    const switchToDrive = document.getElementById('switchToDrive');
+    const switchToAliyun = document.getElementById('switchToAliyun');
+    const switchToIcloud = document.getElementById('switchToIcloud');
+    const imageWidthInput = document.getElementById('imageWidthInput');
+    const imageHeightInput = document.getElementById('imageHeightInput');
+    const saveSizeSettingsBtn = document.getElementById('saveSizeSettings');
+    const clearSizeSettingsBtn = document.getElementById('clearSizeSettings');
+    const sizeSettingsStatus = document.getElementById('sizeSettingsStatus');
+    const frameColumnsInput = document.getElementById('frameColumnsInput');
+    const saveLayoutSettingsBtn = document.getElementById('saveLayoutSettings');
+    const clearLayoutSettingsBtn = document.getElementById('clearLayoutSettings');
+    const layoutSettingsStatus = document.getElementById('layoutSettingsStatus');
+    const toggleMinimizeBtn = document.getElementById('toggleMinimize');
+    const minimizeIcon = document.getElementById('minimizeIcon');
+    const appRoot = document.querySelector('.app');
+    
+    // 尺寸设置：从 Figma clientStorage 读取（通过消息传递）
+    function loadSizeSettings() {
+      // 请求 Figma 端读取设置
+      parent.postMessage({
+        pluginMessage: {
+          type: 'get-size-settings'
+        }
+      }, '*');
+    }
+    
+    // 尺寸设置：保存到 Figma clientStorage（通过消息传递）
+    function saveSizeSettings() {
+      const width = imageWidthInput.value.trim();
+      const height = imageHeightInput.value.trim();
+      
+      // 验证输入
+      if (width && (isNaN(width) || parseInt(width) <= 0)) {
+        sizeSettingsStatus.textContent = '❌ 宽度必须是大于0的数字';
+        sizeSettingsStatus.style.color = 'var(--danger)';
+        return;
+      }
+      if (height && (isNaN(height) || parseInt(height) <= 0)) {
+        sizeSettingsStatus.textContent = '❌ 高度必须是大于0的数字';
+        sizeSettingsStatus.style.color = 'var(--danger)';
+        return;
+      }
+      
+      // 注意：如果只输入了宽度或高度，另一个值会在添加截图时根据实际图片的宽高比自动计算
+      
+      // 发送给 Figma 保存
+      parent.postMessage({
+        pluginMessage: {
+          type: 'update-size-settings',
+          width: width ? parseInt(width) : null,
+          height: height ? parseInt(height) : null
+        }
+      }, '*');
+      
+      sizeSettingsStatus.textContent = '⏳ 正在保存...';
+      sizeSettingsStatus.style.color = 'var(--subtext)';
+    }
+    
+    // 清除尺寸设置
+    function clearSizeSettings() {
+      imageWidthInput.value = '';
+      imageHeightInput.value = '';
+      
+      parent.postMessage({
+        pluginMessage: {
+          type: 'update-size-settings',
+          width: null,
+          height: null
+        }
+      }, '*');
+      
+      sizeSettingsStatus.textContent = '✅ 已清除尺寸设置，将使用截图实际尺寸';
+      sizeSettingsStatus.style.color = 'var(--success-fg)';
+      setTimeout(() => {
+        sizeSettingsStatus.textContent = '';
+      }, 2000);
+    }
+    
+    // 不再实时自动计算，只在保存时计算
+    
+    saveSizeSettingsBtn.onclick = saveSizeSettings;
+    clearSizeSettingsBtn.onclick = clearSizeSettings;
+    
+    // 布局设置：从 Figma clientStorage 读取（通过消息传递）
+    function loadLayoutSettings() {
+      // 请求 Figma 端读取设置
+      parent.postMessage({
+        pluginMessage: {
+          type: 'get-layout-settings'
+        }
+      }, '*');
+    }
+    
+    // 布局设置：保存到 Figma clientStorage（通过消息传递）
+    function saveLayoutSettings() {
+      const columns = frameColumnsInput.value.trim();
+      
+      // 验证输入
+      if (columns && (isNaN(columns) || parseInt(columns) <= 0)) {
+        layoutSettingsStatus.textContent = '❌ 每行显示数量必须是大于0的数字';
+        layoutSettingsStatus.style.color = 'var(--danger)';
+        return;
+      }
+      
+      // 发送给 Figma 保存
+      parent.postMessage({
+        pluginMessage: {
+          type: 'update-layout-settings',
+          columns: columns ? parseInt(columns) : null
+        }
+      }, '*');
+      
+      layoutSettingsStatus.textContent = '⏳ 正在保存...';
+      layoutSettingsStatus.style.color = 'var(--subtext)';
+    }
+    
+    // 清除布局设置
+    function clearLayoutSettings() {
+      frameColumnsInput.value = '';
+      
+      parent.postMessage({
+        pluginMessage: {
+          type: 'update-layout-settings',
+          columns: null
+        }
+      }, '*');
+      
+      layoutSettingsStatus.textContent = '✅ 已清除布局设置，将一直横着排（不换行）';
+      layoutSettingsStatus.style.color = 'var(--success-fg)';
+      setTimeout(() => {
+        layoutSettingsStatus.textContent = '';
+      }, 2000);
+    }
+    
+    saveLayoutSettingsBtn.onclick = saveLayoutSettings;
+    clearLayoutSettingsBtn.onclick = clearLayoutSettings;
+    
+    // 打开设置时加载保存的尺寸设置和布局设置
+    openSettingsBtn.onclick = function() {
+      // 如果当前是最小化状态，先恢复
+      if (isMinimized) {
+        toggleMinimize();
+      }
+      updateSyncModeDisplay();
+      loadSizeSettings();
+      loadLayoutSettings();
+      settingsOverlay.classList.remove('hidden');
+      if (ws && ws.readyState === 1) {
+        ws.send(JSON.stringify({ type: 'get-sync-mode' }));
+      }
+    };
+
+    function closeSettings() {
+      // 立即隐藏模态框
+      settingsOverlay.classList.add('hidden');
+      document.getElementById('switchStatus').textContent = '';
+    }
+
+    function updateSyncModeDisplay() {
+      const driveBtn = document.getElementById('switchToDrive');
+      const aliyunBtn = document.getElementById('switchToAliyun');
+      const icloudBtn = document.getElementById('switchToIcloud');
+      
+      // 移除所有选中状态
+      driveBtn.classList.remove('selected');
+      aliyunBtn.classList.remove('selected');
+      icloudBtn.classList.remove('selected');
+      
+      // 根据当前模式添加选中状态
+      if (currentSyncMode === 'drive') {
+        driveBtn.classList.add('selected');
+      } else if (currentSyncMode === 'aliyun' || currentSyncMode === 'oss') {
+        aliyunBtn.classList.add('selected');
+      } else if (currentSyncMode === 'icloud') {
+        icloudBtn.classList.add('selected');
+      }
+    }
+
+    settingsClose.onclick = closeSettings;
+    settingsOverlay.addEventListener('click', function (e) {
+      if (e.target === settingsOverlay) closeSettings();
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && !settingsOverlay.classList.contains('hidden')) {
+        closeSettings();
+      }
+    });
+
+    // 切换同步模式
+    switchToDrive.onclick = function () {
+      if (currentSyncMode === 'drive') {
+        document.getElementById('switchStatus').textContent = 'ℹ️ 已经是 Google Drive 上传模式';
+        document.getElementById('switchStatus').style.color = 'var(--subtext)';
+        return;
+      }
+      document.getElementById('switchStatus').textContent = '⏳ 正在切换...';
+      document.getElementById('switchStatus').style.color = 'var(--subtext)';
+      if (ws && ws.readyState === 1) {
+        ws.send(JSON.stringify({ type: 'switch-sync-mode', mode: 'drive' }));
+      } else {
+        document.getElementById('switchStatus').textContent = '❌ 未连接到服务器';
+        document.getElementById('switchStatus').style.color = 'var(--danger)';
+      }
+    };
+
+    switchToAliyun.onclick = function () {
+      if (currentSyncMode === 'aliyun' || currentSyncMode === 'oss') {
+        document.getElementById('switchStatus').textContent = 'ℹ️ 已经是阿里云 OSS 上传模式';
+        document.getElementById('switchStatus').style.color = 'var(--subtext)';
+        return;
+      }
+      document.getElementById('switchStatus').textContent = '⏳ 正在切换...';
+      document.getElementById('switchStatus').style.color = 'var(--subtext)';
+      if (ws && ws.readyState === 1) {
+        ws.send(JSON.stringify({ type: 'switch-sync-mode', mode: 'aliyun' }));
+      } else {
+        document.getElementById('switchStatus').textContent = '❌ 未连接到服务器';
+        document.getElementById('switchStatus').style.color = 'var(--danger)';
+      }
+    };
+
+    switchToIcloud.onclick = function () {
+      if (currentSyncMode === 'icloud') {
+        document.getElementById('switchStatus').textContent = 'ℹ️ 已经是 iCloud 上传模式';
+        document.getElementById('switchStatus').style.color = 'var(--subtext)';
+        return;
+      }
+      document.getElementById('switchStatus').textContent = '⏳ 正在切换...';
+      document.getElementById('switchStatus').style.color = 'var(--subtext)';
+      if (ws && ws.readyState === 1) {
+        ws.send(JSON.stringify({ type: 'switch-sync-mode', mode: 'icloud' }));
+      } else {
+        document.getElementById('switchStatus').textContent = '❌ 未连接到服务器';
+        document.getElementById('switchStatus').style.color = 'var(--danger)';
+      }
+    };
+
+    // ========== 最小化/恢复功能 ==========
+    function toggleMinimize() {
+      isMinimized = !isMinimized;
+      
+      // 获取当前图标元素（每次重新获取，避免引用失效）
+      const currentIcon = document.getElementById('minimizeIcon');
+      if (!currentIcon) return; // 如果元素不存在，直接返回
+      
+      if (isMinimized) {
+        // 最小化：只显示 toolbar
+        appRoot.classList.add('minimized');
+        // 关闭所有弹窗
+        settingsOverlay.classList.add('hidden');
+        useCaseOverlay.classList.add('hidden');
+        // 更新图标为最大化图标（maximize.svg）- 使用 img src 替换
+        currentIcon.src = IMAGE_BASE_URL + 'maximize.svg';
+        toggleMinimizeBtn.setAttribute('title', '恢复');
+        
+        // 调整窗口大小到最小（只显示 toolbar）
+        // toolbar 高度大约 60px
+        parent.postMessage({
+          pluginMessage: {
+            type: 'resize',
+            width: 480,
+            height: 60
+          }
+        }, '*');
+      } else {
+        // 恢复：显示完整内容
+        appRoot.classList.remove('minimized');
+        // 更新图标为最小化图标（minimize.svg）- 使用 img src 替换
+        currentIcon.src = IMAGE_BASE_URL + 'minimize.svg';
+        toggleMinimizeBtn.setAttribute('title', '最小化');
+        
+        // 恢复窗口大小
+        parent.postMessage({
+          pluginMessage: {
+            type: 'resize',
+            width: 480,
+            height: 700
+          }
+        }, '*');
+      }
+    }
+
+    toggleMinimizeBtn.onclick = toggleMinimize;
+
+    // ========== 接收Figma消息 ==========
+    window.onmessage = function (event) {
+      var msg = event.data.pluginMessage;
+      if (!msg) return;
+
+      if (msg.type === 'plugin-closing') {
+        stopRealtimeSync();
+      } else if (msg.type === 'frame-created') {
+        log('✅ 画板已创建');
+      } else if (msg.type === 'frame-located') {
+        if (msg.success) {
+          log('📍 ' + msg.message);
+        } else {
+          log('❌ ' + msg.message);
+        }
+      } else if (msg.type === 'screenshot-added') {
+        if (msg.success) {
+          // 只有在成功导入时才增加计数
+          screenshotCount++;
+          document.getElementById('count').textContent = screenshotCount;
+          
+          // 不记录成功日志，避免信息过载（已在收到截图时记录）
+          // 发送确认消息给Mac端，表示文件已成功导入
+          if (ws && ws.readyState === WebSocket.OPEN && currentDriveFileId) {
+            try {
+              ws.send(JSON.stringify({
+                type: 'screenshot-received',
+                filename: msg.filename || '未命名文件',
+                driveFileId: currentDriveFileId,
+                timestamp: Date.now()
+              }));
+              // 成功发送确认后，清除保存的 driveFileId
+              currentDriveFileId = null;
+            } catch (error) {
+              console.error('发送确认失败:', error);
+            }
+          }
+        } else {
+          log('❌ 添加失败: ' + (msg.error || '未知错误'));
+        }
+      } else if (msg.type === 'file-needs-manual-drag') {
+        // undefined 错误：需要手动导入，保留源文件
+        manualDragCount++;
+        const reasonText = msg.reason === 'undefined-error' ? '导入失败（undefined错误）' : '未知原因';
+        log(`⚠️  ${msg.filename} 需手动导入（${reasonText}）`);
+        
+        // 通过 WebSocket 通知服务器，不要删除源文件
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          try {
+            ws.send(JSON.stringify({
+              type: 'screenshot-failed',
+              filename: msg.filename,
+              driveFileId: currentDriveFileId, // 使用保存的 driveFileId
+              error: msg.error || 'undefined错误',
+              keepFile: true // 标记保留文件
+            }));
+            // 清除保存的 driveFileId
+            currentDriveFileId = null;
+          } catch (error) {
+            console.error('发送失败消息失败:', error);
+          }
+        }
+        
+        // 更新状态显示
+        updateStatus('connected', '');
+      } else if (msg.type === 'size-settings-loaded') {
+        // 从 Figma clientStorage 加载的尺寸设置
+        if (msg.width) imageWidthInput.value = msg.width;
+        if (msg.height) imageHeightInput.value = msg.height;
+      } else if (msg.type === 'size-settings-updated') {
+        // 尺寸设置保存成功
+        if (msg.success) {
+          sizeSettingsStatus.textContent = '✅ 尺寸设置已保存';
+          sizeSettingsStatus.style.color = 'var(--success-fg)';
+          setTimeout(() => {
+            sizeSettingsStatus.textContent = '';
+          }, 2000);
+        }
+      } else if (msg.type === 'layout-settings-loaded') {
+        // 从 Figma clientStorage 加载的布局设置
+        if (msg.columns) frameColumnsInput.value = msg.columns;
+      } else if (msg.type === 'layout-settings-updated') {
+        // 布局设置保存成功
+        if (msg.success) {
+          layoutSettingsStatus.textContent = '✅ 布局设置已保存';
+          layoutSettingsStatus.style.color = 'var(--success-fg)';
+          setTimeout(() => {
+            layoutSettingsStatus.textContent = '';
+          }, 2000);
+        }
+      }
+    };
+
+    // ========== 日志展开/收起功能 ==========
+    const logContainer = document.getElementById('logContainer');
+    const logHeader = document.getElementById('logHeader');
+    const logToggleText = document.getElementById('logToggleText');
+    const logToggleIcon = document.querySelector('.log-toggle-icon');
+
+    // 收起日志的函数
+    function collapseLog() {
+      logContainer.classList.add('collapsed');
+      logToggleText.textContent = '展开';
+      logToggleIcon.textContent = '▼';
+    }
+
+    // 展开日志的函数
+    function expandLog() {
+      logContainer.classList.remove('collapsed');
+      logToggleText.textContent = '收起';
+      logToggleIcon.textContent = '▲';
+    }
+
+    logHeader.addEventListener('click', function () {
+      const isCollapsed = logContainer.classList.contains('collapsed');
+      if (isCollapsed) {
+        expandLog();
+      } else {
+        collapseLog();
+      }
+    });
+
+    // ========== 启动 ==========
+    connect();
+
+    // ========== 监听插件关闭事件 ==========
+    // 当用户点击右上角×关闭插件时，确保停止实时同步
+    window.addEventListener('beforeunload', function () {
+      stopRealtimeSync();
+    });
+
+    // 窗口高度固定，不再自适应调整
+  </script>
+</body>
+
+</html>

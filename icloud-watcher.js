@@ -1,0 +1,614 @@
+// icloud-watcher.js - 完全修复版（单一消息监听器）
+const fs = require('fs');
+const path = require('path');
+const WebSocket = require('ws');
+const chokidar = require('chokidar');
+const sharp = require('sharp');
+const { exec } = require('child_process');
+const os = require('os');
+
+// ============= 配置 =============
+const CONFIG = {
+  icloudPath: path.join(
+    process.env.HOME,
+    'Library/Mobile Documents/com~apple~CloudDocs/FigmaSyncImg'
+  ),
+  wsUrl: 'ws://localhost:8888',
+  connectionId: 'sync-session-1',
+  maxWidth: 1920,
+  quality: 85,
+  supportedFormats: ['.png', '.jpg', '.jpeg', '.heic', '.webp', '.gif', '.mp4', '.mov']
+};
+
+let ws = null;
+let reconnectTimer = null;
+let syncCount = 0;
+let isRealTimeMode = false;
+let watcher = null;
+
+// 待删除文件队列：{filename: filePath}
+const pendingDeletes = new Map();
+
+
+// ============= WebSocket连接 =============
+function connectWebSocket() {
+  console.log('🔌 正在连接服务器...');
+  
+  ws = new WebSocket(`${CONFIG.wsUrl}?id=${CONFIG.connectionId}&type=mac`);
+  
+  ws.on('open', () => {
+    console.log('✅ 已连接到服务器\n');
+  });
+  
+  ws.on('message', (data) => {
+    try {
+      const message = JSON.parse(data);
+      
+      // 处理文件导入失败消息（需要手动拖入，保留源文件）
+      if (message.type === 'screenshot-failed') {
+        const filename = message.filename;
+        const keepFile = message.keepFile === true;
+        
+        if (keepFile) {
+          console.log(`   ⚠️  文件导入失败，保留源文件: ${filename}`);
+          
+          // 从 pendingDeletes 中移除，不删除文件
+          let removed = false;
+          if (pendingDeletes.has(filename)) {
+            pendingDeletes.delete(filename);
+            console.log(`   ✅ 已取消删除计划: ${filename}`);
+            removed = true;
+          }
+          
+          if (!removed) {
+            console.log(`   ℹ️  文件不在待删除列表中: ${filename}（可能已经处理或未计划删除）`);
+          }
+          console.log('');
+        }
+        return;
+      }
+      
+      // 处理Figma确认消息
+      if (message.type === 'screenshot-received') {
+        const filename = message.filename;
+        console.log(`   ✅ 收到Figma确认: ${filename}`);
+        
+        // 检查文件是否已经被标记为保留（通过 screenshot-failed 消息）
+        // 如果文件不在 pendingDeletes 中，说明已经被标记为保留，不应该删除
+        if (pendingDeletes.has(filename)) {
+          const filePath = pendingDeletes.get(filename);
+          pendingDeletes.delete(filename);
+          
+          if (fs.existsSync(filePath)) {
+            deleteFile(filePath);
+          } else {
+            console.log(`   ⚠️  文件已不存在: ${filename}`);
+          }
+          console.log('');
+        } else {
+          // 文件不在 pendingDeletes 中，说明已经被标记为保留（通过 screenshot-failed）
+          console.log(`   ℹ️  文件已标记为保留，不删除: ${filename}（可能导入失败需要手动拖入）`);
+          console.log('');
+        }
+        return;
+      }
+      
+      if (message.type === 'figma-connected') {
+        console.log('✅ Figma插件已连接\n');
+      } else if (message.type === 'start-realtime') {
+        console.log('\n🎯 启动实时同步模式...\n');
+        isRealTimeMode = true;
+        startWatching();
+      } else if (message.type === 'stop-realtime') {
+        console.log('\n⏸️  停止实时同步模式\n');
+        isRealTimeMode = false;
+        stopWatching();
+      } else if (message.type === 'manual-sync') {
+        console.log('\n📦 执行手动同步...\n');
+        performManualSync();
+      } else if (message.type === 'switch-sync-mode') {
+        console.log('\n🔄 收到模式切换消息');
+        console.log('   目标模式:', message.mode);
+        if (message.mode !== 'icloud') {
+          console.log('⚠️  当前是 iCloud watcher，需要切换到其他模式');
+          console.log('   正在退出，请等待 start.js 重启正确的 watcher...\n');
+          // 停止监听
+          stopWatching();
+          // 关闭 WebSocket
+          if (ws) {
+            ws.close();
+          }
+          // 退出进程，让 start.js 重启正确的 watcher
+          setTimeout(() => {
+            process.exit(0);
+          }, 1000);
+        }
+      }
+    } catch (error) {
+      console.error('消息解析错误:', error);
+    }
+  });
+  
+  ws.on('close', () => {
+    console.log('⚠️  服务器连接断开');
+    isRealTimeMode = false;
+    stopWatching();
+    pendingDeletes.clear();
+    scheduleReconnect();
+  });
+  
+  ws.on('error', (error) => {
+    console.error('❌ 连接错误:', error.message);
+  });
+}
+
+function scheduleReconnect() {
+  if (reconnectTimer) return;
+  
+  console.log('⏰ 3秒后重新连接...\n');
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    connectWebSocket();
+  }, 3000);
+}
+
+// ============= 实时监听模式 =============
+function startWatching() {
+  if (watcher) {
+    console.log('⚠️  停止旧的监听器...');
+    stopWatching();
+  }
+  
+  if (!fs.existsSync(CONFIG.icloudPath)) {
+    console.log('📁 创建同步文件夹...');
+    fs.mkdirSync(CONFIG.icloudPath, { recursive: true });
+  }
+  
+  console.log(`👀 开始监听文件夹: ${CONFIG.icloudPath}`);
+  console.log(`📸 支持格式: ${CONFIG.supportedFormats.join(', ')}\n`);
+  
+  watcher = chokidar.watch(CONFIG.icloudPath, {
+    persistent: true,
+    ignoreInitial: true,
+    awaitWriteFinish: {
+      stabilityThreshold: 2000,
+      pollInterval: 100
+    }
+  });
+  
+  watcher.on('add', (filePath) => {
+    if (!isRealTimeMode) {
+      console.log(`⏸️  实时模式已关闭，忽略文件: ${path.basename(filePath)}`);
+      return;
+    }
+    
+    const ext = path.extname(filePath).toLowerCase();
+    if (CONFIG.supportedFormats.includes(ext)) {
+      const filename = path.basename(filePath);
+      const isGif = ext === '.gif';
+      const isVideo = ext === '.mp4' || ext === '.mov';
+      
+      // 检查文件是否需要手动拖入（GIF过大或视频文件）
+      if (isVideo) {
+        // 视频文件需要手动拖入，不调用 syncScreenshot
+        console.log(`\n🎥 [实时模式] 检测到视频文件: ${filename}`);
+        console.log(`   ⚠️  视频文件需要手动拖入 Figma`);
+        // 发送 file-skipped 消息
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            type: 'file-skipped',
+            filename: filename,
+            reason: 'video'
+          }));
+        }
+        return; // 不调用 syncScreenshot，不删除文件
+      } else if (isGif) {
+        // 检查 GIF 大小
+        try {
+          const stats = fs.statSync(filePath);
+          const fileSize = stats.size;
+          const maxGifSize = 100 * 1024 * 1024; // 100MB
+          
+          if (fileSize > maxGifSize) {
+            // GIF 过大，需要手动拖入，不调用 syncScreenshot
+            console.log(`\n🎬 [实时模式] 检测到 GIF 文件: ${filename}`);
+            console.log(`   ⚠️  GIF 文件过大 (${(fileSize / 1024 / 1024).toFixed(2)}MB)，需要手动拖入`);
+            // 发送 file-skipped 消息
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({
+                type: 'file-skipped',
+                filename: filename,
+                reason: 'gif-too-large'
+              }));
+            }
+            return; // 不调用 syncScreenshot，不删除文件
+          }
+        } catch (checkError) {
+          // 如果检查失败，继续正常处理流程
+          console.log(`   ⚠️  检查 GIF 大小失败，继续处理: ${checkError.message}`);
+        }
+      }
+      
+      // 文件可以正常处理，调用 syncScreenshot
+      console.log(`\n📸 [实时模式] 检测到新截图: ${filename}`);
+      syncScreenshot(filePath, true);
+    }
+  });
+  
+  watcher.on('ready', () => {
+    console.log('✅ 实时监听已启动\n');
+  });
+  
+  watcher.on('error', (error) => {
+    console.error('❌ 监听错误:', error);
+  });
+}
+
+function stopWatching() {
+  if (watcher) {
+    console.log('🛑 正在停止文件监听器...');
+    
+    try {
+      watcher.close();
+      watcher = null;
+      console.log('✅ 文件监听器已停止\n');
+    } catch (error) {
+      console.error('❌ 停止监听器失败:', error);
+      watcher = null;
+    }
+  }
+}
+
+// ============= 手动同步模式 =============
+async function performManualSync() {
+  if (!fs.existsSync(CONFIG.icloudPath)) {
+    console.log('❌ 同步文件夹不存在\n');
+    
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: 'manual-sync-complete',
+        count: 0,
+        total: 0,
+        message: '同步文件夹不存在'
+      }));
+    }
+    return;
+  }
+  
+  const files = fs.readdirSync(CONFIG.icloudPath);
+  const imageFiles = files.filter(file => {
+    const ext = path.extname(file).toLowerCase();
+    return CONFIG.supportedFormats.includes(ext);
+  });
+  
+  if (imageFiles.length === 0) {
+    console.log('📭 文件夹为空，没有截图需要同步\n');
+    
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: 'manual-sync-complete',
+        count: 0,
+        total: 0,
+        message: '没有截图需要同步'
+      }));
+    }
+    return;
+  }
+  
+  console.log(`📦 [手动模式] 找到 ${imageFiles.length} 张截图，开始同步...\n`);
+  
+  let successCount = 0;
+  
+  for (const file of imageFiles) {
+    const filePath = path.join(CONFIG.icloudPath, file);
+    try {
+      // 检查文件是否需要手动拖入（GIF过大或视频文件）
+      const ext = path.extname(filePath).toLowerCase();
+      const isGif = ext === '.gif';
+      const isVideo = ext === '.mp4' || ext === '.mov';
+      
+      // 如果是 GIF，先检查大小
+      if (isGif) {
+        try {
+          const stats = fs.statSync(filePath);
+          const fileSize = stats.size;
+          const maxGifSize = 100 * 1024 * 1024; // 100MB
+          
+          if (fileSize > maxGifSize) {
+            // GIF 过大，需要手动拖入，不算成功
+            console.log(`   ⚠️  GIF 文件过大，需要手动拖入: ${file}`);
+            // 发送 file-skipped 消息（syncScreenshot 中也会发送，但这里提前发送确保消息顺序）
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({
+                type: 'file-skipped',
+                filename: file,
+                reason: 'gif-too-large'
+              }));
+            }
+            // 跳过此文件，不增加成功计数
+            continue;
+          }
+        } catch (checkError) {
+          // 如果检查失败，继续正常处理流程
+          console.log(`   ⚠️  检查 GIF 大小失败，继续处理: ${checkError.message}`);
+        }
+      }
+      
+      // 如果是视频文件，需要手动拖入，不算成功
+      if (isVideo) {
+        console.log(`   ⚠️  视频文件需要手动拖入: ${file}`);
+        // 发送 file-skipped 消息
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            type: 'file-skipped',
+            filename: file,
+            reason: 'video'
+          }));
+        }
+        // 跳过此文件，不增加成功计数
+        continue;
+      }
+      
+      await syncScreenshot(filePath, true);
+      successCount++;
+      await sleep(300);
+    } catch (error) {
+      console.error(`❌ 同步失败: ${file}`, error.message);
+    }
+  }
+  
+  console.log(`\n✅ [手动模式] 同步完成！成功: ${successCount}/${imageFiles.length}\n`);
+  
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({
+      type: 'manual-sync-complete',
+      count: successCount,
+      total: imageFiles.length
+    }));
+  }
+}
+
+// ============= 同步截图（简化版，不再注册监听器）=============
+async function syncScreenshot(filePath, deleteAfterSync = false) {
+  const startTime = Date.now();
+  const filename = path.basename(filePath);
+  
+  try {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      console.log('⏸️  等待服务器连接...');
+      throw new Error('服务器未连接');
+    }
+    
+    console.log('   ⬆️  正在上传...');
+    
+    if (!fs.existsSync(filePath)) {
+      console.log('   ⚠️  文件不存在，可能已被删除');
+      return;
+    }
+    
+    const stats = fs.statSync(filePath);
+    const originalSize = (stats.size / 1024).toFixed(2);
+    
+    // 检测文件格式
+    const ext = path.extname(filePath).toLowerCase();
+    const isHeif = ext === '.heif' || ext === '.heic';
+    const isGif = ext === '.gif';
+    const isVideo = ext === '.mp4' || ext === '.mov';
+    
+    let imageBuffer;
+    
+    if (isVideo) {
+      // 视频格式（MP4 或 MOV）- Figma 插件 API 不支持视频文件，跳过处理
+      const videoFormat = ext === '.mp4' ? 'MP4' : 'MOV';
+      console.log(`   🎥 检测到 ${videoFormat} 视频格式`);
+      console.log(`   ⚠️  Figma 插件 API 不支持视频文件，跳过此文件`);
+      console.log(`   💡 提示：请通过 Figma 界面直接拖放视频文件，或使用 GIF 格式`);
+      console.log(`   📌 源文件已保留，未删除（因为无法同步到 Figma）`);
+      
+      // 通知 Figma 插件此文件需要手动拖入
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'file-skipped',
+          filename: filename,
+          reason: 'video' // 统一使用 video，包含 mp4 和 mov
+        }));
+      }
+      
+      // 不删除文件，因为无法同步到 Figma，保留文件让用户手动处理
+      // 跳过此文件，不发送到 Figma
+      return;
+    } else if (isGif) {
+      // GIF 格式，检查文件大小
+      console.log(`   🎬 检测到 GIF 格式...`);
+      
+      imageBuffer = fs.readFileSync(filePath);
+      const originalSize = imageBuffer.length;
+      const maxGifSize = 100 * 1024 * 1024; // 100MB（防止 Figma 死机）
+      
+      // 检查文件大小
+      if (originalSize > maxGifSize) {
+        const fileSizeMB = (originalSize / 1024 / 1024).toFixed(2);
+        console.log(`   ⚠️  GIF 文件过大 (${fileSizeMB}MB)，超过限制 (100MB)`);
+        console.log(`   ⚠️  为防止 Figma 死机，跳过此文件（文件过大可能导致传输失败）`);
+        console.log(`   📌 源文件已保留，未删除（因为无法同步到 Figma）`);
+        
+        // 通知 Figma 插件此文件需要手动拖入
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            type: 'file-skipped',
+            filename: filename,
+            reason: 'gif-too-large'
+          }));
+        }
+        
+        // 不删除文件，保留文件让用户手动处理
+        return;
+      }
+      
+      // 文件大小合适，直接使用原始文件
+      const fileSizeKB = (imageBuffer.length / 1024).toFixed(2);
+      console.log(`   ✅ 使用原始 GIF 文件: ${fileSizeKB}KB`);
+    } else if (isHeif && os.platform() === 'darwin') {
+      // 使用 macOS 自带的 sips 命令转换 HEIF 到 JPEG
+      console.log(`   🔄 检测到 HEIF 格式，使用 sips 转换为 JPEG...`);
+      
+      let tempInputPath = filePath; // 直接使用原文件路径
+      let tempOutputPath = path.join(os.tmpdir(), `jpeg-output-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.jpg`);
+      
+      try {
+        // 使用 sips 转换为 JPEG
+        const sipsCommand = `sips -s format jpeg "${tempInputPath}" --out "${tempOutputPath}"`;
+        
+        await new Promise((resolve, reject) => {
+          exec(sipsCommand, 
+            { maxBuffer: 10 * 1024 * 1024 },
+            (err, stdout, stderr) => {
+              if (err) {
+                reject(new Error(`sips 转换失败: ${err.message}${stderr ? ' - ' + stderr : ''}`));
+              } else {
+                if (!fs.existsSync(tempOutputPath)) {
+                  reject(new Error(`sips 转换失败: 输出文件不存在`));
+                } else {
+                  resolve();
+                }
+              }
+            });
+        });
+        
+        // 读取转换后的 JPEG 文件
+        let convertedBuffer = fs.readFileSync(tempOutputPath);
+        
+        // 使用 sharp 对转换后的 JPEG 进行压缩和调整大小
+        imageBuffer = await sharp(convertedBuffer)
+          .resize(CONFIG.maxWidth, null, {
+            withoutEnlargement: true,
+            fit: 'inside'
+          })
+          .jpeg({ quality: CONFIG.quality })
+          .toBuffer();
+        
+        // 清理临时文件
+        try {
+          fs.unlinkSync(tempOutputPath);
+        } catch (cleanupError) {
+          // 忽略清理错误
+        }
+        
+        const compressedSize = (imageBuffer.length / 1024).toFixed(2);
+        console.log(`   📦 ${originalSize}KB → ${compressedSize}KB (HEIF → JPEG)`);
+      } catch (sipsError) {
+        console.log(`   ❌ sips 转换失败: ${sipsError.message}`);
+        console.log(`   ⚠️  跳过此文件（无法转换 HEIF 格式）`);
+        throw new Error(`HEIF 转换失败: ${sipsError.message}`);
+      }
+    } else if (isHeif) {
+      // 非 macOS 系统，无法使用 sips
+      console.log(`   ❌ 检测到 HEIF 格式，但当前系统不支持 sips 转换`);
+      console.log(`   ⚠️  跳过此文件（无法转换 HEIF 格式）`);
+      throw new Error('HEIF 格式需要 macOS 系统支持');
+    } else {
+      // 非 HEIF 格式，使用 sharp 正常处理
+    try {
+      imageBuffer = await sharp(filePath)
+        .resize(CONFIG.maxWidth, null, {
+          withoutEnlargement: true,
+          fit: 'inside'
+        })
+        .jpeg({ quality: CONFIG.quality })
+        .toBuffer();
+      
+      const compressedSize = (imageBuffer.length / 1024).toFixed(2);
+      console.log(`   📦 ${originalSize}KB → ${compressedSize}KB`);
+      
+    } catch (error) {
+      console.log('   ⚠️  压缩失败，使用原文件');
+      imageBuffer = fs.readFileSync(filePath);
+      }
+    }
+    
+    // 使用 base64 编码，避免 Array.from 创建巨大数组占用内存（与 drive-watcher.js 保持一致）
+    const base64String = imageBuffer.toString('base64');
+    imageBuffer = null; // 立即释放内存
+    
+    const payload = {
+      type: 'screenshot',
+      bytes: base64String, // 直接使用 base64 字符串，Figma 端需要解码
+      timestamp: Date.now(),
+      filename: filename
+    };
+    
+    ws.send(JSON.stringify(payload));
+    
+    syncCount++;
+    const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+    console.log(`   ✅ 同步完成 (${duration}秒)`);
+    console.log(`   📊 已同步: ${syncCount} 张`);
+    
+    if (deleteAfterSync) {
+      // 添加到待删除队列，等待Figma确认
+      pendingDeletes.set(filename, filePath);
+      console.log('   ⏳ 等待Figma确认...');
+      
+      // 设置超时兜底删除（10秒）
+      setTimeout(() => {
+        if (pendingDeletes.has(filename)) {
+          console.log(`   ⚠️  等待确认超时（10秒），强制删除: ${filename}`);
+          const path = pendingDeletes.get(filename);
+          pendingDeletes.delete(filename);
+          
+          if (fs.existsSync(path)) {
+            deleteFile(path);
+          }
+          console.log('');
+        }
+      }, 10000);
+    } else {
+      console.log('');
+    }
+    
+  } catch (error) {
+    console.error(`   ❌ 同步失败: ${error.message}\n`);
+    throw error;
+  }
+}
+
+function deleteFile(filePath) {
+  try {
+    fs.unlinkSync(filePath);
+    console.log(`   🗑️  已删除源文件: ${path.basename(filePath)}`);
+    return true;
+  } catch (deleteError) {
+    console.error(`   ⚠️  删除失败: ${deleteError.message}`);
+    return false;
+  }
+}
+
+// ============= 工具函数 =============
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// ============= 启动 =============
+function start() {
+  console.clear();
+  console.log('╔════════════════════════════════════════╗');
+  console.log('║  iPhone截图同步 - Mac端监听器         ║');
+  console.log('║  支持实时同步和手动同步两种模式       ║');
+  console.log('╚════════════════════════════════════════╝\n');
+  
+  connectWebSocket();
+  
+  console.log('📍 同步文件夹:', CONFIG.icloudPath);
+  console.log('⏳ 等待Figma插件选择同步模式...\n');
+  
+  process.on('SIGINT', () => {
+    console.log('\n\n👋 停止服务...');
+    console.log(`📊 总共同步了 ${syncCount} 张截图`);
+    console.log(`📋 待删除队列: ${pendingDeletes.size} 个文件\n`);
+    stopWatching();
+    if (ws) ws.close();
+    process.exit(0);
+  });
+}
+
+start();
