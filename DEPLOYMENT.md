@@ -433,17 +433,30 @@ git pull
 - 需要先 pull
 
 **解决方法**：
+
+**情况 1：没有未提交的修改**
 ```bash
-# 拉取并合并远程更新
+# 直接拉取
 git pull --rebase origin main
 
-# 检查是否有冲突
-git status
-
-# 如果有冲突，解决后继续
-git rebase --continue
-
 # 重新运行发布脚本
+./release.sh
+```
+
+**情况 2：有未提交的修改**
+```bash
+# 如果提示：error: cannot pull with rebase: You have unstaged changes
+
+# 方案 A：提交修改（推荐）
+git add .
+git commit -m "fix: your changes description"
+git pull --rebase origin main
+./release.sh
+
+# 方案 B：暂存修改
+git stash
+git pull --rebase origin main
+git stash pop
 ./release.sh
 ```
 
