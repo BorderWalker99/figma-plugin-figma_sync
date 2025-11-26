@@ -181,25 +181,45 @@ ipcMain.handle('install-homebrew', async () => {
     const installScript = '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"';
     
     // 使用 AppleScript 在终端中运行安装脚本
-    const appleScript = `
-      tell application "Terminal"
-        activate
-        do script "${installScript.replace(/"/g, '\\"')}"
-      end tell
-    `;
+    // 简化版本，避免复杂的转义问题
+    const tempScriptPath = path.join(os.tmpdir(), 'homebrew-install.sh');
+    fs.writeFileSync(tempScriptPath, installScript, { mode: 0o755 });
     
-    exec(`osascript -e '${appleScript.replace(/'/g, "'\\''")}'`, (error, stdout, stderr) => {
+    const appleScript = `tell application "Terminal"
+	activate
+	do script "${tempScriptPath}"
+end tell`;
+    
+    const tempAppleScriptPath = path.join(os.tmpdir(), 'open-terminal.scpt');
+    fs.writeFileSync(tempAppleScriptPath, appleScript, 'utf8');
+    
+    console.log('Running AppleScript to open Terminal...');
+    console.log('Script path:', tempAppleScriptPath);
+    
+    exec(`osascript "${tempAppleScriptPath}"`, (error, stdout, stderr) => {
+      console.log('AppleScript result:', { error, stdout, stderr });
+      
+      // 清理临时文件
+      try {
+        fs.unlinkSync(tempScriptPath);
+        fs.unlinkSync(tempAppleScriptPath);
+      } catch (e) {
+        console.error('Failed to cleanup temp files:', e);
+      }
+      
       if (error) {
+        console.error('AppleScript error:', error.message);
         resolve({ 
           success: false, 
-          error: '无法打开终端。请手动在终端中运行安装命令。',
-          manualCommand: installScript
+          error: `无法打开终端: ${error.message}\n\n请手动在终端中运行:\n${installScript}`,
+          details: stderr || error.message
         });
       } else {
+        console.log('Terminal opened successfully');
         // 终端已打开，用户需要完成安装
         resolve({ 
           success: true, 
-          message: '终端已打开，请按照提示完成 Homebrew 安装。安装完成后，请重新启动安装器。',
+          message: '终端已打开，请按照提示完成 Homebrew 安装。\n\n安装完成后，请点击"重新检测"按钮。',
           needsRestart: true
         });
       }
