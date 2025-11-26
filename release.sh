@@ -150,8 +150,13 @@ else
 fi
 
 # 推送到 GitHub
-git push origin main > /dev/null 2>&1
-echo -e "   ${GREEN}✅ 代码已推送到 GitHub${NC}"
+if git push origin main > /dev/null 2>&1; then
+    echo -e "   ${GREEN}✅ 代码已推送到 GitHub${NC}"
+else
+    echo -e "   ${RED}❌ 推送失败，可能需要先 pull${NC}"
+    echo -e "   ${YELLOW}请运行：git pull --rebase origin main${NC}"
+    exit 1
+fi
 
 # ==================== 步骤 4: 创建 Git Tag ====================
 echo -e "\n${BLUE}🏷️  步骤 4/5: 创建 Git Tag...${NC}"
@@ -160,9 +165,17 @@ echo -e "\n${BLUE}🏷️  步骤 4/5: 创建 Git Tag...${NC}"
 if git rev-parse "v${NEW_VERSION}" >/dev/null 2>&1; then
     echo -e "   ${YELLOW}⚠️  Tag v${NEW_VERSION} 已存在，跳过创建${NC}"
 else
-    git tag -a "v${NEW_VERSION}" -m "Release v${NEW_VERSION}" > /dev/null 2>&1
-    git push origin "v${NEW_VERSION}" > /dev/null 2>&1
-    echo -e "   ${GREEN}✅ Git Tag v${NEW_VERSION} 已创建并推送${NC}"
+    if git tag -a "v${NEW_VERSION}" -m "Release v${NEW_VERSION}" 2>&1; then
+        if git push origin "v${NEW_VERSION}" 2>&1; then
+            echo -e "   ${GREEN}✅ Git Tag v${NEW_VERSION} 已创建并推送${NC}"
+        else
+            echo -e "   ${RED}❌ Tag 推送失败${NC}"
+            exit 1
+        fi
+    else
+        echo -e "   ${RED}❌ Tag 创建失败${NC}"
+        exit 1
+    fi
 fi
 
 # ==================== 步骤 5: 发布到 GitHub Releases ====================

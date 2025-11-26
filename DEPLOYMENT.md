@@ -416,7 +416,41 @@ git pull
 ./deploy-cloud-run.sh
 ```
 
-### 问题 9：版本号不一致
+### 问题 9：release.sh 在步骤 3 后退出，没有报错
+
+**症状**：
+```
+📤 步骤 3/5: 提交代码到 GitHub...
+   ✅ 代码已提交
+（然后就退出了，没有继续步骤 4 和 5）
+```
+
+**原因**：
+`git push origin main` 失败，但错误被 `> /dev/null 2>&1` 隐藏了
+
+**常见失败原因**：
+- 远程仓库有本地没有的提交
+- 需要先 pull
+
+**解决方法**：
+```bash
+# 拉取并合并远程更新
+git pull --rebase origin main
+
+# 检查是否有冲突
+git status
+
+# 如果有冲突，解决后继续
+git rebase --continue
+
+# 重新运行发布脚本
+./release.sh
+```
+
+**已优化**：
+✅ `release.sh` 现在会显示 git push 失败的错误信息
+
+### 问题 10：版本号不一致
 
 **可能原因**：
 - 手动修改了版本号但不一致
