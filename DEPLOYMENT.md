@@ -241,7 +241,36 @@ curl https://your-service-url.run.app/health
 
 ## 🐛 常见问题
 
-### 问题 0：首次发布时报错
+### 问题 0：GitHub CLI 认证失败
+
+**错误信息**：
+```
+X Failed to log in to github.com account
+- The token in default is invalid.
+```
+
+**原因**：
+GitHub CLI 的认证 token 过期或失效
+
+**解决方法**：
+```bash
+# 重新登录 GitHub CLI
+gh auth login
+
+# 选择：
+# - GitHub.com
+# - HTTPS
+# - Login with a web browser（推荐）
+# 或 Paste an authentication token
+
+# 验证登录成功
+gh auth status
+
+# 现在可以正常发布了
+./release.sh
+```
+
+### 问题 1：首次发布时报错
 
 **错误信息**：
 ```
@@ -268,7 +297,7 @@ ls -la installer/dist/mac-arm64/
 ./release.sh
 ```
 
-### 问题 1：插件打包失败，找不到 zip 文件
+### 问题 2：插件打包失败，找不到 zip 文件
 
 **错误信息**：
 ```
@@ -293,7 +322,7 @@ const PLUGIN_VERSION = '1.0.1';  // 确保格式正确
 # 应该生成：figma-plugin-v1.0.1.zip
 ```
 
-### 问题 2：用户检测不到更新
+### 问题 3：用户检测不到更新
 
 **可能原因**：
 - Release 未标记为 latest
@@ -310,7 +339,7 @@ gh release delete v1.0.1 --yes
 ./release.sh
 ```
 
-### 问题 3：更新下载失败
+### 问题 4：更新下载失败
 
 **可能原因**：
 - 文件过大（>100MB）
@@ -322,7 +351,7 @@ gh release delete v1.0.1 --yes
 - 检查文件大小，优化打包
 - 等待一段时间后重试
 
-### 问题 4：iPhone 快捷指令上传失败
+### 问题 5：iPhone 快捷指令上传失败
 
 **可能原因**：
 - Cloud Run 服务未更新
@@ -337,7 +366,57 @@ gh release delete v1.0.1 --yes
 gcloud run services list --region asia-east2
 ```
 
-### 问题 5：版本号不一致
+### 问题 7：Cloud Run 部署失败 - npm ci 错误
+
+**错误信息**：
+```
+ERROR: failed to build: process "/bin/sh -c npm ci --only=production" did not complete successfully
+npm error Cannot find module 'adm-zip'
+```
+
+**原因**：
+`package-lock.json` 与 `package.json` 不同步
+
+**解决方法**：
+```bash
+# 重新生成 package-lock.json
+rm package-lock.json
+npm install
+
+# 提交更新
+git add package-lock.json
+git commit -m "fix: update package-lock.json"
+git push
+
+# 现在可以部署了
+./deploy-cloud-run.sh
+```
+
+### 问题 8：Cloud Run 容器启动失败 - "failed to start and listen on port"
+
+**错误信息**：
+```
+The user-provided container failed to start and listen on the port defined provided by the PORT=8080
+❌ 未捕获的异常: ReferenceError: ws is not defined at line 2007
+```
+
+**原因**：
+`server.js` 代码结构错误，`ws.on('error')` 在 `wss.on('connection')` 回调外面
+
+**已修复**：
+✅ 已修复代码结构（将 update handlers 移到正确位置）
+✅ Docker 构建测试通过
+
+**如果遇到此问题**：
+```bash
+# 拉取最新代码
+git pull
+
+# 重新部署
+./deploy-cloud-run.sh
+```
+
+### 问题 9：版本号不一致
 
 **可能原因**：
 - 手动修改了版本号但不一致
