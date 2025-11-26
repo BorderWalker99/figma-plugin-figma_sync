@@ -49,7 +49,68 @@ mkdir -p "$TEMP_DIR"
 
 echo -e "${GREEN}📦 开始打包...${NC}\n"
 
+# 0. 创建 macOS 安全提示解决脚本
+echo -e "${YELLOW}📄 创建 macOS 安全提示解决脚本...${NC}"
+cat > "$TEMP_DIR/解决macOS安全提示.command" << 'EOFSCRIPT'
+#!/bin/bash
+
+# 获取脚本所在目录
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+echo "═══════════════════════════════════════════════════════"
+echo "  ScreenSync - 解决 macOS 安全提示"
+echo "═══════════════════════════════════════════════════════"
+echo ""
+echo "正在删除 ScreenSync Installer.app 的隔离属性..."
+echo ""
+
+if [ -d "$DIR/ScreenSync Installer.app" ]; then
+    xattr -cr "$DIR/ScreenSync Installer.app"
+    echo "✅ 完成！现在可以双击 ScreenSync Installer.app 运行了。"
+else
+    echo "❌ 错误：未找到 ScreenSync Installer.app"
+    echo "请确保此脚本在 ScreenSync-UserPackage 文件夹中运行。"
+fi
+
+echo ""
+echo "按任意键关闭窗口..."
+read -n 1
+EOFSCRIPT
+
+chmod +x "$TEMP_DIR/解决macOS安全提示.command"
+
 # 1. 复制核心服务器文件
+echo -e "${YELLOW}📄 复制核心服务器文件...${NC}"
+
+# 创建 macOS 安装提示脚本
+cat > "$TEMP_DIR/解决macOS安全提示.command" << 'EOF'
+#!/bin/bash
+
+# 获取脚本所在目录
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+echo "═══════════════════════════════════════════════════════"
+echo "  ScreenSync - 解决 macOS 安全提示"
+echo "═══════════════════════════════════════════════════════"
+echo ""
+echo "正在删除 ScreenSync Installer.app 的隔离属性..."
+echo ""
+
+if [ -d "$DIR/ScreenSync Installer.app" ]; then
+    xattr -cr "$DIR/ScreenSync Installer.app"
+    echo "✅ 完成！现在可以双击 ScreenSync Installer.app 运行了。"
+else
+    echo "❌ 错误：未找到 ScreenSync Installer.app"
+    echo "请确保此脚本在 ScreenSync-UserPackage 文件夹中运行。"
+fi
+
+echo ""
+echo "按任意键关闭窗口..."
+read -n 1
+EOF
+
+chmod +x "$TEMP_DIR/解决macOS安全提示.command"
+
 echo -e "${YELLOW}📄 复制核心服务器文件...${NC}"
 cp server.js "$TEMP_DIR/"
 cp googleDrive.js "$TEMP_DIR/"
@@ -209,6 +270,12 @@ ScreenSync - iPhone截图自动同步到Figma
 ═══════════════════════════════════════════════════════
 
 💡 常见问题
+
+Q: 提示"ScreenSync Installer 已损坏"怎么办？
+A: 这是 macOS 安全机制。在终端运行：
+   cd ~/Downloads/ScreenSync-UserPackage
+   xattr -cr "ScreenSync Installer.app"
+   或右键点击应用 → 选择"打开" → 点击"打开"
 
 Q: 安装器在哪里？
 A: 解压后的文件夹中，名为 "ScreenSync Installer.app"

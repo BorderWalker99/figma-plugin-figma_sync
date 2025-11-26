@@ -502,7 +502,67 @@ git push origin main --force
 - ✅ 构建前先 pull，避免提交冲突
 - ✅ `release.sh` 会自动打包，不要手动运行打包脚本
 
-### 问题 11：版本号不一致
+### 问题 11：用户下载后报错"ScreenSync Installer 已损坏，无法打开"
+
+**症状**：
+用户解压 `ScreenSync-UserPackage.tar.gz` 后，双击 `ScreenSync Installer.app` 显示：
+```
+"ScreenSync Installer"已损坏，无法打开。您应该将它移到废纸篓。
+```
+
+**原因**：
+macOS Gatekeeper 安全机制阻止未签名的应用运行
+
+**用户端解决方法（3 种方案）**：
+
+**方案 1：删除隔离属性（推荐）**
+```bash
+# 在终端中运行（最安全）
+cd ~/Downloads/ScreenSync-UserPackage
+xattr -cr "ScreenSync Installer.app"
+
+# 然后双击运行
+```
+
+**方案 2：右键打开**
+```
+1. 右键点击 "ScreenSync Installer.app"
+2. 选择"打开"
+3. 在弹出的对话框中点击"打开"
+4. （首次打开需要此操作，之后可以直接双击）
+```
+
+**方案 3：系统设置允许**
+```
+1. 双击应用（会被阻止）
+2. 打开"系统设置" → "隐私与安全性"
+3. 在底部找到"'ScreenSync Installer' 已被阻止"
+4. 点击"仍要打开"
+```
+
+**开发者端长期解决方案**：
+
+1. **申请 Apple Developer Program**（99 美元/年）
+2. **签名应用**：
+```bash
+# 在 installer/package.json 中添加签名配置
+"build": {
+  "mac": {
+    "identity": "Developer ID Application: Your Name (TEAM_ID)",
+    "hardenedRuntime": true,
+    "gatekeeperAssess": false,
+    "entitlements": "entitlements.mac.plist",
+    "entitlementsInherit": "entitlements.mac.plist"
+  }
+}
+```
+
+3. **公证应用**（Notarization）
+
+**临时解决方案（在 README 中说明）**：
+在 `ScreenSync-UserPackage` 中添加 `安装说明.txt`，提示用户使用方案 1 或 2。
+
+### 问题 12：版本号不一致
 
 **可能原因**：
 - 手动修改了版本号但不一致
