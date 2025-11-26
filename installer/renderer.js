@@ -34,7 +34,9 @@ function showStep(step) {
   }
 }
 
-function nextStep() {
+// 暴露到全局，供 HTML onclick 调用
+window.nextStep = function() {
+  console.log('nextStep called, currentStep:', currentStep, 'selectedMode:', selectedMode);
   // 如果是 Step 1 且选择了 iCloud 模式，检查空间
   if (currentStep === 1 && selectedMode === 'icloud') {
     if (icloudSpaceAvailable === false) {
@@ -49,11 +51,13 @@ function nextStep() {
   }
 }
 
-function prevStep() {
+// 暴露到全局，供 HTML onclick 调用
+window.prevStep = function() {
+  console.log('prevStep called');
   if (currentStep > 1) {
     showStep(currentStep - 1);
   }
-}
+};
 
 // 自动检测项目根目录
 async function detectProjectRoot() {
@@ -75,7 +79,9 @@ async function detectProjectRoot() {
 }
 
 // Step 1: 选择储存方式
-function selectMode(mode) {
+// 使用 window.selectMode 确保在全局作用域，供 HTML onclick 调用
+window.selectMode = function(mode) {
+  console.log('selectMode called with:', mode);
   selectedMode = mode;
   
   // 更新 UI - 使用 feature-card 选择器
@@ -108,7 +114,7 @@ function selectMode(mode) {
       checkResult.style.display = 'none';
     }
   }
-}
+};
 
 
 // 显示 Toast 通知
@@ -450,8 +456,14 @@ async function copyUserId(userId) {
 }
 
 // Step 5: 完成
-async function finishInstallation() {
-  const button = event.target;
+// 暴露到全局，供 HTML onclick 调用
+window.finishInstallation = async function() {
+  console.log('finishInstallation called');
+  const button = document.querySelector('#step5 .btn-primary');
+  if (!button) {
+    console.error('finishInstallation button not found');
+    return;
+  }
   const originalText = button.textContent;
   
   try {
