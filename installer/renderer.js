@@ -270,20 +270,47 @@ async function checkSystemRequirements() {
     installBtn.style.marginLeft = '12px';
     installBtn.onclick = async () => {
       installBtn.disabled = true;
-      installBtn.textContent = '安装中...';
+      installBtn.textContent = '正在打开终端...';
       const result = await ipcRenderer.invoke('install-node');
       if (result.success) {
-        nodeCheck.className = 'status-item success';
-        nodeCheck.innerHTML = `
-          <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg></div>
-          <div class="status-content">
-            <div class="status-label">Node.js</div>
-            <div class="status-detail">已安装</div>
-          </div>
-        `;
-        checkSystemRequirements(); // 重新检查
+        if (result.needsRestart) {
+          // 终端已打开，用户需要等待安装完成
+          showToast(result.message || '终端已打开，请等待 Node.js 安装完成', 'loading');
+          
+          // 更新按钮文本
+          installBtn.textContent = '重新检测';
+          installBtn.disabled = false;
+          installBtn.onclick = async () => {
+            // 重新检查 Node.js
+            const checkResult = await ipcRenderer.invoke('check-node');
+            if (checkResult.installed) {
+              nodeCheck.className = 'status-item success';
+              nodeCheck.innerHTML = `
+                <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg></div>
+                <div class="status-content">
+                  <div class="status-label">Node.js</div>
+                  <div class="status-detail">已安装 ${checkResult.version || ''}</div>
+                </div>
+              `;
+              showToast('Node.js 安装成功！', 'success');
+              checkSystemRequirements(); // 重新检查所有依赖
+            } else {
+              showToast('Node.js 尚未安装完成，请在终端中完成安装后再检测', 'error');
+            }
+          };
+        } else {
+          nodeCheck.className = 'status-item success';
+          nodeCheck.innerHTML = `
+            <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg></div>
+            <div class="status-content">
+              <div class="status-label">Node.js</div>
+              <div class="status-detail">已安装</div>
+            </div>
+          `;
+          checkSystemRequirements(); // 重新检查
+        }
       } else {
-        alert('安装失败: ' + result.error);
+        showToast(result.error || '无法打开终端安装 Node.js', 'error');
         installBtn.disabled = false;
         installBtn.textContent = '安装 Node.js';
       }
