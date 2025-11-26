@@ -463,7 +463,46 @@ git stash pop
 **已优化**：
 ✅ `release.sh` 现在会显示 git push 失败的错误信息
 
-### 问题 10：版本号不一致
+### 问题 10：GitHub 拒绝推送大文件
+
+**错误信息**：
+```
+remote: error: File ScreenSync-UserPackage.tar.gz is 314.18 MB; this exceeds GitHub's file size limit of 100.00 MB
+remote: error: GH001: Large files detected.
+error: failed to push some refs
+```
+
+**原因**：
+构建产物（.tar.gz, .zip, .dmg, installer/dist/）被提交到 Git 历史中
+
+**解决方法**：
+```bash
+# 步骤 1：确保 .gitignore 已更新（已完成）
+
+# 步骤 2：提交所有未保存的更改
+git add .
+git commit -m "fix: update gitignore"
+
+# 步骤 3：从 Git 历史中删除大文件
+FILTER_BRANCH_SQUELCH_WARNING=1 git filter-branch --force --index-filter \
+  'git rm --cached --ignore-unmatch -r ScreenSync-UserPackage.tar.gz figma-plugin-v*.zip installer/dist/' \
+  --prune-empty --tag-name-filter cat -- --all
+
+# 步骤 4：清理和垃圾回收
+rm -rf .git/refs/original/
+git reflog expire --expire=now --all
+git gc --prune=now --aggressive
+
+# 步骤 5：强制推送到远程
+git push origin main --force
+```
+
+**预防措施**：
+- ✅ `.gitignore` 已更新，包含所有构建产物
+- ✅ 构建前先 pull，避免提交冲突
+- ✅ `release.sh` 会自动打包，不要手动运行打包脚本
+
+### 问题 11：版本号不一致
 
 **可能原因**：
 - 手动修改了版本号但不一致
