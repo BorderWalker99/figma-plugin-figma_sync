@@ -177,49 +177,60 @@ ipcMain.handle('enable-anywhere', async () => {
 
 ipcMain.handle('install-homebrew', async () => {
   return new Promise((resolve) => {
+    // Homebrew 安装需要交互式终端，所以使用 AppleScript 打开终端运行
     const installScript = '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"';
-    const child = spawn('bash', ['-c', installScript], {
-      stdio: 'inherit',
-      shell: true
-    });
     
-    child.on('close', (code) => {
-      if (code === 0) {
-        // 配置环境变量
-        const isArm64 = process.arch === 'arm64';
-        const brewPath = isArm64 ? '/opt/homebrew/bin/brew' : '/usr/local/bin/brew';
-        const shellEnv = `eval "$(${brewPath} shellenv)"`;
-        
-        // 添加到 .zprofile
-        const zprofilePath = path.join(os.homedir(), '.zprofile');
-        let zprofileContent = '';
-        if (fs.existsSync(zprofilePath)) {
-          zprofileContent = fs.readFileSync(zprofilePath, 'utf8');
-        }
-        
-        if (!zprofileContent.includes(shellEnv)) {
-          fs.appendFileSync(zprofilePath, '\n' + shellEnv);
-        }
-        
-        resolve({ success: true });
+    // 使用 AppleScript 在终端中运行安装脚本
+    const appleScript = `
+      tell application "Terminal"
+        activate
+        do script "${installScript.replace(/"/g, '\\"')}"
+      end tell
+    `;
+    
+    exec(`osascript -e '${appleScript.replace(/'/g, "'\\''")}'`, (error, stdout, stderr) => {
+      if (error) {
+        resolve({ 
+          success: false, 
+          error: '无法打开终端。请手动在终端中运行安装命令。',
+          manualCommand: installScript
+        });
       } else {
-        resolve({ success: false, error: `安装失败，退出码: ${code}` });
+        // 终端已打开，用户需要完成安装
+        resolve({ 
+          success: true, 
+          message: '终端已打开，请按照提示完成 Homebrew 安装。安装完成后，请重新启动安装器。',
+          needsRestart: true
+        });
       }
-    });
-    
-    child.on('error', (error) => {
-      resolve({ success: false, error: error.message });
     });
   });
 });
 
 ipcMain.handle('install-node', async () => {
   return new Promise((resolve) => {
-    exec('brew install node', (error, stdout, stderr) => {
+    // 使用 AppleScript 在终端中运行 Node.js 安装
+    const installCommand = 'brew install node';
+    const appleScript = `
+      tell application "Terminal"
+        activate
+        do script "${installCommand}"
+      end tell
+    `;
+    
+    exec(`osascript -e '${appleScript.replace(/'/g, "'\\''")}'`, (error, stdout, stderr) => {
       if (error) {
-        resolve({ success: false, error: error.message });
+        resolve({ 
+          success: false, 
+          error: '无法打开终端。请手动在终端中运行: brew install node'
+        });
       } else {
-        resolve({ success: true });
+        // 终端已打开，用户需要等待安装完成
+        resolve({ 
+          success: true, 
+          message: '终端已打开，正在安装 Node.js。安装完成后，请点击"重新检测"按钮。',
+          needsRestart: true
+        });
       }
     });
   });
