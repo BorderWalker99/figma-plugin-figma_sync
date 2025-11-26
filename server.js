@@ -1968,6 +1968,18 @@ wss.on('connection', (ws, req) => {
       });
       return;
     }
+    
+    // 插件自动更新
+    if (data.type === 'update-plugin') {
+      handlePluginUpdate(targetGroup, connectionId);
+      return;
+    }
+    
+    // 服务器自动更新
+    if (data.type === 'update-server') {
+      handleServerUpdate(targetGroup, connectionId);
+      return;
+    }
   });
   
   ws.on('close', () => {
@@ -1990,23 +2002,10 @@ wss.on('connection', (ws, req) => {
     }
   });
   
-    // 插件自动更新
-    if (data.type === 'update-plugin') {
-      handlePluginUpdate(targetGroup, connectionId);
-      return;
-    }
-    
-    // 服务器自动更新
-    if (data.type === 'update-server') {
-      handleServerUpdate(targetGroup, connectionId);
-      return;
-    }
-    
-  });
-  
   ws.on('error', (error) => {
     console.error('❌ WebSocket错误 (', clientType, '):', error.message);
   });
+});
 
 // 检查并通知更新（插件和服务器）
 async function checkAndNotifyUpdates(targetGroup, connectionId) {
