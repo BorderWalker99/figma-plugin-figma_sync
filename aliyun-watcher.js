@@ -18,8 +18,8 @@ const {
   getUserIdentifier,
   getUserFolderName,
   getOrCreateUserConfig,
-  updateUserFolderId,
-  getUserFolderId,
+  updateOssFolderId,
+  getOssFolderId,
   getLocalDownloadFolder
 } = require('./userConfig');
 
@@ -97,13 +97,44 @@ async function saveFileToLocalFolder(buffer, filename, mimeType) {
     const safeFilename = sanitizeFilename(filename, mimeType);
     const filePath = path.join(folderPath, safeFilename);
     
-    // 如果文件已存在，添加时间戳避免覆盖
+    // 检查是否是视频或 GIF 文件
+    const ext = path.extname(safeFilename).toLowerCase();
+    const isVideo = ext === '.mp4' || ext === '.mov' || (mimeType && mimeType.startsWith('video/'));
+    const isGif = ext === '.gif' || (mimeType && mimeType === 'image/gif');
+    
+    // 如果是视频或 GIF 文件且已存在，直接替换；否则添加时间戳避免覆盖
     let finalPath = filePath;
     if (fs.existsSync(finalPath)) {
-      const ext = path.extname(safeFilename);
+      if (isVideo || isGif) {
+        // 视频或 GIF 文件：先删除旧文件，再写入新文件（确保直接替换）
+        console.log(`   🔄 [OSS] 检测到重名 ${isVideo ? '视频' : 'GIF'} 文件，将替换: ${safeFilename}`);
+        try {
+          // 先尝试删除文件
+          fs.unlinkSync(finalPath);
+          // 等待一小段时间确保文件系统完成删除操作
+          await new Promise(resolve => setTimeout(resolve, 10));
+          // 验证文件是否已删除
+          if (fs.existsSync(finalPath)) {
+            console.warn(`   ⚠️  [OSS] 文件删除后仍存在，尝试强制删除`);
+            // 如果文件仍存在，可能是文件系统延迟，再次尝试删除
+            try {
+              fs.unlinkSync(finalPath);
+            } catch (retryError) {
+              console.warn(`   ⚠️  [OSS] 强制删除失败: ${retryError.message}`);
+            }
+          } else {
+            console.log(`   🗑️  [OSS] 已删除旧文件: ${safeFilename}`);
+          }
+        } catch (deleteError) {
+          console.warn(`   ⚠️  [OSS] 删除旧文件失败，将直接覆盖: ${deleteError.message}`);
+        }
+        finalPath = filePath; // 使用原路径
+      } else {
+        // 其他文件：添加时间戳避免覆盖
       const nameWithoutExt = path.basename(safeFilename, ext);
       const timestamp = Date.now();
       finalPath = path.join(folderPath, `${nameWithoutExt}_${timestamp}${ext}`);
+      }
     }
     
     // 确保目录存在（虽然应该已经存在，但以防万一）
@@ -112,7 +143,8 @@ async function saveFileToLocalFolder(buffer, filename, mimeType) {
       fs.mkdirSync(dir, { recursive: true });
     }
     
-    fs.writeFileSync(finalPath, buffer);
+    // 使用 writeFileSync 的覆盖模式（如果文件存在会被覆盖）
+    fs.writeFileSync(finalPath, buffer, { flag: 'w' });
     console.log(`   💾 文件已保存到本地: ${finalPath}`);
     return true;
   } catch (error) {
@@ -121,8 +153,8 @@ async function saveFileToLocalFolder(buffer, filename, mimeType) {
   }
 }
 
-// 阿里云 OSS 根文件夹路径（从环境变量读取）
-let OSS_ROOT_FOLDER = process.env.ALIYUN_ROOT_FOLDER || 'FigmaSync';
+// 阿里云根文件夹路径（从环境变量读取）
+let OSS_ROOT_FOLDER = process.env.ALIYUN_ROOT_FOLDER || 'ScreenSync';
 
 const CONFIG = {
   wsUrl: process.env.WS_URL || 'ws://localhost:8888',
@@ -150,8 +182,8 @@ async function initializeUserFolder() {
     console.log(`   📁 期望文件夹名称: ${userFolderName}`);
     console.log(`   📂 OSS 根文件夹: ${CONFIG.rootFolder}`);
     
-    // 先检查配置文件中是否有用户文件夹路径
-    let userFolderPath = getUserFolderId();
+    // 先检查配置文件中是否有用户文件夹路径（使用 OSS 专用字段）
+    let userFolderPath = getOssFolderId();
     
     if (userFolderPath) {
       console.log(`   📋 配置文件中的文件夹路径: ${userFolderPath}`);
@@ -201,8 +233,8 @@ async function initializeUserFolder() {
     
     console.log(`   ✅ 用户文件夹路径: ${userFolderPath}`);
     
-    // 保存到配置文件
-    updateUserFolderId(userFolderPath);
+    // 保存到配置文件（使用 OSS 专用字段）
+    updateOssFolderId(userFolderPath);
     CONFIG.userFolderId = userFolderPath;
     
     // 再次验证文件夹路径是否正确
@@ -291,6 +323,8 @@ async function pollOSS() {
     let nextPageToken = null;
     let pageCount = 0;
     
+    console.log(`🔍 [OSS] 正在轮询文件夹: ${CONFIG.userFolderId}`);
+    
     do {
       const result = await listFolderFiles({ 
         folderId: CONFIG.userFolderId, 
@@ -302,6 +336,7 @@ async function pollOSS() {
       if (result.files && result.files.length > 0) {
         allFiles = allFiles.concat(result.files);
         pageCount++;
+        console.log(`   📄 第 ${pageCount} 页: 获取到 ${result.files.length} 个文件`);
       }
       
       nextPageToken = result.nextPageToken;
@@ -309,15 +344,32 @@ async function pollOSS() {
     
     if (pageCount > 1) {
       console.log(`📄 [OSS] 获取了 ${pageCount} 页文件，共 ${allFiles.length} 个文件`);
+    } else if (allFiles.length > 0) {
+      console.log(`📄 [OSS] 获取了 ${allFiles.length} 个文件`);
+    } else {
+      console.log(`📄 [OSS] 文件夹为空，没有文件`);
     }
     
     // 过滤图片和视频文件
     const imageFiles = allFiles.filter(file => {
       const mimeType = file.mimeType || '';
       const name = file.name || '';
-      return mimeType.startsWith('image/') || mimeType.startsWith('video/') ||
-             /\.(jpg|jpeg|png|gif|webp|heic|heif|mp4|mov)$/i.test(name);
+      const isImageByMime = mimeType.startsWith('image/');
+      const isVideoByMime = mimeType.startsWith('video/');
+      const hasImageExt = /\.(jpg|jpeg|png|gif|webp|heic|heif)$/i.test(name);
+      const hasVideoExt = /\.(mp4|mov)$/i.test(name);
+      
+      const result = isImageByMime || isVideoByMime || hasImageExt || hasVideoExt;
+      
+      // 只在调试模式下打印被过滤的文件（避免日志过多）
+      if (!result && file.name && allFiles.length <= 10) {
+        console.log(`   ⚠️  文件被过滤: ${file.name} (MIME: ${mimeType || '未设置'}, 扩展名: ${name.split('.').pop() || '无'})`);
+      }
+      
+      return result;
     });
+    
+    console.log(`🖼️  [OSS] 过滤后找到 ${imageFiles.length} 个图片/视频文件`);
     
     const newFiles = [];
 
@@ -346,6 +398,8 @@ async function pollOSS() {
           knownFileIds.delete(file.id);
         }
       }
+    } else {
+      console.log(`✅ [OSS] 没有新文件需要处理`);
     }
   } catch (error) {
     console.error('⚠️  拉取 OSS 文件失败:', error.message);
@@ -356,6 +410,10 @@ async function pollOSS() {
 }
 
 async function handleOSSFile(file, deleteAfterSync = false) {
+  // 返回处理结果：{ success: boolean, skipped: boolean, reason?: string }
+  // success: 是否成功导入到 Figma
+  // skipped: 是否跳过（视频或过大的 GIF）
+  // reason: 跳过的原因
   try {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       throw new Error('服务器未连接');
@@ -456,7 +514,7 @@ async function handleOSSFile(file, deleteAfterSync = false) {
         }));
       }
       
-      return;
+      return { success: false, skipped: true, reason: 'video' };
     } else if (isGif) {
       // GIF 格式，检查文件大小
       console.log(`   🎬 检测到 GIF 格式...`);
@@ -498,7 +556,7 @@ async function handleOSSFile(file, deleteAfterSync = false) {
           }));
         }
         
-        return;
+        return { success: false, skipped: true, reason: 'gif-too-large' };
       }
       
       // 文件大小合适，直接使用原始文件
@@ -627,19 +685,31 @@ async function handleOSSFile(file, deleteAfterSync = false) {
     console.log(`   ⬆️  已发送到 Figma 插件 (总耗时: ${totalTime}ms, 发送: ${sendTime}ms)`);
 
     if (deleteAfterSync && CONFIG.autoDelete) {
+      const deleteTimeout = 90000; // 增加到 90 秒，给大文件（如 GIF）更多处理时间
       pendingDeletes.set(file.id, {
         filename: file.name,
         timestamp: Date.now()
       });
-      console.log(`   ⏳ 等待 Figma 确认后删除 OSS 文件 (路径: ${file.id})`);
+      console.log(`   ⏳ 等待 Figma 确认后删除 OSS 文件 (路径: ${file.id}, 超时: ${deleteTimeout/1000}秒)`);
 
-      setTimeout(() => {
+      const timeoutId = setTimeout(() => {
         if (pendingDeletes.has(file.id)) {
-          console.log(`   ⚠️  等待确认超时（30秒），保留文件: ${file.name}`);
+          const elapsed = Date.now() - pendingDeletes.get(file.id).timestamp;
+          console.log(`   ⚠️  等待确认超时（${elapsed/1000}秒），保留文件: ${file.name}`);
+          console.log(`   💡 提示：如果文件已成功导入到 Figma，可能是确认消息未正确发送或接收`);
           pendingDeletes.delete(file.id);
         }
-      }, 30000);
+      }, deleteTimeout);
+      
+      // 保存 timeout ID，以便在收到确认消息时清除
+      const deleteInfo = pendingDeletes.get(file.id);
+      if (deleteInfo) {
+        deleteInfo.timeoutId = timeoutId;
+      }
     }
+    
+    // 成功导入到 Figma
+    return { success: true, skipped: false };
   } catch (error) {
     console.error(`   ❌ 处理 OSS 文件失败 (${file.name}):`, error.message);
     throw error;
@@ -697,12 +767,42 @@ async function performManualSync() {
 
     console.log(`   📋 找到 ${allFiles.length} 个文件`);
 
+    // 调试：打印所有文件信息
+    if (allFiles.length > 0) {
+      console.log(`   🔍 文件详情：`);
+      allFiles.forEach((file, index) => {
+        console.log(`      ${index + 1}. ${file.name || '(无文件名)'}`);
+        console.log(`         - MIME类型: ${file.mimeType || '(未设置)'}`);
+        console.log(`         - 大小: ${file.size ? (file.size / 1024).toFixed(2) + ' KB' : '(未知)'}`);
+        console.log(`         - ID: ${file.id || '(无ID)'}`);
+      });
+    }
+
     // 过滤图片和视频文件
+    // 优先根据 MIME 类型判断，即使没有扩展名也能识别
     const imageFiles = allFiles.filter(file => {
       const mimeType = file.mimeType || '';
       const name = file.name || '';
-      return mimeType.startsWith('image/') || mimeType.startsWith('video/') ||
-             /\.(jpg|jpeg|png|gif|webp|heic|heif|mp4|mov)$/i.test(name);
+      
+      // 根据 MIME 类型判断（最可靠）
+      const isImageByMime = mimeType.startsWith('image/');
+      const isVideoByMime = mimeType.startsWith('video/');
+      
+      // 根据文件扩展名判断（作为补充）
+      const hasImageExt = /\.(jpg|jpeg|png|gif|webp|heic|heif)$/i.test(name);
+      const hasVideoExt = /\.(mp4|mov)$/i.test(name);
+      
+      // 如果 MIME 类型是 application/octet-stream，尝试从文件名推断
+      const isOctetStream = mimeType === 'application/octet-stream' || !mimeType;
+      const inferredFromName = hasImageExt || hasVideoExt;
+      
+      const result = isImageByMime || isVideoByMime || (isOctetStream && inferredFromName);
+      
+      if (!result && file.name) {
+        console.log(`   ⚠️  文件被过滤: ${file.name} (MIME: ${mimeType || '未设置'}, 扩展名: ${name.split('.').pop() || '无'})`);
+      }
+      
+      return result;
     });
     
     console.log(`   🖼️  其中 ${imageFiles.length} 个是媒体文件`);
@@ -730,49 +830,17 @@ async function performManualSync() {
       
       // 处理文件（手动同步时强制处理所有文件）
       try {
-        // 检查文件是否需要手动拖入（GIF过大或视频文件）
-        const fileName = file.name.toLowerCase();
-        const isGif = fileName.endsWith('.gif');
-        const isVideo = fileName.endsWith('.mp4') || fileName.endsWith('.mov');
+        // 调用 handleOSSFile 处理文件（会自动处理视频和过大的 GIF）
+        const result = await handleOSSFile(file, true);
         
-        // 如果是 GIF，先检查大小
-        if (isGif) {
-          try {
-            const originalBuffer = await downloadFileBuffer(file.id);
-            const originalSize = originalBuffer.length;
-            const maxGifSize = 100 * 1024 * 1024; // 100MB
-            
-            if (originalSize > maxGifSize) {
-              console.log(`   ⚠️  GIF 文件过大，需要手动拖入: ${file.name}`);
-              if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({
-                  type: 'file-skipped',
-                  filename: file.name,
-                  reason: 'gif-too-large'
-                }));
-              }
-              continue;
-            }
-          } catch (checkError) {
-            console.log(`   ⚠️  检查 GIF 大小失败，继续处理: ${checkError.message}`);
-          }
+        // 根据处理结果决定是否计入成功
+        if (result && result.success && !result.skipped) {
+          // 成功导入到 Figma，计入成功
+          success += 1;
+        } else if (result && result.skipped) {
+          // 文件被跳过（视频或过大的 GIF），已保存到本地并删除云端，不计入成功
+          console.log(`   ℹ️  文件已处理（${result.reason}），不计入成功计数: ${file.name}`);
         }
-        
-        // 如果是视频文件，需要手动拖入，不算成功
-        if (isVideo) {
-          console.log(`   ⚠️  视频文件需要手动拖入: ${file.name}`);
-          if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({
-              type: 'file-skipped',
-              filename: file.name,
-              reason: 'video'
-            }));
-          }
-          continue;
-        }
-        
-        await handleOSSFile(file, true);
-        success += 1;
         await sleep(300); // 避免请求过快
       } catch (error) {
         console.error(`   ❌ 处理文件失败: ${file.name}`, error.message);
@@ -843,7 +911,7 @@ function connectWebSocket() {
         console.log('\n🔄 [OSS] 收到模式切换消息');
         console.log('   目标模式:', message.mode);
         if (message.mode !== 'aliyun' && message.mode !== 'oss') {
-          console.log('⚠️  [OSS] 当前是阿里云 OSS watcher，需要切换到其他模式');
+          console.log('⚠️  [OSS] 当前是阿里云 watcher，需要切换到其他模式');
           console.log('   正在退出，请等待 start.js 重启正确的 watcher...\n');
           stopPolling();
           if (ws) {
@@ -891,6 +959,13 @@ function connectWebSocket() {
         const filename = message.filename;
         const ossFileId = message.ossFileId || message.fileId;
         
+        console.log(`   ✅ [OSS] 收到 Figma 确认消息: ${filename}`);
+        if (ossFileId) {
+          console.log(`      OSS 文件ID: ${ossFileId}`);
+        } else {
+          console.log(`      ⚠️  警告：确认消息中未包含 ossFileId，将尝试通过文件名匹配`);
+        }
+        
         let shouldDelete = false;
         let deleteInfo = null;
         let fileIdToDelete = null;
@@ -900,7 +975,12 @@ function connectWebSocket() {
             deleteInfo = pendingDeletes.get(ossFileId);
             fileIdToDelete = ossFileId;
             shouldDelete = true;
+            // 清除超时定时器
+            if (deleteInfo.timeoutId) {
+              clearTimeout(deleteInfo.timeoutId);
+            }
             pendingDeletes.delete(ossFileId);
+            console.log(`      ✅ 通过 OSS 文件ID 匹配到待删除记录`);
           }
         }
         
@@ -910,7 +990,12 @@ function connectWebSocket() {
               deleteInfo = info;
               fileIdToDelete = fileId;
               shouldDelete = true;
+              // 清除超时定时器
+              if (info.timeoutId) {
+                clearTimeout(info.timeoutId);
+              }
               pendingDeletes.delete(fileId);
+              console.log(`      ✅ 通过文件名匹配到待删除记录: ${fileId}`);
               break;
             }
           }
@@ -918,7 +1003,8 @@ function connectWebSocket() {
         
         if (shouldDelete && deleteInfo && fileIdToDelete) {
           try {
-            console.log(`   🗑️  删除 OSS 文件: ${filename} (路径: ${fileIdToDelete})`);
+            const elapsed = Date.now() - deleteInfo.timestamp;
+            console.log(`   🗑️  删除 OSS 文件: ${filename} (路径: ${fileIdToDelete}, 等待时间: ${(elapsed/1000).toFixed(1)}秒)`);
             await deleteFile(fileIdToDelete);
             console.log(`   ✅ 已删除`);
           } catch (error) {
@@ -930,16 +1016,30 @@ function connectWebSocket() {
             }
           }
         } else {
-          console.log(`   ℹ️  文件已标记为保留，不删除: ${filename}（可能导入失败需要手动拖入）`);
+          console.log(`   ℹ️  文件不在待删除列表中: ${filename}`);
+          console.log(`      💡 可能原因：1) 文件已超时被移除 2) 文件从未被标记为删除 3) 文件ID不匹配`);
+          if (pendingDeletes.size > 0) {
+            console.log(`      📋 当前待删除列表 (${pendingDeletes.size} 个):`);
+            for (const [id, info] of pendingDeletes.entries()) {
+              const age = ((Date.now() - info.timestamp) / 1000).toFixed(1);
+              console.log(`         - ${info.filename} (ID: ${id}, 等待: ${age}秒)`);
+            }
+          }
         }
         return;
       }
 
       if (message.type === 'start-realtime') {
         console.log('\n🎯 [OSS] 启动实时同步模式...');
+        // 先确保已知文件列表已初始化，避免处理已有文件
+        if (knownFileIds.size === 0) {
+          console.log('📂 [OSS] 初始化已知文件列表（避免处理已有文件）...');
+          await initializeKnownFiles();
+        }
         isRealTimeMode = true;
         startPolling();
-        await pollOSS();
+        // 注意：startPolling() 会立即执行一次 pollOSS()，但此时 knownFileIds 已经初始化
+        // 所以不会处理已有文件，只会处理新文件
         return;
       }
 
@@ -1007,7 +1107,7 @@ function cleanupCache() {
 
 async function start() {
   console.log('╔════════════════════════════════════════╗');
-  console.log('║  阿里云 OSS 截图同步 - Mac 监听器     ║');
+  console.log('║  阿里云截图同步 - Mac 监听器     ║');
   console.log('╚════════════════════════════════════════╝\n');
 
   // 初始化用户文件夹
@@ -1051,6 +1151,11 @@ async function start() {
 
   setInterval(cleanupCache, CLEANUP_INTERVAL_MS);
   console.log(`🧹 [缓存管理] 已启动定期清理，每 ${CLEANUP_INTERVAL_MS / 1000 / 60} 分钟执行一次`);
+  
+  // 显示本地下载文件夹路径
+  const localFolderPath = getLocalDownloadFolder();
+  console.log(`\n📂 [本地文件夹] 无法自动导入的文件将保存到: ${localFolderPath}`);
+  console.log(`   💡 提示：视频文件（MP4/MOV）和过大的 GIF 文件会自动下载到此文件夹，可直接拖入 Figma`);
 
   process.on('SIGINT', () => {
     console.log('\n👋 [OSS] 停止服务');

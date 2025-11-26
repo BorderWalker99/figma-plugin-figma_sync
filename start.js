@@ -1,8 +1,47 @@
 // start.js - 一键启动脚本（支持动态切换模式）
-const { spawn } = require('child_process');
+const { spawn, execSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const { checkUpdateAsync } = require('./update-manager');
+
+// 检查并清理端口 8888
+function cleanupPort() {
+  if (process.platform === 'win32') {
+    // Windows 平台清理逻辑 (可选)
+    return;
+  }
+  
+  try {
+    // 查找占用 8888 端口的进程
+    // 使用 lsof 查找 LISTEN 状态的端口
+    const pid = execSync("lsof -i :8888 | grep LISTEN | awk '{print $2}'").toString().trim();
+    
+    if (pid) {
+      console.log(`🧹 发现端口 8888 被占用 (PID: ${pid})，正在清理...`);
+      
+      // 处理可能有多个 PID 的情况
+      const pids = pid.split('\n');
+      for (const p of pids) {
+        if (p) {
+          try {
+            process.kill(parseInt(p), 'SIGKILL');
+            console.log(`   ✅ 已终止进程 ${p}`);
+          } catch (e) {
+            console.log(`   ⚠️  无法终止进程 ${p}: ${e.message}`);
+          }
+        }
+      }
+      
+      // 等待端口释放
+      execSync('sleep 1');
+    }
+  } catch (error) {
+    // lsof 返回非 0 状态码表示没有找到进程，忽略
+  }
+}
+
+// 清理端口
+cleanupPort();
 
 // 从环境变量读取同步模式，默认 Google Drive
 let SYNC_MODE = process.env.SYNC_MODE || 'drive';
@@ -53,7 +92,10 @@ let watcher = null;
 
 // 1. 启动服务器
 console.log('🚀 启动WebSocket服务器...');
-const server = spawn('node', ['server.js'], {
+// 增加 Node.js 内存限制到 4GB，以支持大文件（GIF/视频）处理
+// 如果系统内存不足，可以减小这个值（如 2048 表示 2GB）
+const NODE_MEMORY_LIMIT = process.env.NODE_MEMORY_LIMIT || '4096';
+const server = spawn('node', [`--max-old-space-size=${NODE_MEMORY_LIMIT}`, 'server.js'], {
   stdio: 'inherit',
   cwd: __dirname,
   env: { ...process.env, SYNC_MODE }
@@ -109,7 +151,7 @@ function startWatcher() {
       }
     });
   } else if (SYNC_MODE === 'aliyun' || SYNC_MODE === 'oss') {
-    console.log('\n🚀 启动阿里云 OSS 监听器...');
+    console.log('\n🚀 启动阿里云监听器...');
     watcher = spawn('node', ['aliyun-watcher.js'], {
       stdio: 'inherit',
       cwd: __dirname,
@@ -117,7 +159,7 @@ function startWatcher() {
     });
     
     watcher.on('exit', (code) => {
-      console.log(`\n⚠️  阿里云 OSS 监听器已退出 (code: ${code})`);
+      console.log(`\n⚠️  阿里云监听器已退出 (code: ${code})`);
       watcher = null;
       
       // 检查模式是否改变

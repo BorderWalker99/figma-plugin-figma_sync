@@ -1,0 +1,31 @@
+{
+  "name": "screensync-installer",
+  "version": "1.0.0",
+  "description": "ScreenSync GUI Installer",
+  "author": "ScreenSync",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder",
+    "build:mac": "electron-builder --mac"
+  },
+  "build": {
+    "appId": "com.screensync.installer",
+    "productName": "ScreenSync Installer",
+    "mac": {
+      "category": "public.app-category.utilities",
+      "target": "dmg",
+      "icon": "icon.icns"
+    },
+    "files": [
+      "**/*",
+      "!node_modules/**/*"
+    ]
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "electron": "^35.7.5",
+    "electron-builder": "^25.1.8"
+  }
+}
+

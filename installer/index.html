@@ -1,0 +1,829 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ScreenSync 安装向导</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Staatliches&family=Archivo+Black&display=swap" rel="stylesheet">
+  <style>
+    /*========================
+      Design System: Lab / Apple Hybrid (Matched with Figma Plugin)
+    ========================*/
+    :root {
+      /* Colors */
+      --bg-app: #F5F5F7;
+      --bg-card: #FFFFFF;
+      --bg-card-hover: #FDFDFD;
+      
+      /* Logo Colors */
+      --logo-color-primary: #007AFF;
+      --logo-color-secondary: #FFFFFF;
+
+      --text-primary: #1D1D1F;
+      --text-secondary: #86868B;
+      --text-tertiary: #AEAEB2;
+      
+      --accent: #007AFF;
+      --accent-gradient: linear-gradient(135deg, #007AFF, #0062CC);
+      --accent-soft: rgba(0, 122, 255, 0.1);
+      
+      --success: #34C759;
+      --success-bg: rgba(52, 199, 89, 0.1);
+      
+      --warning: #FF9500;
+      --warning-bg: rgba(255, 149, 0, 0.1);
+      
+      --danger: #FF3B30;
+      --danger-bg: rgba(255, 59, 48, 0.1);
+      
+      --divider: rgba(0, 0, 0, 0.05);
+      --border: rgba(0, 0, 0, 0.08);
+      
+      /* Shadows */
+      --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+      --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.06);
+      --shadow-lg: 0 15px 48px rgba(0, 0, 0, 0.1);
+      --shadow-inner: inset 0 1px 1px rgba(255,255,255,0.5);
+      
+      /* Radius */
+      --radius-s: 8px;
+      --radius-m: 16px;
+      --radius-l: 24px;
+      
+      /* Animation */
+      --ease-spring: cubic-bezier(0.25, 0.8, 0.25, 1);
+      --ease-out: cubic-bezier(0.33, 1, 0.68, 1);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg-app: #121212;
+        --bg-card: #1C1C1E;
+        --bg-card-hover: #2C2C2E;
+        
+        /* Logo Colors Dark Mode */
+        --logo-color-primary: #0051D5;
+        --logo-color-secondary: #1C1C1E;
+
+        --text-primary: #F5F5F7;
+        --text-secondary: #8E8E93;
+        --text-tertiary: #48484A;
+        
+        --divider: rgba(255, 255, 255, 0.08);
+        --border: rgba(255, 255, 255, 0.12);
+        
+        --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+        --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.4);
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: "SF Pro Text", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif;
+      background: var(--bg-app);
+      color: var(--text-primary);
+      font-size: 13px;
+      line-height: 1.4;
+      overflow: hidden;
+      user-select: none;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Header */
+    .header {
+      /* background: var(--bg-card); */
+      padding: 40px 24px 8px 24px;
+      text-align: left;
+      /* border-bottom: 1px solid var(--border); */
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      -webkit-app-region: drag;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .logo-box {
+      width: 18px;
+      height: 18px;
+      /* Transparent background for SVG logo */
+      background: transparent; 
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--accent);
+      /* box-shadow: var(--shadow-sm); Removed shadow for transparent logo */
+    }
+    
+
+    .app-title {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .app-title h1 {
+      font-family: 'Archivo Black', sans-serif;
+      font-weight: 400;
+      font-size: 16px;
+      letter-spacing: -0.01em;
+      line-height: 100%;
+      color: var(--text-primary);
+      margin: 0;
+    }
+
+    .app-title p {
+      font-size: 12px;
+      color: var(--text-secondary);
+      margin: 0;
+      font-weight: 500;
+    }
+
+    /* Content */
+    .content {
+      flex: 1;
+      padding: 12px 24px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .step {
+      display: none;
+      flex: 1;
+      flex-direction: column;
+      gap: 24px;
+      animation: fadeIn 0.4s var(--ease-out);
+    }
+
+    .step.active {
+      display: flex;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .step-header {
+      text-align: center;
+    }
+
+    .step-title {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 4px;
+      color: var(--text-primary);
+    }
+
+    .step-description {
+      font-size: 13px;
+      color: var(--text-secondary);
+      margin: 0;
+    }
+
+    /* Components */
+    .btn {
+      padding: 8px 8px 8px 8px;
+      border-radius: var(--radius-s);
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      border: 1px solid transparent;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: all 0.2s var(--ease-spring);
+      min-width: 90px;
+    }
+
+    .btn:active {
+      transform: scale(0.98);
+    }
+
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #FFFFFF;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      background: #0051D5;
+      box-shadow: none;
+    }
+
+    .btn-secondary {
+      background: transparent;
+      border-color: var(--border);
+      color: var(--text-primary);
+    }
+
+    .btn-secondary:hover:not(:disabled) {
+      background: rgba(0, 0, 0, 0.05);
+      border-color: var(--border);
+    }
+    
+    @media (prefers-color-scheme: dark) {
+      .btn-primary {
+        background: #0051D5;
+        color: #FFFFFF;
+      }
+      .btn-primary:hover:not(:disabled) {
+        background: #0040B3;
+      }
+      .btn-secondary {
+        border-color: rgba(255, 255, 255, 0.15);
+      }
+      .btn-secondary:hover:not(:disabled) {
+        background: rgba(255, 255, 255, 0.08);
+        border-color: rgba(255, 255, 255, 0.15);
+      }
+    }
+
+    .input-group {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-m);
+      padding: 20px;
+      box-shadow: var(--shadow-sm);
+      margin-bottom: 24px;
+    }
+
+    .input-label {
+      display: block;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      margin-bottom: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .input-row {
+      display: flex;
+      gap: 12px;
+    }
+
+    .input-field {
+      flex: 1;
+      padding: 12px 16px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-s);
+      font-size: 14px;
+      color: var(--text-primary);
+      background: var(--bg-app);
+      transition: all 0.2s ease;
+    }
+
+    .input-field:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-soft);
+    }
+
+    /* Cards */
+    .card-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+
+    .feature-card {
+      background: var(--bg-card);
+      border: 2px solid transparent;
+      border-radius: var(--radius-m);
+      padding: 24px;
+      cursor: pointer;
+      transition: all 0.3s var(--ease-spring);
+      box-shadow: var(--shadow-sm);
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      gap: 16px;
+    }
+
+    .feature-card:hover {
+      transform: translateY(-4px);
+      box-shadow: var(--shadow-md);
+      border-color: var(--border);
+    }
+
+    .feature-card.selected {
+      border-color: var(--accent);
+      background: var(--bg-card);
+      box-shadow: 0 0 0 1px var(--accent), var(--shadow-md);
+    }
+
+    .card-icon {
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      /* background: var(--bg-app); */
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-primary);
+      transition: all 0.3s ease;
+    }
+
+    /* .feature-card.selected .card-icon {
+      background: var(--accent-soft);
+      color: var(--accent);
+    } */
+
+    .card-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text-primary);
+      margin-bottom: 4px;
+    }
+
+    .card-desc {
+      font-size: 13px;
+      color: var(--text-secondary);
+      line-height: 1.5;
+    }
+
+    /* Status Items */
+    .status-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .status-item {
+      display: flex;
+      align-items: center;
+      padding: 16px 20px;
+      background: var(--bg-card);
+      border-radius: var(--radius-m);
+      border: 1px solid var(--border);
+      transition: all 0.3s ease;
+    }
+
+    .status-icon {
+      width: 24px;
+      height: 24px;
+      margin-right: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .status-content {
+      flex: 1;
+    }
+
+    .status-label {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-primary);
+      margin-bottom: 2px;
+    }
+
+    .status-detail {
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+
+    .status-item.success .status-icon { color: var(--success); }
+    .status-item.error .status-icon { color: var(--danger); }
+    .status-item.checking .status-icon { color: var(--accent); }
+
+    /* Progress */
+    .progress-container {
+      background: var(--bg-card);
+      border-radius: var(--radius-m);
+      padding: 24px;
+      border: 1px solid var(--border);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .progress-bar {
+      height: 8px;
+      background: var(--bg-app);
+      border-radius: 4px;
+      overflow: hidden;
+      margin: 16px 0;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: var(--accent-gradient);
+      width: 0%;
+      transition: width 0.3s ease, background 0.3s ease;
+      border-radius: 4px;
+    }
+
+    .progress-fill.success {
+      background: var(--success);
+    }
+
+    /* Logs */
+    .log-container {
+      background: #1e1e1e;
+      color: #d4d4d4;
+      padding: 16px;
+      border-radius: var(--radius-s);
+      font-family: 'Monaco', 'Menlo', monospace;
+      font-size: 12px;
+      height: 200px;
+      overflow-y: auto;
+      margin-top: 16px;
+      border: 1px solid var(--border);
+    }
+
+    .log-line {
+      padding: 2px 0;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    /* Footer */
+    .footer {
+      background: var(--bg-card);
+      padding: 20px 40px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .step-dots {
+      display: flex;
+      gap: 8px;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--border);
+      transition: all 0.3s ease;
+    }
+
+    .dot.active {
+      background: rgba(0, 0, 0, 0.2);;
+      transform: scale(1.2);
+    }
+
+    .dot.completed {
+      background: var(--success);
+    }
+
+    .button-group {
+      display: flex;
+      gap: 16px;
+      margin-top: auto; /* Push to bottom of step content if needed */
+    }
+
+    /* Alerts */
+    .alert {
+      padding: 12px 16px 12px 16px;
+      border-radius: var(--radius-s);
+      font-size: 13px;
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      line-height: 1.5;
+    }
+
+    .alert-success { background: var(--success-bg); color: #006600; }
+    .alert-error { background: var(--danger-bg); color: #CC0000; }
+    .alert-info { background: var(--accent-soft); color: #0044AA; }
+
+    /* Icons */
+    svg {
+      width: 20px;
+      height: 20px;
+      stroke-width: 2;
+      stroke: currentColor;
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    /* Button icons - smaller */
+    .btn svg {
+      width: 14px;
+      height: 14px;
+    }
+
+    /* Completion icon - larger */
+    .completion-icon svg {
+      width: 40px !important;
+      height: 40px !important;
+    }
+
+    .spinner {
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      100% { transform: rotate(360deg); }
+    }
+
+    /* Toast */
+    .toast {
+      position: fixed;
+      top: 40px;
+      left: 50%;
+      transform: translateX(-50%) translateY(-100px);
+      background: var(--bg-card);
+      border-radius: var(--radius-m); /* Match --radius-m usually, or specific value */
+      padding: 8px 16px;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12), 0 0 1px rgba(0, 0, 0, 0.1);
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-primary);
+      z-index: 1000;
+      opacity: 0;
+      pointer-events: none;
+      transition: all 0.5s var(--ease-spring);
+      white-space: nowrap;
+      width: fit-content;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+      pointer-events: auto;
+    }
+    
+    @media (prefers-color-scheme: dark) {
+        .toast {
+            color: #F5F5F7;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4), 0 0 1px rgba(255, 255, 255, 0.1);
+        }
+    }
+
+    .toast-icon {
+      width: 14px;
+      height: 14px;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: visible;
+    }
+    
+    .toast-icon svg {
+      width: 100%;
+      height: 100%;
+      overflow: visible;
+    }
+
+    .toast-message {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-primary);
+      white-space: nowrap;
+    }
+
+    /* Toast Variants */
+    .toast.success .toast-icon { color: var(--success); }
+    .toast.error .toast-icon { color: var(--danger); }
+    .toast.loading .toast-icon { color: var(--text-secondary); }
+    
+    /* Dark Mode specific toast adjustment */
+    @media (prefers-color-scheme: dark) {
+        .toast {
+            background: #2C2C2E;
+            border-color: #38383A;
+        }
+    }
+  </style>
+</head>
+<body>
+  <div id="toast" class="toast">
+    <div class="toast-icon"></div>
+    <span class="toast-message"></span>
+  </div>
+
+  <div class="header">
+    <div class="brand">
+      <div class="logo-box">
+        <!-- Plugin Logo SVG -->
+        <img src="https://raw.githubusercontent.com/BorderWalker99/figma-plugin-figma_sync/refs/heads/main/images/logo.svg" width="18" height="18" />
+      </div>
+      <div class="app-title">
+        <h1>ScreenSync</h1>
+        <!-- <p>安装向导</p> -->
+      </div>
+    </div>
+  </div>
+
+  <div class="content">
+    <!-- Step 1: Upload Mode -->
+    <div class="step active" id="step1">
+      <div class="step-header">
+        <h2 class="step-title">选择储存方式</h2>
+        <p class="step-description">用于暂存截图/录屏</p>
+      </div>
+
+      <div class="card-grid">
+        <div class="feature-card" onclick="selectMode('drive')">
+          <div class="card-icon">
+            <img class="no-invert" src="https://raw.githubusercontent.com/BorderWalker99/figma-plugin-figma_sync/refs/heads/main/images/google.svg" width="56" height="56">
+          </div>
+          <div>
+            <div class="card-title">Google Cloud</div>
+            <div class="card-desc">iCloud 无空间也可使用</div>
+          </div>
+        </div>
+        <div class="feature-card" onclick="selectMode('icloud')">
+          <div class="card-icon">
+            <img class="no-invert" src="https://raw.githubusercontent.com/BorderWalker99/figma-plugin-figma_sync/refs/heads/main/images/icloud.svg" width="56" height="56">
+          </div>
+          <div>
+            <div class="card-title">iCloud</div>
+            <div class="card-desc">iCloud 需要足够空间，隐私性更好</div>
+          </div>
+        </div>
+      </div>
+
+      <div id="icloudCheckResult" style="display: none;"></div>
+
+      <div class="button-group">
+        <div style="flex:1"></div>
+        <button class="btn btn-primary" onclick="nextStep()" id="step1Next" disabled>
+          下一步
+          <svg viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Step 2: System Check -->
+    <div class="step" id="step2">
+      <div class="step-header">
+        <h2 class="step-title">环境检查</h2>
+        <p class="step-description">检查系统环境是否满足运行要求</p>
+      </div>
+
+      <div class="status-list" id="systemChecks">
+        <div class="status-item checking">
+          <div class="status-icon"><svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg></div>
+          <div class="status-content">
+            <div class="status-label">Homebrew</div>
+            <div class="status-detail">检查中...</div>
+          </div>
+        </div>
+        <div class="status-item checking">
+          <div class="status-icon"><svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg></div>
+          <div class="status-content">
+            <div class="status-label">Node.js</div>
+            <div class="status-detail">检查中...</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="button-group" id="step2Buttons" style="display: none;">
+        <button class="btn btn-secondary" onclick="prevStep()">上一步</button>
+        <div style="flex:1"></div>
+        <button class="btn btn-primary" onclick="nextStep()" id="step2Next">
+          下一步
+          <svg viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Step 3: Install Dependencies -->
+    <div class="step" id="step3">
+      <div class="step-header">
+        <h2 class="step-title">安装依赖</h2>
+        <p class="step-description">安装项目所需的依赖包，请保持网络畅通</p>
+      </div>
+
+      <div class="progress-container">
+        <div class="status-label" id="installStatusLabel">正在安装</div>
+        <div class="progress-bar">
+          <div class="progress-fill" id="installProgress" style="width: 0%"></div>
+        </div>
+      </div>
+
+      <div class="log-container" id="installLog" style="display: none;"></div>
+      <div id="installErrorAlert" style="display: none;"></div>
+
+      <div class="button-group" id="step3Buttons" style="display: none;">
+        <button class="btn btn-secondary" onclick="prevStep()">上一步</button>
+        <div style="flex:1"></div>
+        <button class="btn btn-primary" onclick="nextStep()" id="step3Next" disabled>
+          下一步
+          <svg viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Step 4: Configuration -->
+    <div class="step" id="step4">
+      <div class="step-header">
+        <h2 class="step-title">系统配置</h2>
+        <p class="step-description">应用配置并设置本地环境</p>
+      </div>
+
+      <div class="status-list" id="configStatus">
+        <div class="status-item checking">
+          <div class="status-icon"><svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg></div>
+          <div class="status-content">
+            <div class="status-label">配置中</div>
+            <div class="status-detail">正在设置权限和文件夹</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="button-group" id="step4Buttons" style="display: none;">
+        <button class="btn btn-secondary" onclick="prevStep()">上一步</button>
+        <div style="flex:1"></div>
+        <button class="btn btn-primary" onclick="nextStep()" id="step4Next" disabled>
+          下一步
+          <svg viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Step 5: Complete -->
+    <div class="step" id="step5" style="justify-content: center; gap: 16px;">
+      <div class="step-header" style="margin-bottom: 0; margin-top: -12px;">
+        <div style="width: 80px; height: 80px; background: var(--success); border-radius: 50%; color: white; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; box-shadow: 0 4px 16px rgba(52, 199, 89, 0.3);">
+          <div class="completion-icon" style="transform: translateY(4px);">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M20 6L9 17L4 12" stroke="white" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
+        </div>
+        <h2 class="step-title">安装完成</h2>
+        <p class="step-description">请前往 Figma 载入插件</p>
+      </div>
+      
+      <!-- 下一步提示 -->
+      <div style="background: var(--bg-card); border-radius: var(--radius-m); padding: 16px; margin-top: 8px; border: 1px solid var(--border);">
+        <div style="display: flex; align-items: flex-start; gap: 12px;">
+          <!-- Figma Logo SVG -->
+          <svg width="20" height="20" viewBox="0 0 200 300" style="flex-shrink: 0; margin-top: 2px;">
+            <path fill="#0acf83" d="M50 300c27.6 0 50-22.4 50-50v-50H50c-27.6 0-50 22.4-50 50s22.4 50 50 50z"/>
+            <path fill="#a259ff" d="M0 150c0-27.6 22.4-50 50-50h50v100H50c-27.6 0-50-22.4-50-50z"/>
+            <path fill="#f24e1e" d="M0 50C0 22.4 22.4 0 50 0h50v100H50C22.4 100 0 77.6 0 50z"/>
+            <path fill="#ff7262" d="M100 0h50c27.6 0 50 22.4 50 50s-22.4 50-50 50h-50V0z"/>
+            <path fill="#1abcfe" d="M200 150c0 27.6-22.4 50-50 50s-50-22.4-50-50 22.4-50 50-50 50 22.4 50 50z"/>
+          </svg>
+          <div>
+            <div style="font-size: 13px; font-weight: 600; margin-bottom: 4px;">下一步：导入 Figma 插件</div>
+            <div style="font-size: 12px; color: var(--text-secondary); line-height: 1.5;">
+              Plugins → Development → Import plugin from manifest<br>
+              选择：<span style="font-family: 'Monaco', 'Courier New', monospace; background: rgba(0,0,0,0.05); padding: 2px 6px; border-radius: 3px; font-size: 11px;">{安装目录}/figma-plugin/manifest.json</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="button-group" style="justify-content: center; margin-top: 0;">
+        <button class="btn btn-primary" onclick="finishInstallation()" style="min-width: 200px;">
+          我知道了
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <div class="step-dots">
+      <div class="dot active" data-step="1"></div>
+      <div class="dot" data-step="2"></div>
+      <div class="dot" data-step="3"></div>
+      <div class="dot" data-step="4"></div>
+      <div class="dot" data-step="5"></div>
+    </div>
+    <div style="color: var(--text-tertiary); font-size: 12px;">
+      v1.0.0
+    </div>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>

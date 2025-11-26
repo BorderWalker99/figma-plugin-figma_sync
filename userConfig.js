@@ -21,7 +21,7 @@ function getUserIdentifier() {
  */
 function getUserFolderName() {
   const identifier = getUserIdentifier();
-  return `FigmaSync-${identifier}`;
+  return `ScreenSync-${identifier}`;
 }
 
 /**
@@ -62,15 +62,49 @@ function getOrCreateUserConfig() {
     config = {
       userId: getUserIdentifier(),
       folderName: getUserFolderName(),
-      userFolderId: null,
+      userFolderId: null, // 保留用于向后兼容
+      driveFolderId: null, // Google Drive 文件夹 ID
+      ossFolderId: null, // 阿里云 OSS 文件夹路径
       localDownloadFolder: null, // 本地下载文件夹路径，null 表示使用默认值
+      backupGif: false, // 是否自动备份 GIF 文件到本地（Google Drive 模式）
+      keepGifInIcloud: false, // 是否保留 GIF 文件在 iCloud 文件夹中（iCloud 模式）
       createdAt: new Date().toISOString()
     };
     writeUserConfig(config);
   } else {
+    // 迁移旧配置：如果只有 userFolderId，根据格式判断是哪个模式
+    if (config.userFolderId && !config.driveFolderId && !config.ossFolderId) {
+      // 如果 userFolderId 看起来像 Google Drive ID（长字符串，不包含斜杠）
+      if (config.userFolderId.length > 20 && !config.userFolderId.includes('/')) {
+        config.driveFolderId = config.userFolderId;
+        console.log('ℹ️  迁移配置：将 userFolderId 识别为 Google Drive 文件夹 ID');
+      } else if (config.userFolderId.includes('/')) {
+        // 如果包含斜杠，可能是 OSS 路径
+        config.ossFolderId = config.userFolderId;
+        console.log('ℹ️  迁移配置：将 userFolderId 识别为阿里云 OSS 文件夹路径');
+      }
+      writeUserConfig(config);
+    }
+    
+    // 确保所有新字段存在
+    if (config.driveFolderId === undefined) {
+      config.driveFolderId = null;
+      writeUserConfig(config);
+    }
+    if (config.ossFolderId === undefined) {
+      config.ossFolderId = null;
+      writeUserConfig(config);
+    }
+    
     // 确保旧配置也有 localDownloadFolder 字段
     if (config.localDownloadFolder === undefined) {
       config.localDownloadFolder = null;
+      writeUserConfig(config);
+    }
+    
+    // 确保旧配置也有 keepGifInIcloud 字段
+    if (config.keepGifInIcloud === undefined) {
+      config.keepGifInIcloud = false;
       writeUserConfig(config);
     }
   }
@@ -79,22 +113,68 @@ function getOrCreateUserConfig() {
 }
 
 /**
- * 更新用户文件夹ID
+ * 更新用户文件夹ID（向后兼容，默认更新 driveFolderId）
  */
 function updateUserFolderId(folderId) {
   const config = getOrCreateUserConfig();
-  config.userFolderId = folderId;
+  config.userFolderId = folderId; // 保留向后兼容
+  // 根据格式判断是哪个模式
+  if (folderId && folderId.length > 20 && !folderId.includes('/')) {
+    config.driveFolderId = folderId;
+  } else if (folderId && folderId.includes('/')) {
+    config.ossFolderId = folderId;
+  }
   config.updatedAt = new Date().toISOString();
   writeUserConfig(config);
   return config;
 }
 
 /**
- * 获取用户文件夹ID
+ * 获取用户文件夹ID（向后兼容，默认返回 driveFolderId）
  */
 function getUserFolderId() {
   const config = getOrCreateUserConfig();
-  return config.userFolderId;
+  // 优先返回 driveFolderId（向后兼容）
+  return config.driveFolderId || config.userFolderId;
+}
+
+/**
+ * 更新 Google Drive 文件夹ID
+ */
+function updateDriveFolderId(folderId) {
+  const config = getOrCreateUserConfig();
+  config.driveFolderId = folderId;
+  config.userFolderId = folderId; // 保留向后兼容
+  config.updatedAt = new Date().toISOString();
+  writeUserConfig(config);
+  return config;
+}
+
+/**
+ * 获取 Google Drive 文件夹ID
+ */
+function getDriveFolderId() {
+  const config = getOrCreateUserConfig();
+  return config.driveFolderId || config.userFolderId; // 向后兼容
+}
+
+/**
+ * 更新阿里云 OSS 文件夹路径
+ */
+function updateOssFolderId(folderPath) {
+  const config = getOrCreateUserConfig();
+  config.ossFolderId = folderPath;
+  config.updatedAt = new Date().toISOString();
+  writeUserConfig(config);
+  return config;
+}
+
+/**
+ * 获取阿里云 OSS 文件夹路径
+ */
+function getOssFolderId() {
+  const config = getOrCreateUserConfig();
+  return config.ossFolderId;
 }
 
 /**
@@ -112,14 +192,14 @@ function getLocalDownloadFolder() {
         return customPath;
       } else {
         console.warn(`⚠️  配置的本地文件夹路径无效（父目录不存在）: ${customPath}`);
-        console.warn(`   将使用默认路径: ${path.join(os.homedir(), 'FigmaSyncImg')}`);
+        console.warn(`   将使用默认路径: ${path.join(os.homedir(), 'ScreenSyncImg')}`);
       }
     } catch (error) {
       console.warn(`⚠️  验证本地文件夹路径时出错: ${error.message}`);
     }
   }
-  // 默认路径：用户主目录下的 FigmaSyncImg
-  return path.join(os.homedir(), 'FigmaSyncImg');
+  // 默认路径：用户主目录下的 ScreenSyncImg
+  return path.join(os.homedir(), 'ScreenSyncImg');
 }
 
 /**
@@ -133,15 +213,61 @@ function updateLocalDownloadFolder(folderPath) {
   return config;
 }
 
+/**
+ * 更新 GIF 自动备份设置
+ */
+function updateBackupGif(enabled) {
+  const config = getOrCreateUserConfig();
+  config.backupGif = !!enabled;
+  config.updatedAt = new Date().toISOString();
+  writeUserConfig(config);
+  return config;
+}
+
+/**
+ * 获取 GIF 自动备份设置
+ */
+function getBackupGif() {
+  const config = getOrCreateUserConfig();
+  return config.backupGif === true;
+}
+
+/**
+ * 更新 iCloud GIF 保留设置
+ */
+function updateKeepGifInIcloud(enabled) {
+  const config = getOrCreateUserConfig();
+  config.keepGifInIcloud = !!enabled;
+  config.updatedAt = new Date().toISOString();
+  writeUserConfig(config);
+  return config;
+}
+
+/**
+ * 获取 iCloud GIF 保留设置
+ */
+function getKeepGifInIcloud() {
+  const config = getOrCreateUserConfig();
+  return config.keepGifInIcloud === true;
+}
+
 module.exports = {
   getUserIdentifier,
   getUserFolderName,
   getOrCreateUserConfig,
   updateUserFolderId,
   getUserFolderId,
+  updateDriveFolderId,
+  getDriveFolderId,
+  updateOssFolderId,
+  getOssFolderId,
   readUserConfig,
   writeUserConfig,
   getLocalDownloadFolder,
-  updateLocalDownloadFolder
+  updateLocalDownloadFolder,
+  updateBackupGif,
+  getBackupGif,
+  updateKeepGifInIcloud,
+  getKeepGifInIcloud
 };
 

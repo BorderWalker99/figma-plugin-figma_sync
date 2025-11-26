@@ -56,7 +56,7 @@ function checkUpdate() {
     const options = {
       timeout: 5000,
       headers: {
-        'User-Agent': 'FigmaSync-UpdateChecker/1.0'
+        'User-Agent': 'ScreenSync-UpdateChecker/1.0'
       }
     };
     

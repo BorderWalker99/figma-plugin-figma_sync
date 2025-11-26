@@ -6,7 +6,7 @@
 
 在终端中运行：
 ```bash
-cd FigmaSync
+cd ScreenSync
 ./install-and-run.sh
 ```
 

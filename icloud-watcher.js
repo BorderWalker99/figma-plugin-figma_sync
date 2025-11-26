@@ -8,16 +8,19 @@ const { exec } = require('child_process');
 const os = require('os');
 
 // ============= 配置 =============
+const { getKeepGifInIcloud, updateKeepGifInIcloud } = require('./userConfig');
+
 const CONFIG = {
   icloudPath: path.join(
     process.env.HOME,
-    'Library/Mobile Documents/com~apple~CloudDocs/FigmaSyncImg'
+    'Library/Mobile Documents/com~apple~CloudDocs/ScreenSyncImg'
   ),
   wsUrl: 'ws://localhost:8888',
   connectionId: 'sync-session-1',
   maxWidth: 1920,
   quality: 85,
-  supportedFormats: ['.png', '.jpg', '.jpeg', '.heic', '.webp', '.gif', '.mp4', '.mov']
+  supportedFormats: ['.png', '.jpg', '.jpeg', '.heic', '.webp', '.gif', '.mp4', '.mov'],
+  keepGifInIcloud: getKeepGifInIcloud()
 };
 
 let ws = null;
@@ -123,6 +126,22 @@ function connectWebSocket() {
             process.exit(0);
           }, 1000);
         }
+        return;
+      }
+      
+      // 处理 iCloud GIF 保留设置更新
+      if (message.type === 'update-keep-gif-in-icloud-setting') {
+        CONFIG.keepGifInIcloud = !!message.enabled;
+        updateKeepGifInIcloud(CONFIG.keepGifInIcloud);
+        console.log(`📝 [iCloud] GIF 保留设置已${CONFIG.keepGifInIcloud ? '启用' : '禁用'}`);
+        
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            type: 'keep-gif-in-icloud-setting-updated',
+            enabled: CONFIG.keepGifInIcloud
+          }));
+        }
+        return;
       }
     } catch (error) {
       console.error('消息解析错误:', error);
@@ -187,6 +206,53 @@ function startWatching() {
       const filename = path.basename(filePath);
       const isGif = ext === '.gif';
       const isVideo = ext === '.mp4' || ext === '.mov';
+      
+      // 处理重名文件：如果是视频或 GIF，检查是否有同名文件，如果有则删除旧文件
+      if (isVideo || isGif) {
+        const nameWithoutExt = path.basename(filename, ext);
+        const folderPath = path.dirname(filePath);
+        
+        // 检查文件名是否包含 -2, -3 等后缀（macOS 自动添加的）
+        const duplicateMatch = nameWithoutExt.match(/^(.+)-(\d+)$/);
+        if (duplicateMatch) {
+          const originalName = duplicateMatch[1];
+          const originalFilePath = path.join(folderPath, `${originalName}${ext}`);
+          
+          // 如果原始文件存在，删除它（因为新文件会替换它）
+          if (fs.existsSync(originalFilePath)) {
+            try {
+              fs.unlinkSync(originalFilePath);
+              console.log(`   🔄 [iCloud] 检测到重名 ${isVideo ? '视频' : 'GIF'} 文件，已删除旧文件: ${originalName}${ext}`);
+              
+              // 重命名新文件为原始文件名（去掉 -2 后缀）
+              const newFilePath = path.join(folderPath, `${originalName}${ext}`);
+              fs.renameSync(filePath, newFilePath);
+              console.log(`   ✅ [iCloud] 已重命名新文件: ${filename} → ${originalName}${ext}`);
+              
+              // 更新 filePath 为新的路径
+              filePath = newFilePath;
+            } catch (renameError) {
+              console.warn(`   ⚠️  [iCloud] 处理重名文件失败: ${renameError.message}`);
+            }
+          }
+        } else {
+          // 文件名不包含后缀，检查是否有带后缀的同名文件（旧文件）
+          // 例如：如果新文件是 file.gif，检查是否有 file-2.gif, file-3.gif 等
+          let foundDuplicate = false;
+          for (let i = 2; i <= 10; i++) {
+            const duplicatePath = path.join(folderPath, `${nameWithoutExt}-${i}${ext}`);
+            if (fs.existsSync(duplicatePath)) {
+              try {
+                fs.unlinkSync(duplicatePath);
+                console.log(`   🔄 [iCloud] 检测到重名 ${isVideo ? '视频' : 'GIF'} 文件，已删除旧文件: ${path.basename(duplicatePath)}`);
+                foundDuplicate = true;
+              } catch (deleteError) {
+                console.warn(`   ⚠️  [iCloud] 删除旧文件失败: ${deleteError.message}`);
+              }
+            }
+          }
+        }
+      }
       
       // 检查文件是否需要手动拖入（GIF过大或视频文件）
       if (isVideo) {
@@ -300,12 +366,57 @@ async function performManualSync() {
   let successCount = 0;
   
   for (const file of imageFiles) {
-    const filePath = path.join(CONFIG.icloudPath, file);
+    let filePath = path.join(CONFIG.icloudPath, file);
     try {
       // 检查文件是否需要手动拖入（GIF过大或视频文件）
       const ext = path.extname(filePath).toLowerCase();
       const isGif = ext === '.gif';
       const isVideo = ext === '.mp4' || ext === '.mov';
+      
+      // 处理重名文件：如果是视频或 GIF，检查是否有同名文件，如果有则删除旧文件
+      if (isVideo || isGif) {
+        const nameWithoutExt = path.basename(file, ext);
+        const folderPath = CONFIG.icloudPath;
+        
+        // 检查文件名是否包含 -2, -3 等后缀（macOS 自动添加的）
+        const duplicateMatch = nameWithoutExt.match(/^(.+)-(\d+)$/);
+        if (duplicateMatch) {
+          const originalName = duplicateMatch[1];
+          const originalFilePath = path.join(folderPath, `${originalName}${ext}`);
+          
+          // 如果原始文件存在，删除它（因为新文件会替换它）
+          if (fs.existsSync(originalFilePath)) {
+            try {
+              fs.unlinkSync(originalFilePath);
+              console.log(`   🔄 [iCloud] 检测到重名 ${isVideo ? '视频' : 'GIF'} 文件，已删除旧文件: ${originalName}${ext}`);
+              
+              // 重命名新文件为原始文件名（去掉 -2 后缀）
+              const newFilePath = path.join(folderPath, `${originalName}${ext}`);
+              fs.renameSync(filePath, newFilePath);
+              console.log(`   ✅ [iCloud] 已重命名新文件: ${file} → ${originalName}${ext}`);
+              
+              // 更新 filePath 为新的路径
+              filePath = newFilePath;
+            } catch (renameError) {
+              console.warn(`   ⚠️  [iCloud] 处理重名文件失败: ${renameError.message}`);
+            }
+          }
+        } else {
+          // 文件名不包含后缀，检查是否有带后缀的同名文件（旧文件）
+          // 例如：如果新文件是 file.gif，检查是否有 file-2.gif, file-3.gif 等
+          for (let i = 2; i <= 10; i++) {
+            const duplicatePath = path.join(folderPath, `${nameWithoutExt}-${i}${ext}`);
+            if (fs.existsSync(duplicatePath)) {
+              try {
+                fs.unlinkSync(duplicatePath);
+                console.log(`   🔄 [iCloud] 检测到重名 ${isVideo ? '视频' : 'GIF'} 文件，已删除旧文件: ${path.basename(duplicatePath)}`);
+              } catch (deleteError) {
+                console.warn(`   ⚠️  [iCloud] 删除旧文件失败: ${deleteError.message}`);
+              }
+            }
+          }
+        }
+      }
       
       // 如果是 GIF，先检查大小
       if (isGif) {
@@ -530,11 +641,15 @@ async function syncScreenshot(filePath, deleteAfterSync = false) {
     const base64String = imageBuffer.toString('base64');
     imageBuffer = null; // 立即释放内存
     
+    // 检查是否是 GIF 且开启了保留设置
+    const keptInIcloud = isGif && CONFIG.keepGifInIcloud;
+    
     const payload = {
       type: 'screenshot',
       bytes: base64String, // 直接使用 base64 字符串，Figma 端需要解码
       timestamp: Date.now(),
-      filename: filename
+      filename: filename,
+      keptInIcloud: keptInIcloud || false // 通知 Figma 插件文件已保留在 iCloud
     };
     
     ws.send(JSON.stringify(payload));
@@ -545,6 +660,11 @@ async function syncScreenshot(filePath, deleteAfterSync = false) {
     console.log(`   📊 已同步: ${syncCount} 张`);
     
     if (deleteAfterSync) {
+      // 如果是 GIF 且开启了保留设置，不删除源文件
+      if (isGif && CONFIG.keepGifInIcloud) {
+        console.log('   📌 GIF 保留设置已启用，源文件将保留在 iCloud 文件夹中');
+        console.log('');
+      } else {
       // 添加到待删除队列，等待Figma确认
       pendingDeletes.set(filename, filePath);
       console.log('   ⏳ 等待Figma确认...');
@@ -562,6 +682,7 @@ async function syncScreenshot(filePath, deleteAfterSync = false) {
           console.log('');
         }
       }, 10000);
+      }
     } else {
       console.log('');
     }

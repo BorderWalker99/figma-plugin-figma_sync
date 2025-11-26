@@ -15,7 +15,6 @@ COPY server.js ./
 COPY googleDrive.js ./
 COPY aliyunOSS.js ./
 COPY userConfig.js ./
-COPY update-manager.js ./
 
 # Cloud Run 需要监听 0.0.0.0 和端口 8080
 ENV PORT=8080

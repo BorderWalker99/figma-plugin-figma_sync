@@ -1,5 +1,5 @@
 {
-  "name": "iPhone Screenshot Sync",
+  "name": "ScreenSync",
   "id": "iphone-screenshot-sync",
   "api": "1.0.0",
   "main": "code.js",

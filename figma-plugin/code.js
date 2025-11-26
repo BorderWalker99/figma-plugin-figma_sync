@@ -1,10 +1,13 @@
 // code.js - 智能布局版本
 
+const PLUGIN_VERSION = '1.0.1'; // 插件版本号
+
 console.log('🚀 Figma插件启动');
+console.log('📦 插件版本:', PLUGIN_VERSION);
 
 figma.showUI(__html__, { 
-  width: 480, 
-  height: 700,
+  width: 360, 
+  height: 350,
   themeColors: true 
 });
 
@@ -15,7 +18,7 @@ let screenRecordingIndex = 0; // 录屏计数器
 
 // 从画板中已有的元素初始化计数器
 function initializeCounters() {
-  const frame = findFrameByName("iPhone Screenshots");
+  const frame = findFrameByName("ScreenSync Screenshots");
   if (frame && frame.children) {
     let maxScreenshotIndex = 0;
     let maxScreenRecordingIndex = 0;
@@ -34,7 +37,7 @@ function initializeCounters() {
         // 匹配 ScreenRecording_XXX 格式
         const recordingMatch = child.name.match(/^ScreenRecording_(\d+)$/);
         if (recordingMatch) {
-          const index = parseInt(recordingMatch[1], 10);
+          const index = parseInt(recordingMatch[1], 10);         
           if (index > maxScreenRecordingIndex) {
             maxScreenRecordingIndex = index;
           }
@@ -122,9 +125,9 @@ function ensureFrame() {
   }
   
   // 尝试查找已存在的画板
-  const existingFrame = findFrameByName("iPhone Screenshots");
+  const existingFrame = findFrameByName("ScreenSync Screenshots");
   if (existingFrame) {
-    console.log('✅ 找到已存在的画板: iPhone Screenshots');
+    console.log('✅ 找到已存在的画板: ScreenSync Screenshots');
     currentFrame = existingFrame;
     
     // 确保画板使用 Auto Layout（如果还没有设置，或者设置不完整）
@@ -145,12 +148,18 @@ function ensureFrame() {
       if (customSizeSettings.columns && customSizeSettings.columns > 0) {
         currentFrame.layoutWrap = 'WRAP';
         currentFrame.counterAxisSizingMode = 'AUTO';
-        // 设置画板宽度为固定值，以触发换行
-        const estimatedItemWidth = CONFIG.imageWidth || 440;
-        const frameWidth = (estimatedItemWidth * customSizeSettings.columns) + (10 * (customSizeSettings.columns - 1));
-        currentFrame.layoutSizingHorizontal = 'FIXED';
-        currentFrame.resize(frameWidth, currentFrame.height || 800);
-        console.log(`   📐 画板宽度设置为 ${frameWidth}px（每行 ${customSizeSettings.columns} 张）`);
+        // 如果有子元素，根据第一个子元素的实际宽度计算；否则先使用 HUG，等第一张图片添加后再设置
+        if (currentFrame.children.length > 0) {
+          const firstChild = currentFrame.children[0];
+          const itemWidth = firstChild.width;
+          const itemSpacing = currentFrame.itemSpacing || 10;
+          const frameWidth = (itemWidth * customSizeSettings.columns) + (itemSpacing * (customSizeSettings.columns - 1));
+          currentFrame.layoutSizingHorizontal = 'FIXED';
+          currentFrame.resize(frameWidth, currentFrame.height || 800);
+        } else {
+          // 还没有子元素，先使用 HUG，等第一张图片添加后再根据实际宽度设置
+          currentFrame.layoutSizingHorizontal = 'HUG';
+        }
       } else {
         currentFrame.layoutWrap = 'NO_WRAP';
         currentFrame.layoutSizingHorizontal = 'HUG';
@@ -174,7 +183,7 @@ function ensureFrame() {
   
   try {
     const frame = figma.createFrame();
-    frame.name = "iPhone Screenshots";
+    frame.name = "ScreenSync Screenshots";
     
     // 设置 Auto Layout：水平方向，间距10
     frame.layoutMode = 'HORIZONTAL';
@@ -188,14 +197,9 @@ function ensureFrame() {
     if (customSizeSettings.columns && customSizeSettings.columns > 0) {
       frame.layoutWrap = 'WRAP';
       frame.counterAxisSizingMode = 'AUTO';
-      // 设置画板宽度为固定值，以触发换行
-      // 宽度 = (子元素宽度 * 列数) + (间距 * (列数 - 1))
-      // 使用 CONFIG.imageWidth 作为估算值（实际子元素宽度可能不同，但 Auto Layout 会自动调整）
-      const estimatedItemWidth = CONFIG.imageWidth || 440;
-      const frameWidth = (estimatedItemWidth * customSizeSettings.columns) + (10 * (customSizeSettings.columns - 1));
-      frame.layoutSizingHorizontal = 'FIXED';
-      frame.resize(frameWidth, frame.height || 800);
-      console.log(`   📐 画板宽度设置为 ${frameWidth}px（每行 ${customSizeSettings.columns} 张）`);
+      // 创建画板时先使用 HUG 模式，等第一张图片添加后根据实际宽度设置
+      // 这样可以确保画板宽度正好 hug 第一张图片的宽度
+      frame.layoutSizingHorizontal = 'HUG';
     } else {
       // 不换行，一直横着排
       frame.layoutWrap = 'NO_WRAP';
@@ -315,12 +319,31 @@ function adjustFrameSize() {
   
   if (newWidth !== currentFrame.width || newHeight !== currentFrame.height) {
     currentFrame.resize(newWidth, newHeight);
-    console.log(`📐 画板已调整为: ${newWidth}x${newHeight}`);
   }
 }
 
 figma.ui.onmessage = async (msg) => {
   console.log('📬 收到UI消息:', msg.type);
+  
+  // 处理插件版本信息请求
+  if (msg.type === 'get-plugin-version') {
+    figma.ui.postMessage({
+      type: 'plugin-version-info',
+      version: PLUGIN_VERSION
+    });
+    return;
+  }
+  
+  // 处理保存插件版本请求
+  if (msg.type === 'save-plugin-version') {
+    try {
+      await figma.clientStorage.setAsync('pluginVersion', msg.version);
+      console.log('✅ 插件版本已保存:', msg.version);
+    } catch (error) {
+      console.error('❌ 保存插件版本失败:', error);
+    }
+    return;
+  }
   
   // 处理尺寸设置更新
   if (msg.type === 'update-size-settings') {
@@ -435,11 +458,52 @@ figma.ui.onmessage = async (msg) => {
     return;
   }
   
+  // 处理保存服务器路径请求
+  if (msg.type === 'save-server-path') {
+    try {
+      if (msg.path) {
+        await figma.clientStorage.setAsync('serverPath', msg.path);
+        console.log('✅ 服务器路径已保存:', msg.path);
+      }
+    } catch (error) {
+      console.error('❌ 保存服务器路径失败:', error);
+    }
+    return;
+  }
+
+  // 处理读取服务器路径请求
+  if (msg.type === 'get-server-path') {
+    try {
+      const path = await figma.clientStorage.getAsync('serverPath');
+      console.log('📖 读取服务器路径:', path);
+      figma.ui.postMessage({
+        type: 'server-path-loaded',
+        path: path || null
+      });
+    } catch (error) {
+      console.error('❌ 读取服务器路径失败:', error);
+      figma.ui.postMessage({
+        type: 'server-path-loaded',
+        path: null
+      });
+    }
+    return;
+  }
+  
+  // 处理打开更新URL请求
+  if (msg.type === 'open-update-url') {
+    // Figma 插件无法直接打开外部链接，但可以显示提示
+    figma.notify(`请访问以下地址下载最新版本：\n${msg.url}`, { timeout: 10000 });
+    console.log('🔗 更新地址:', msg.url);
+    return;
+  }
+  
   // 处理窗口大小调整（用于最小化/恢复功能）
   if (msg.type === 'resize') {
     try {
-      const width = Math.max(320, Math.min(880, msg.width || 480));
-      const height = Math.max(60, Math.min(1200, msg.height || 700));
+      // 允许最小宽度为 80px（用于最小化状态），最大宽度为 880px
+      const width = Math.max(80, Math.min(880, msg.width || 480));
+      const height = Math.max(40, Math.min(1200, msg.height || 700));
       figma.ui.resize(width, height);
       console.log(`🪟 已调整UI尺寸: ${width}x${height}`);
     } catch (e) {
@@ -467,7 +531,7 @@ figma.ui.onmessage = async (msg) => {
     // 先清空 currentFrame，强制重新查找当前页面的画板
     currentFrame = null;
     
-    const frameName = "iPhone Screenshots";
+    const frameName = "ScreenSync Screenshots";
     const frame = findFrameByName(frameName);
     
     if (frame) {
@@ -475,7 +539,7 @@ figma.ui.onmessage = async (msg) => {
       currentFrame = frame;
       figma.currentPage.selection = [frame];
       figma.viewport.scrollAndZoomIntoView([frame]);
-      console.log('✅ 已定位到画板: iPhone Screenshots');
+      console.log('✅ 已定位到画板: ScreenSync Screenshots');
       
       figma.ui.postMessage({
         type: 'frame-located',
@@ -490,7 +554,7 @@ figma.ui.onmessage = async (msg) => {
       if (success && currentFrame) {
         figma.currentPage.selection = [currentFrame];
         figma.viewport.scrollAndZoomIntoView([currentFrame]);
-        console.log('✅ 已创建并定位到画板: iPhone Screenshots');
+        console.log('✅ 已创建并定位到画板: ScreenSync Screenshots');
         
         figma.ui.postMessage({
           type: 'frame-located',
@@ -713,18 +777,25 @@ figma.ui.onmessage = async (msg) => {
               rect.layoutSizingVertical = 'HUG';
               // 宽度已经在上面设置了 finalWidth，不需要再设置
               
-              // 每次添加子元素时，根据实际宽度重新计算画板宽度，确保画板宽度正好 hug 内容
+              // 根据第一张图片的实际宽度计算画板宽度
+              // 如果是第一张图片（画板只有这一张），根据这张图片的宽度设置画板宽度
               const itemSpacing = currentFrame.itemSpacing || 10;
               const frameWidth = (finalWidth * customSizeSettings.columns) + (itemSpacing * (customSizeSettings.columns - 1));
-              currentFrame.layoutSizingHorizontal = 'FIXED';
-              currentFrame.resize(frameWidth, currentFrame.height || 800);
-              console.log(`   📐 根据实际子元素宽度 ${finalWidth}px 重新计算画板宽度为 ${frameWidth}px（每行 ${customSizeSettings.columns} 张）`);
               
-              console.log(`   📐 子元素宽度设置为固定值 ${finalWidth}px，每行 ${customSizeSettings.columns} 张`);
+              // 只有当这是第一张图片时，才设置画板宽度
+              // 或者如果画板当前是 HUG 模式，也需要设置
+              if (currentFrame.children.length === 1 || currentFrame.layoutSizingHorizontal === 'HUG') {
+                currentFrame.layoutSizingHorizontal = 'FIXED';
+                currentFrame.resize(frameWidth, currentFrame.height || 800);
+              }
             } else {
-              // 不换行，子元素可以自由扩展
+              // 不换行，子元素可以自由扩展，画板宽度自动 hug 内容
               rect.layoutSizingHorizontal = 'HUG';
               rect.layoutSizingVertical = 'HUG';
+              // 确保画板也是 HUG 模式
+              if (currentFrame.layoutSizingHorizontal !== 'HUG') {
+                currentFrame.layoutSizingHorizontal = 'HUG';
+              }
             }
           } catch (layoutError) {
             // 如果设置 layoutSizing 失败，记录错误但继续执行
@@ -818,7 +889,10 @@ figma.ui.onmessage = async (msg) => {
     figma.ui.postMessage({ 
       type: 'plugin-closing'
     });
-    figma.closePlugin('已同步 ' + screenshotCount + ' 张截图');
+    // 延迟关闭，确保停止命令有时间发送
+    setTimeout(() => {
+      figma.closePlugin('已同步 ' + screenshotCount + ' 张截图');
+    }, 200);
   }
   
   if (msg.type === 'stop-realtime') {

@@ -89,7 +89,7 @@ Thumbs.db
 
 # 部署文件
 deploy-web/
-FigmaSync-UserPackage.tar.gz
+ScreenSync-UserPackage.tar.gz
 
 # 临时文件
 *.tmp

@@ -4,6 +4,7 @@ const { Readable } = require('stream');
 const SCOPES = ['https://www.googleapis.com/auth/drive'];
 
 let driveInstance = null;
+let authClient = null;
 
 function resolveServiceAccount() {
   const envEmail = process.env.GDRIVE_CLIENT_EMAIL;
@@ -35,13 +36,13 @@ function resolveServiceAccount() {
 function createDriveClient() {
   const credentials = resolveServiceAccount();
 
-  const auth = new google.auth.JWT({
+  authClient = new google.auth.JWT({
     email: credentials.client_email,
     key: credentials.private_key,
     scopes: SCOPES
   });
 
-  return google.drive({ version: 'v3', auth });
+  return google.drive({ version: 'v3', auth: authClient });
 }
 
 function getDriveClient() {
@@ -65,12 +66,13 @@ async function uploadBuffer({ buffer, filename, mimeType = 'image/jpeg', folderI
   }
 
   const drive = getDriveClient();
-  const fileSizeMB = (buffer.length / 1024 / 1024).toFixed(2);
+  const fileSizeBytes = buffer.length;
+  const fileSizeMB = fileSizeBytes / 1024 / 1024;
   const isVideo = mimeType && mimeType.toLowerCase().startsWith('video/');
 
   // 记录上传信息
   if (isVideo) {
-    console.log(`   🎥 [Drive API] 准备上传视频: ${filename} (${fileSizeMB}MB, MIME: ${mimeType})`);
+    console.log(`   🎥 [Drive API] 准备上传视频: ${filename} (${fileSizeMB.toFixed(2)}MB, MIME: ${mimeType})`);
   }
 
   // 将 Buffer 转换为 Stream（Google Drive API 需要）
@@ -79,42 +81,90 @@ async function uploadBuffer({ buffer, filename, mimeType = 'image/jpeg', folderI
   // 检查是否是共享驱动器（以 '0A' 开头的是共享驱动器 ID）
   const isSharedDrive = folderId.startsWith('0A') || folderId.length === 33;
 
+  // 优化：只返回必要的字段，减少响应大小和处理时间
+  // 优先使用普通上传（更快），只有文件过大时才使用分块上传
+  const isGif = mimeType && mimeType.toLowerCase() === 'image/gif';
+  
+  // 设置阈值：超过 5MB 就使用分块上传（Google 推荐 > 5MB 使用 resumable）
+  // 之前设置为 100MB，导致 20MB+ 文件使用普通上传容易失败
+  const USE_RESUMABLE_THRESHOLD = 5 * 1024 * 1024; // 5MB
+  const useResumable = fileSizeBytes > USE_RESUMABLE_THRESHOLD;
+  
   const requestBody = {
     name: filename,
     parents: [folderId]
   };
-
-  // 优化：只返回必要的字段，减少响应大小和处理时间
+  
+  // 对于共享驱动器，确保在 requestBody 中也设置相关参数（分块上传需要）
+  if (isSharedDrive || supportsAllDrives) {
+    // 共享驱动器不需要额外设置，但确保 parents 正确
+  }
+  
   const params = {
     requestBody,
     media: {
       mimeType,
-      body: stream
+      body: stream,
+      // 只有超过阈值的大文件才使用分块上传
+      resumable: useResumable
     },
     fields: 'id,name' // 返回文件ID和名称，用于验证
   };
 
+  // 对于共享驱动器，必须设置这些参数（特别是分块上传时）
   if (isSharedDrive || supportsAllDrives) {
     params.supportsAllDrives = true;
     params.supportsTeamDrives = true; // 兼容旧版 API
+    // 分块上传时，确保这些参数也正确传递
+    if (useResumable) {
+      // 确保 requestBody 中的 parents 是数组格式
+      if (!Array.isArray(requestBody.parents)) {
+        requestBody.parents = [folderId];
+      }
+    }
   }
 
   try {
-    // 对于大文件（>5MB），Google Drive API 会自动使用分块上传
-    // 设置更长的超时时间用于视频文件
-    // 大文件（视频和 GIF）需要更长的超时时间
-    const isGif = mimeType && mimeType.toLowerCase() === 'image/gif';
+    // 优先速度：小文件使用普通上传，大文件使用分块上传
+    // 根据文件大小和上传方式动态设置超时时间
     const isLargeFile = isVideo || isGif;
-    const timeout = isLargeFile ? 120000 : 30000; // 大文件120秒，其他30秒
     
-    if (isVideo) {
-      console.log(`   🎥 [Drive API] 开始上传视频文件（超时: ${timeout/1000}秒）...`);
-    } else if (isGif) {
-      console.log(`   🎬 [Drive API] 开始上传 GIF 文件（超时: ${timeout/1000}秒）...`);
+    // 根据文件大小和上传方式计算超时时间
+    // 优化：增加大文件的超时时间，特别是对于 resumable uploads
+    let timeout = 30000; // 默认30秒
+    if (isLargeFile || fileSizeBytes > 5 * 1024 * 1024) {
+      if (useResumable) {
+        // 分块上传：每MB给30秒，最小180秒，最大1800秒（30分钟）
+        // Resumable upload 可以在网络不稳定时恢复，但整个请求不能超时太快
+        timeout = Math.max(180000, Math.min(1800000, fileSizeMB * 30 * 1000));
+      } else {
+        // 普通上传：每MB给15秒，最小90秒，最大600秒（10分钟）- 更快
+        timeout = Math.max(90000, Math.min(600000, fileSizeMB * 15 * 1000));
+      }
     }
     
+    const uploadType = useResumable ? '分块上传' : '普通上传';
+    if (isVideo) {
+      console.log(`   🎥 [Drive API] 开始上传视频文件（${fileSizeMB.toFixed(2)}MB, ${uploadType}, 超时: ${timeout/1000}秒, 共享驱动器: ${isSharedDrive}）...`);
+    } else if (isGif) {
+      console.log(`   🎬 [Drive API] 开始上传 GIF 文件（${fileSizeMB.toFixed(2)}MB, ${uploadType}, 超时: ${timeout/1000}秒, 共享驱动器: ${isSharedDrive}）...`);
+    } else if (useResumable) {
+      console.log(`   📤 [Drive API] 开始分块上传大文件（${fileSizeMB.toFixed(2)}MB, 超时: ${timeout/1000}秒, 共享驱动器: ${isSharedDrive}）...`);
+    }
+    
+    // 使用 v3 API 的 create 方法，它会自动处理 resumable uploads 的 chunking
+    // googleapis 库内部会根据 media.body 的流类型和大小自动优化
     const response = await drive.files.create(params, {
-      timeout: timeout
+      // timeout 是整个请求的超时
+      timeout: timeout,
+      // 对于大文件，可以设置 maxRedirects 增加稳定性
+      maxRedirects: 5,
+      // 重试配置
+      retryConfig: {
+        retry: 3,
+        statusCodesToRetry: [[100, 199], [429, 429], [500, 599]],
+        retryDelay: 1000
+      }
     });
 
     if (isVideo) {
@@ -125,25 +175,119 @@ async function uploadBuffer({ buffer, filename, mimeType = 'image/jpeg', folderI
 
     return response.data;
   } catch (error) {
-    // 提供更详细的错误信息
-    const errorInfo = {
-      message: error.message,
-      code: error.code,
-      filename,
-      mimeType,
-      folderId,
-      fileSizeMB
-    };
+    // 检查是否是网络相关的错误或超时
+    const isNetworkError = error.code === 'ECONNRESET' || 
+                          error.code === 'ETIMEDOUT' || 
+                          error.code === 'EPIPE' || 
+                          error.message.includes('socket hang up') ||
+                          error.message.includes('timeout') ||
+                          error.message.includes('Connection lost');
+
+    // 只要是大文件（> 5MB 或 isVideo/isGif），无论之前是用普通还是分块，失败后都尝试用分块重试
+    // 注意：如果之前已经是分块上传且失败了，我们依然重试一次，因为网络波动很常见
+    const LARGE_FILE_THRESHOLD = 5 * 1024 * 1024; // 5MB
+    const shouldRetry = fileSizeBytes > LARGE_FILE_THRESHOLD || isGif || isVideo;
     
-    if (isVideo) {
-      console.error(`   ❌ [Drive API] 视频文件上传失败:`, errorInfo);
-      if (error.response) {
-        console.error(`      - 状态码: ${error.response.status}`);
-        console.error(`      - 响应数据:`, JSON.stringify(error.response.data, null, 2));
+    if (shouldRetry) {
+      console.log(`   ⚠️  [Drive API] 上传中断 (${error.code || error.message})，正在尝试重新上传...`);
+      
+      // 重新创建 stream（之前的 stream 可能已经消耗或损坏）
+      const retryStream = Readable.from(buffer);
+      
+      // 使用分块上传重试
+      const retryRequestBody = {
+        name: filename,
+        parents: [folderId]
+      };
+      
+      const retryParams = {
+        requestBody: retryRequestBody,
+        media: {
+          mimeType,
+          body: retryStream,
+          resumable: true // 强制使用分块上传
+        },
+        fields: 'id,name'
+      };
+      
+      // 对于共享驱动器，确保设置正确的参数
+      if (isSharedDrive || supportsAllDrives) {
+        retryParams.supportsAllDrives = true;
+        retryParams.supportsTeamDrives = true;
+      }
+      
+      // 增加超时时间（分块上传需要更长时间），给重试更多机会
+      const retryTimeout = Math.max(300000, Math.min(3600000, fileSizeMB * 60 * 1000)); // 最小5分钟，最大1小时
+      
+      try {
+        const retryResponse = await drive.files.create(retryParams, {
+          timeout: retryTimeout,
+          retryConfig: {
+            retry: 5, // 增加重试次数到 5
+            statusCodesToRetry: [[100, 199], [408, 408], [429, 429], [500, 599], ['ECONNRESET', 'ETIMEDOUT']], // 尝试包含网络错误代码
+            retryDelay: 2000, // 增加重试延迟
+            onRetryAttempt: (err) => {
+                console.log(`      Checking retry attempt: ${err.code || err.message}`);
+            }
+          }
+        });
+        
+        if (isVideo) {
+          console.log(`   ✅ [Drive API] 视频文件上传成功（重试后）: ${filename} (文件ID: ${retryResponse.data.id})`);
+        } else if (isGif) {
+          console.log(`   ✅ [Drive API] GIF 文件上传成功（重试后）: ${filename} (文件ID: ${retryResponse.data.id})`);
+        } else {
+           console.log(`   ✅ [Drive API] 文件上传成功（重试后）: ${filename} (文件ID: ${retryResponse.data.id})`);
+        }
+        
+        return retryResponse.data;
+      } catch (retryError) {
+        console.error(`   ❌ [Drive API] 重试上传也失败: ${retryError.message}`);
+        // 记录两次错误的详情，便于调试
+        console.error(`      原始错误: ${error.message}`);
+        // 继续抛出重试的错误
+        throw retryError;
       }
     }
     
-    throw new Error(`Google Drive 上传失败: ${error.message} (文件: ${filename}, 大小: ${fileSizeMB}MB)`);
+    // 提供更详细的错误信息
+    const errorMessage = error.message || String(error);
+    const errorCode = error.code || 'UNKNOWN';
+    const statusCode = error.response?.status || 'N/A';
+    const responseData = error.response?.data ? JSON.stringify(error.response.data) : 'N/A';
+    
+    if (isVideo) {
+      console.error(`   ❌ [Drive API] 视频文件上传失败:`);
+      console.error(`      - 文件名: ${filename}`);
+      console.error(`      - 大小: ${fileSizeMB.toFixed(2)}MB`);
+      console.error(`      - MIME类型: ${mimeType}`);
+      console.error(`      - 错误消息: ${errorMessage}`);
+      console.error(`      - 错误代码: ${errorCode}`);
+      console.error(`      - HTTP状态码: ${statusCode}`);
+      if (error.response?.data) {
+        console.error(`      - 响应数据: ${responseData}`);
+      }
+    } else if (isGif) {
+      console.error(`   ❌ [Drive API] GIF 文件上传失败:`);
+      console.error(`      - 文件名: ${filename}`);
+      console.error(`      - 大小: ${fileSizeMB.toFixed(2)}MB`);
+      console.error(`      - MIME类型: ${mimeType}`);
+      console.error(`      - 错误消息: ${errorMessage}`);
+      console.error(`      - 错误代码: ${errorCode}`);
+      console.error(`      - HTTP状态码: ${statusCode}`);
+      if (error.response?.data) {
+        console.error(`      - 响应数据: ${responseData}`);
+      }
+    } else {
+      console.error(`   ❌ [Drive API] 文件上传失败:`);
+      console.error(`      - 文件名: ${filename}`);
+      console.error(`      - 大小: ${fileSizeMB.toFixed(2)}MB`);
+      console.error(`      - 错误消息: ${errorMessage}`);
+      console.error(`      - 错误代码: ${errorCode}`);
+      console.error(`      - HTTP状态码: ${statusCode}`);
+    }
+    
+    throw new Error(`Google Drive 上传失败: ${errorMessage} (文件: ${filename}, 大小: ${fileSizeMB.toFixed(2)}MB)`);
   }
 }
 
@@ -356,12 +500,91 @@ async function getFileInfo(fileId, supportsAllDrives = true) {
   return response.data;
 }
 
+/**
+ * 获取断点续传上传链接 (Resumable Upload URL)
+ * @param {Object} params
+ * @param {string} params.filename - 文件名
+ * @param {string} params.mimeType - 文件类型
+ * @param {string} params.folderId - 目标文件夹ID
+ * @param {boolean} params.supportsAllDrives - 是否支持共享驱动器
+ * @returns {Promise<string>} 上传链接 (session URI)
+ */
+async function getResumableUploadUrl({ filename, mimeType, folderId, supportsAllDrives = true }) {
+  if (!filename || !folderId) {
+    throw new Error('getResumableUploadUrl 缺少 filename 或 folderId');
+  }
+
+  const drive = getDriveClient();
+  
+  // 获取 Access Token
+  // 确保 authClient 已初始化
+  if (!authClient) {
+     // 如果 driveInstance 已经存在但 authClient 为空（极少见情况），重新初始化
+     createDriveClient();
+  }
+  
+  if (!authClient) {
+    throw new Error('Google Drive Auth Client 未初始化');
+  }
+
+  // 使用 authorize() 确保已连接，然后获取 token
+  // JWT 客户端使用 authorize() 而不是 getAccessToken()
+  const credentials = await authClient.authorize();
+  const token = credentials.access_token;
+  
+  if (!token) {
+    throw new Error('无法获取 Google Access Token');
+  }
+
+  // 检查是否是共享驱动器
+  const isSharedDrive = folderId.startsWith('0A') || folderId.length === 33;
+
+  // 构造元数据
+  const metadata = {
+    name: filename,
+    parents: [folderId],
+    mimeType: mimeType || 'application/octet-stream'
+  };
+
+  // 构造请求 URL
+  let url = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable';
+  if (isSharedDrive || supportsAllDrives) {
+    url += '&supportsAllDrives=true&supportsTeamDrives=true';
+  }
+
+  // 发起初始化请求
+  // 注意：这里使用 fetch 手动发起请求，因为我们需要获取 Header 中的 Location
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      'X-Upload-Content-Type': mimeType || 'application/octet-stream'
+    },
+    body: JSON.stringify(metadata)
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`初始化断点续传失败: ${response.status} ${response.statusText} - ${errorText}`);
+  }
+
+  // 获取上传链接
+  const uploadUrl = response.headers.get('Location');
+  if (!uploadUrl) {
+    throw new Error('Google Drive API 未返回 Location Header');
+  }
+
+  console.log(`   🔗 [Drive API] 已生成断点续传链接: ${filename}`);
+  return uploadUrl;
+}
+
 module.exports = {
   uploadBuffer,
   listFolderFiles,
   downloadFileBuffer,
   trashFile,
   createFolder,
-  getFileInfo
+  getFileInfo,
+  getResumableUploadUrl
 };
-

@@ -4,656 +4,1233 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>iPhone 截图同步 · Apple 风格</title>
+  <title>ScreenSync</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Staatliches&family=Archivo+Black&display=swap" rel="stylesheet">
   <style>
     /*========================
-      Apple-like Visual System
+      Design System: Lab / Apple Hybrid
     ========================*/
     :root {
-      --bg: #f5f5f7;
-      /* macOS / iOS background gray */
-      --surface: #ffffff;
-      /* card surface */
-      --text: #000000;
-      /* primary text */
-      --subtext: #6e6e73;
-      /* secondary text */
-      --separator: #e5e5ea;
-      /* separator lines */
-      --accent: #0a84ff;
-      /* iOS system blue */
-      --accent-hover: #0066d6;
-      /* hover blue */
-      --success-bg: #e6f7ec0a;
-      --success-fg: #1d7a41;
-      --warn-bg: #fff6e60a;
-      --warn-fg: #9f5b00;
-      --info-bg: #e7f1ff0a;
-      --info-fg: #0b66c3;
-      --danger: #ff3b30;
-      --radius: 12px;
-      /* rounded corners */
-      --radius-lg: 16px;
-      --shadow-sm: 0 1px 2px rgba(0, 0, 0, .06), 0 1px 1px rgba(0, 0, 0, .04);
-      --shadow-md: 0 10px 30px rgba(0, 0, 0, .08);
-      --shadow-focus: 0 0 0 4px rgba(10, 132, 255, .18);
+      /* Colors */
+      --bg-app: #F5F5F7;
+      --bg-card: #FFFFFF;
+      --bg-card-hover: #FDFDFD;
+      
+      /* Logo Colors */
+      --logo-color-primary: #007AFF;
+      --logo-color-secondary: #FFFFFF;
+
+      --text-primary: #1D1D1F;
+      --text-secondary: #86868B;
+      --text-tertiary: #AEAEB2;
+      
+      --accent: #007AFF;
+      --accent-gradient: linear-gradient(135deg, #007AFF, #0062CC);
+      --accent-soft: rgba(0, 122, 255, 0.1);
+      
+      --success: #34C759;
+      --success-bg: rgba(52, 199, 89, 0.1);
+      
+      --warning: #FF9500;
+      --warning-bg: rgba(255, 149, 0, 0.1);
+      
+      --danger: #FF3B30;
+      --danger-bg: rgba(255, 59, 48, 0.1);
+      
+      --divider: rgba(0, 0, 0, 0.05);
+      --border: rgba(0, 0, 0, 0.08);
+      
+      /* Shadows */
+      --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+      --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.06);
+      --shadow-lg: 0 15px 48px rgba(0, 0, 0, 0.1);
+      --shadow-inner: inset 0 1px 1px rgba(255,255,255,0.5);
+      
+      /* Radius */
+      --radius-s: 8px;
+      --radius-m: 16px;
+      --radius-l: 24px;
+      
+      /* Animation */
+      --ease-spring: cubic-bezier(0.25, 0.8, 0.25, 1);
+      --ease-out: cubic-bezier(0.33, 1, 0.68, 1);
     }
 
     @media (prefers-color-scheme: dark) {
       :root {
-        --bg: #000000;
-        --surface: #1c1c1e;
-        --text: #ffffff;
-        --subtext: #9a9aa0;
-        --separator: #2c2c2e;
-        --accent: #0a84ff;
-        --accent-hover: #0a6ed1;
-        --success-bg: rgba(52, 199, 89, 0.2);
-        --success-fg: #34c759;
-        --warn-bg: rgba(255, 159, 10, .2);
-        --warn-fg: #ff9f0a;
-        --info-bg: rgba(10, 132, 255, .2);
-        --info-fg: #0a84ff;
-        --danger: #ff453a;
-        --shadow-sm: 0 1px 2px rgba(0, 0, 0, .5);
-        --shadow-md: 0 10px 30px rgba(0, 0, 0, .6);
+        --bg-app: #121212;
+        --bg-card: #1C1C1E;
+        --bg-card-hover: #2C2C2E;
+        
+        /* Logo Colors Dark Mode */
+        --logo-color-primary: #0051D5;
+        --logo-color-secondary: #1C1C1E;
+
+        --text-primary: #F5F5F7;
+        --text-secondary: #8E8E93;
+        --text-tertiary: #48484A;
+        
+        --divider: rgba(255, 255, 255, 0.08);
+        --border: rgba(255, 255, 255, 0.12);
+        
+        --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+        --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.4);
       }
     }
 
     * {
       box-sizing: border-box;
-    }
-
-    html,
-    body {
-      height: auto;
-      min-height: 0;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
     }
 
     body {
       margin: 0;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      -webkit-font-smoothing: antialiased;
-      -moz-osx-font-smoothing: grayscale;
-      letter-spacing: .02em;
+      padding: 0;
+      font-family: "SF Pro Text", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif;
+      background: var(--bg-app);
+      color: var(--text-primary);
+      font-size: 13px;
+      line-height: 1.4;
+      overflow: hidden; /* Fixed height app */
+      user-select: none;
     }
 
-    /* App Frame */
+    /* Layout */
     .app {
-      max-width: 880px;
-      margin: 32px auto;
-      padding: 0 20px;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      padding: 16px;
+      gap: 8px;
+      transition: all 0.4s var(--ease-spring);
+    }
+
+    .app.minimized {
+      padding: 0;
+      background: transparent;
+    }
+    
+    .app.minimized .main-content,
+    .app.minimized .status-bar {
+      display: none;
+    }
+
+    /* Header */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 4px;
+      flex-shrink: 0;
+      height: 32px; /* Fixed header height */
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .logo-box {
+      /* width: 28px;
+      height: 28px; */
+      /* border-radius: var(--radius-s); */
+      /* background: var(--bg-card);
+      border: 1px solid var(--border); */
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      /* box-shadow: var(--shadow-sm); */
+    }
+    
+    .logo-box img {
+        display: block;
+        width: 18px;
+        height: 18px;
+    }
+
+    .app-title {
+      font-family: 'Archivo Black', sans-serif;
+      font-weight: 400;
+      font-size: 15px;
+      letter-spacing: -0.01em;
+      margin-top: 2px;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    .connection-pill {
+      font-size: 12px;
+      padding: 4px 10px;
+      border-radius: 100px;
+      background: rgba(0, 0, 0, 0.08);
+      color: var(--text-secondary);
+      font-weight: 500;
+      transition: all 0.3s ease;
+      height: 24px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    
+    .connection-pill::before {
+      content: '';
+        display: block;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+        background-color: currentColor;
+      opacity: 0.5;
+    }
+
+    .connection-pill:empty {
+        display: none;
+    }
+
+    .connection-pill.connected {
+        background: rgba(52, 199, 89, 0.15);
+      color: var(--success);
+    }
+    
+    .connection-pill.connected::before {
+      opacity: 1;
+        box-shadow: 0 0 6px rgba(52, 199, 89, 0.5);
+    }
+    
+    .connection-pill.waiting {
+        background: rgba(255, 149, 0, 0.15);
+        color: var(--warning);
+    }
+    
+    .connection-pill.waiting::before {
+        opacity: 1;
+        box-shadow: 0 0 6px rgba(255, 149, 0, 0.5);
+    }
+    
+    /* 减少右箭头和文字之间的间距 */
+    .connection-pill svg {
+        margin-left: -4px;
+        margin-right: -4px;
+    }
+
+    @media (prefers-color-scheme: dark) {
+        .connection-pill {
+            background: rgba(255, 255, 255, 0.1);
+            color: var(--text-secondary);
+        }
+        .connection-pill.connected {
+            background: rgba(52, 199, 89, 0.2);
+        }
+        .connection-pill.waiting {
+            background: rgba(255, 149, 0, 0.2);
+        }
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .icon-btn {
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      border: none;
+      background: transparent;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      opacity: 0.6;
+    }
+
+    .icon-btn:hover {
+      background: rgba(0,0,0,0.05);
+      opacity: 1;
+    }
+    
+    @media (prefers-color-scheme: dark) {
+        .icon-btn:hover {
+            background: rgba(255,255,255,0.1);
+        }
+    }
+
+    /* Update Banner */
+    .update-banner {
+      display: none;
+      background: linear-gradient(135deg, var(--accent) 0%, #0066FF 100%);
+      color: white;
+      padding: 10px 12px;
+      font-size: 12px;
+      line-height: 1.4;
+      border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+      animation: slideDown 0.3s ease;
+      flex-shrink: 0;
+    }
+
+    .update-banner.show {
+      display: block;
+    }
+
+    @keyframes slideDown {
+      from {
+        opacity: 0;
+        transform: translateY(-10px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .update-banner-content {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .update-banner-info {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .update-banner-icon {
+      width: 16px;
+      height: 16px;
+      flex-shrink: 0;
+    }
+
+    .update-banner-text {
+      flex: 1;
+    }
+
+    .update-banner-title {
+      font-weight: 600;
+      margin-bottom: 2px;
+    }
+
+    .update-banner-version {
+      font-size: 11px;
+      opacity: 0.9;
+    }
+
+    .update-banner-actions {
+      display: flex;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
+    .update-banner-btn {
+      padding: 6px 12px;
+      border-radius: var(--radius-s);
+      font-size: 11px;
+      font-weight: 600;
+      border: none;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      white-space: nowrap;
+    }
+
+    .update-banner-btn.primary {
+      background: white;
+      color: var(--accent);
+    }
+
+    .update-banner-btn.primary:hover {
+      background: rgba(255, 255, 255, 0.9);
+      transform: translateY(-1px);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    }
+
+    .update-banner-btn.secondary {
+      background: rgba(255, 255, 255, 0.2);
+      color: white;
+    }
+
+    .update-banner-btn.secondary:hover {
+      background: rgba(255, 255, 255, 0.3);
+    }
+
+    .update-banner-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    /* Main Content Area */
+    .main-content {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* Mode Selection View */
+    .mode-selection {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      height: 100%;
+      animation: zoomIn 0.4s var(--ease-out);
+      text-align: center;
+    }
+
+    .section-title {
+      font-size: 15px;
+      font-weight: 700;
+      margin: 0 0 4px 0;
+      letter-spacing: -0.02em;
+    }
+
+    .section-desc {
+      color: var(--text-secondary);
+        font-size: 12px;
+        margin-bottom: 8px;
+    }
+
+    .card-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+    }
+
+    .feature-card {
+      background: var(--bg-card);
+      border: 1px solid transparent;
+      border-radius: var(--radius-m);
+      padding: 15px;
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      justify-content: space-between;
+      text-align: left;
+      gap: 0;
+      cursor: pointer;
+      transition: all 0.3s var(--ease-spring);
+      box-shadow: var(--shadow-sm);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .feature-card:hover {
+      transform: translateY(-2px);
+      box-shadow: var(--shadow-md);
+    }
+
+    .card-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%; /* Circular icons */
+      /* background: var(--bg-app); */
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      transition: all 0.3s ease;
+      margin-bottom: 0;
+      margin-right: 12px;
+    }
+    
+    .card-icon img {
+        width: 24px;
+        height: 24px;
+    }
+
+    .card-content {
+      flex: 1;
+      width: 100%;
+    }
+
+    .card-title {
+      font-weight: 600;
+      font-size: 14px;
+      margin-bottom: 2px;
+      color: var(--text-primary);
+    }
+
+    .card-desc {
+      font-size: 12px;
+      color: var(--text-secondary);
+      line-height: 1.4;
+    }
+
+    /* Upload mode cards - centered titles */
+    .feature-card.mode-card {
+      align-items: center;
+    }
+    
+    .feature-card.mode-card .card-icon {
+      margin-right: 0;
+      margin-bottom: 4px;
+    }
+    
+    .feature-card.mode-card .card-content {
+      text-align: center;
+    }
+    
+    .feature-card.mode-card .card-title {
+      text-align: center;
+    }
+    
+    .feature-card.mode-card .card-desc {
+      text-align: center;
+    }
+
+    /* Selected Checkmark */
+    .checkmark {
+      position: absolute;
+      top: 0;
+      right: 0;
+      background: var(--accent);
+      width: 24px;
+      height: 24px;
+      border-bottom-left-radius: calc(var(--radius-m) - 1px);
+      border-top-right-radius: calc(var(--radius-m) - 1px); /* Match card radius */
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 10;
+    }
+
+    .checkmark svg {
+      width: 14px;
+      height: 14px;
+      color: white;
+    }
+
+    .feature-card.selected .checkmark {
+      display: flex;
+    }
+    
+    .chevron {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-tertiary);
+      margin-left: 8px;
+    }
+    
+    .chevron svg {
+        width: 20px; 
+        height: 20px;
+    }
+
+    /* Work Area View */
+    .work-area {
+      display: none;
+      flex-direction: column;
+      height: 100%;
+      animation: zoomIn 0.4s var(--ease-spring);
+    }
+    
+    .work-area.active {
+      display: flex;
+    }
+
+    /* Compact Status Hero - Optimized Layout */
+    .status-hero {
+      background: var(--bg-card);
+      border-radius: var(--radius-m);
+      padding: 16px 16px 20px 16px;
+      /* border: 1px solid var(--border); */
+      box-shadow: var(--shadow-sm);
+      position: relative;
+      overflow: hidden;
       display: flex;
       flex-direction: column;
       gap: 16px;
     }
 
-    /* 最小化状态 */
-    .app.minimized .mode-selection,
-    .app.minimized .work-area {
-      display: none;
-    }
-
-    .app.minimized {
-      margin: 0;
-      padding: 0;
-      gap: 0;
-    }
-
-    .app.minimized .toolbar {
-      margin: 0;
-      border-radius: 0;
-      border-left: none;
-      border-right: none;
-      border-top: none;
-    }
-
-    /* Toolbar */
-    .toolbar {
+    .hero-header {
       display: flex;
       align-items: center;
-      justify-content: space-between;
-      padding: 14px 16px;
-      background: var(--surface);
-      border: 1px solid var(--separator);
-      border-radius: var(--radius-lg);
-      box-shadow: var(--shadow-sm);
-      z-index: 2;
-      backdrop-filter: saturate(180%) blur(20px);
+        justify-content: space-between;
+        width: 100%;
     }
-
-    .title {
+    
+    .hero-mode-info {
       display: flex;
       align-items: center;
-      gap: 10px;
+        gap: 8px;
+    }
+    
+    /* New compact mode icon */
+    .hero-icon-sm {
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+      display: flex;
+      align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+    }
+    
+    .hero-icon-sm svg {
+        width: 12px;
+        height: 12px;
+    }
+
+    .hero-mode-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--text-primary);
+    }
+
+    /* Main metric layout */
+    .hero-main-metric {
+      display: flex;
+        align-items: baseline;
+        justify-content: center;
+        gap: 8px;
+        padding: 8px 0;
+    }
+
+    .count-display {
+      font-size: 48px;
       font-weight: 700;
-      font-size: 17px;
-      flex-wrap: wrap;
+      letter-spacing: -0.02em;
+      color: var(--text-primary);
+      line-height: 1;
+      font-variant-numeric: tabular-nums;
     }
 
-    .subtitle-top {
-      color: var(--subtext);
-      font-size: 13px;
+    .metric-label {
+        font-size: 13px;
+        color: var(--text-secondary);
+        font-weight: 500;
+    }
+
+    /* Action buttons container */
+    .action-buttons {
       display: flex;
-      align-items: center;
-      gap: 4px;
-    }
-
-    .pill {
-      padding: 6px 10px;
-      border: 1px solid var(--separator);
-      border-radius: 999px;
-      font-size: 12px;
-      color: var(--subtext);
-    }
-
-    /* Card */
-    .card {
-      background: var(--surface);
-      border: 1px solid var(--separator);
-      border-radius: var(--radius-lg);
-      box-shadow: var(--shadow-md);
-    }
-
-    .section {
-      padding: 20px;
-    }
-
-    .section+.section {
-      border-top: 1px solid var(--separator);
-    }
-
-    /* Mode selection */
-    .mode-selection {
-      display: block;
-    }
-
-    .mode-selection.hidden {
-      display: none;
-    }
-
-    .mode-head {
-      padding: 20px;
-    }
-
-    .modeTitleContainer {
-      display: flex;
-      align-items: center;
+      flex-direction: column;
       gap: 8px;
-      font-weight: 700;
-      font-size: 17px;
-      flex-wrap: wrap;
+      margin-top: auto; /* Push to bottom */
     }
 
-    #modeTitle {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    #modeTitle .mode-icon {
-      width: 20px;
-      height: 20px;
-      margin-bottom: 0;
-    }
-
-    .mode-subtitle {
-      font-size: 13px;
-      color: var(--subtext);
-    }
-
-    .mode-grid {
-      padding: 0px 20px 20px 20px;
-      display: grid;
-      grid-template-columns: 1fr;
-      gap: 16px;
-    }
-
-    @media (min-width: 640px) {
-      .mode-grid {
-        grid-template-columns: 1fr 1fr;
-      }
-    }
-
-    .mode-button {
+    .btn {
       width: 100%;
-      padding: 16px;
-      border: 1px solid var(--separator);
-      border-radius: var(--radius);
+      padding: 12px;
+      border-radius: var(--radius-s);
+      font-size: 13px;
+      font-weight: 600;
       cursor: pointer;
-      transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease, background .16s ease;
-      background: linear-gradient(180deg,
-          color-mix(in srgb, var(--surface) 90%, white 10%) 0%,
-          color-mix(in srgb, var(--surface) 90%, white 10%) 100%);
-      text-align: left;
-      box-shadow: var(--shadow-sm);
-      position: relative;
-      overflow: hidden;
-    }
-
-    .mode-button:hover {
-      border-color: var(--accent);
-      box-shadow: 0 8px 24px rgba(10, 132, 255, .12);
-      transform: translateY(-1px);
-    }
-
-    .mode-button:active {
-      transform: translateY(0);
-    }
-
-    .mode-button:focus-visible {
-      outline: none;
-      box-shadow: var(--shadow-focus);
-    }
-
-    .mode-button.selected {
-      border-color: var(--accent);
-      background: linear-gradient(180deg,
-          color-mix(in srgb, var(--accent) 8%, var(--surface) 92%) 0%,
-          color-mix(in srgb, var(--accent) 8%, var(--surface) 92%) 100%);
-      box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.15), var(--shadow-sm);
-    }
-
-    .mode-button.selected:hover {
-      border-color: var(--accent);
-      box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.2), 0 8px 24px rgba(10, 132, 255, .12);
-    }
-
-    .mode-icon {
-      width: 68px;
-      height: 68px;
-      position: absolute;
-      bottom: -8px;
-      right: -8px;
+      border: 1px solid transparent;
       display: flex;
       align-items: center;
       justify-content: center;
-      opacity: 0.3;
-      pointer-events: none;
+      gap: 6px;
+      transition: all 0.2s var(--ease-spring);
     }
 
-    .mode-icon img {
-      width: 100%;
-      height: 100%;
-      display: block;
-      object-fit: contain;
-    }
-
-    .logo-icon {
-      width: 20px;
-      height: 20px;
-      display: inline-flex;
-      align-items: center;
-      vertical-align: middle;
-    }
-
-    .logo-icon svg,
-    .logo-icon img {
-      width: 100%;
-      height: 100%;
-      display: block;
-    }
-
-    /* 图标主题适配 - 单色图标在 dark mode 下反转颜色 */
-    .text-link img,
-    .logo-icon img {
-      transition: filter 0.2s ease;
-    }
-
-    @media (prefers-color-scheme: dark) {
-      /* 单色图标在 dark mode 下反转为白色 */
-      .text-link img:not(.no-invert),
-      .logo-icon img:not(.no-invert) {
-        filter: invert(1) brightness(1);
-      }
-    }
-
-    .mode-button-title {
-      font-size: 16px;
-      font-weight: 700;
-      margin-bottom: 4px;
-      position: relative;
-      z-index: 1;
-    }
-
-    .mode-button-desc {
-      font-size: 13px;
-      color: var(--subtext);
-      line-height: 1.55;
-      position: relative;
-      z-index: 1;
-    }
-
-    /* Work area */
-    .work-area {
-      display: none;
-    }
-
-    .work-area.active {
-      display: block;
-    }
-
-    h2 {
-      font-size: 17px;
-      font-weight: 700;
-      margin-bottom: 4px;
-    }
-
-    .subtitle {
-      font-size: 13px;
-      color: var(--subtext);
-      margin-bottom: 12px;
-    }
-
-    .status {
-      padding: 6px 10px;
-      border: 1px solid var(--separator);
-      border-radius: 999px;
-      font-size: 12px;
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      background: var(--surface);
-    }
-
-    .status.connected {
-      background: var(--success-bg);
-      color: var(--success-fg);
-      border-color: transparent;
-    }
-
-    .status.waiting {
-      background: var(--warn-bg);
-      color: var(--warn-fg);
-      border-color: transparent;
-    }
-
-    .status.syncing {
-      background: var(--info-bg);
-      color: var(--info-fg);
-      border-color: transparent;
-    }
-
-    .stats {
-      background: var(--surface);
-      border: 1px solid var(--separator);
-      padding: 16px;
-      border-radius: var(--radius);
-      margin: 12px 0;
-      text-align: center;
-    }
-
-    .stat-value {
-      font-size: 28px;
-      font-weight: 800;
-      color: var(--accent);
-      letter-spacing: .02em;
-    }
-
-    .stat-label {
-      font-size: 12px;
-      color: var(--subtext);
-      margin-top: 4px;
-    }
-
-    .info-box {
-      background: var(--info-bg);
-      color: var(--info-fg);
-      border: 1px solid transparent;
-      border-left: 4px solid var(--accent);
-      padding: 12px 14px;
-      margin: 12px 0 6px;
-      font-size: 13px;
-      border-radius: 10px;
-    }
-
-    .info-box strong {
-      display: block;
-      margin-bottom: 6px;
-      color: inherit;
-    }
-
-    .log-container {
-      margin: 12px 0;
-    }
-
-    .log-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 8px 12px;
-      background: var(--surface);
-      border: 1px solid var(--separator);
-      border-radius: var(--radius) var(--radius) 0 0;
-      cursor: pointer;
-      user-select: none;
-    }
-
-    .log-header:hover {
-      background: var(--bg);
-    }
-
-    .log-header-title {
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--text);
-    }
-
-    .log-toggle {
-      font-size: 12px;
-      color: var(--subtext);
-      display: flex;
-      align-items: center;
-      gap: 4px;
-    }
-
-    .log-toggle-icon {
-      display: inline-block;
-      font-size: 10px;
-    }
-
-    .log {
-      background: var(--surface);
-      border: 1px solid var(--separator);
-      border-top: none;
-      padding: 12px 12px 10px;
-      border-radius: 0 0 var(--radius) var(--radius);
-      max-height: 220px;
-      overflow: auto;
-      font-size: 12px;
-      line-height: 1.55;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-      white-space: pre-wrap;
-      transition: max-height 0.3s ease, padding 0.3s ease;
-    }
-
-    .log-container.collapsed .log {
-      max-height: 0;
-      padding: 0 12px;
-      overflow: hidden;
-      border: none;
-    }
-
-    /* Buttons */
-    button {
-      width: 100%;
-      padding: 12px 14px;
-      border: 1px solid var(--separator);
-      border-radius: 11px;
-      cursor: pointer;
-      font-size: 13px;
-      font-weight: 600;
-      background: var(--surface);
-      color: var(--text);
-      transition: box-shadow .16s ease, border-color .16s ease, transform .06s ease;
-      box-shadow: var(--shadow-sm);
-    }
-
-    button:hover {
-      border-color: var(--accent);
-    }
-
-    button:focus-visible {
-      outline: none;
-      box-shadow: var(--shadow-focus);
-    }
-
-    button:active {
-      transform: translateY(1px);
+    .btn:active {
+      transform: scale(0.98);
     }
 
     .btn-primary {
-      background: linear-gradient(180deg, #0a84ff, #0071eb);
-      color: #fff;
-      border-color: transparent;
+      background: #007AFF;
+      color: #FFFFFF;
     }
-
+    
     .btn-primary:hover {
-      background: linear-gradient(180deg, #0a7aee, #0066d6);
+        background: #0051D5;
+        box-shadow: none;
     }
-
-    .btn-success {
-      background: linear-gradient(180deg, #34c759, #2cab4d);
-      color: #fff;
-      border-color: transparent;
-      margin-bottom: 12px;
-    }
-
-    .btn-success:hover {
-      background: linear-gradient(180deg, #30b851, #279b44);
-    }
-
-    .btn-danger {
-      background: linear-gradient(180deg, #ff3b30, #e13228);
-      color: #fff;
-      border-color: transparent;
-      margin-bottom: 12px;
-    }
-
-    .btn-danger:hover {
-      background: linear-gradient(180deg, #f4352a, #d12d24);
+    
+    @media (prefers-color-scheme: dark) {
+        .btn-primary {
+            background: #0051D5;
+            color: #FFFFFF;
+        }
+        .btn-primary:hover {
+            background: #0040B3;
+        }
     }
 
     .btn-secondary {
-      background: linear-gradient(180deg,
-          color-mix(in srgb, var(--surface) 90%, white 10%) 0%,
-          color-mix(in srgb, var(--surface) 90%, white 10%) 100%);
+      background: transparent;
+      border-color: var(--border);
+      color: var(--text-primary);
+    }
+
+    .btn-secondary:hover {
+      background: rgba(0, 0, 0, 0.05);
+      border-color: var(--border);
     }
     
+    @media (prefers-color-scheme: dark) {
+        .btn-secondary {
+            border-color: rgba(255, 255, 255, 0.15);
+        }
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(255, 255, 255, 0.15);
+        }
+    }
 
-    /* Footer tips */
-    .footnote {
-      text-align: center;
-      color: var(--subtext);
+    .btn-danger {
+        background: #FF3B30;
+        color: #FFFFFF;
+    }
+    
+    .btn-danger:hover {
+        background: #CC2E26;
+        opacity: 1;
+    }
+    
+    @media (prefers-color-scheme: dark) {
+        .btn-danger {
+            background: #CC2E26;
+            color: #FFFFFF;
+        }
+        .btn-danger:hover {
+            background: #B3261E;
+        }
+    }
+
+    /* Log Area */
+    .log-wrapper {
+        flex: 1;
+        min-height: 0;
+        /* border: 1px solid var(--border); */
+        border-radius: var(--radius-s);
+        background: var(--bg-card);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        margin-bottom: 12px;
+    }
+    
+    .log-header {
+        padding: 6px 12px;
+        background: rgba(0,0,0,0.02);
+        /* border-bottom: 1px solid var(--border); */
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        cursor: pointer;
+        height: 28px;
+    }
+    
+    .log-title {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    
+    .log-content {
+        flex: 1;
+        padding: 8px 12px;
+        overflow-y: auto;
+        font-family: "SF Mono", Menlo, monospace;
+        font-size: 12px;
+        line-height: 1.6;
+        color: var(--text-secondary);
+        white-space: pre-wrap;
+        transition: all 0.3s ease;
+    }
+    
+    .log-wrapper.collapsed .log-content {
+        display: none;
+    }
+    .log-wrapper.collapsed {
+        flex: 0 0 auto;
+    }
+
+    /* Info Box */
+    .info-box {
+      background: var(--accent-soft);
+      /* border: 1px solid rgba(0, 122, 255, 0.1); */
+      color: var(--accent);
+      padding: 12px;
+      border-radius: var(--radius-s);
       font-size: 12px;
-      margin-top: 12px;
-    }
-
-    /* Small helper for hidden elements */
-    .hidden {
-      display: none !important;
-    }
-
-    /* Text link */
-    .text-link {
-      color: var(--text);
-      cursor: pointer;
-      text-decoration: none;
-      font-weight: 600;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      padding: 4px;
-      border-radius: 4px;
-      transition: background-color 0.2s ease, opacity 0.2s ease;
-    }
-
-    .text-link:hover {
-      color: var(--text);
-      opacity: 0.7;
-      background-color: rgba(0, 0, 0, 0.05);
-      text-decoration: none;
-    }
-
-    .text-link svg {
-      width: 16px;
-      height: 16px;
-      fill: currentColor;
-      flex-shrink: 0;
-    }
-
-    .text-link:hover svg {
-      fill: currentColor;
+      margin-bottom: 8px;
+      display: none;
     }
 
     /* Modal */
     .modal-overlay {
       position: fixed;
       inset: 0;
-      background: rgba(0, 0, 0, .75);
+      background: rgba(0, 0, 0, 0);
+      backdrop-filter: blur(0px);
+      z-index: 100;
       display: flex;
       align-items: center;
       justify-content: center;
-      z-index: 10;
+      
+      /* Hidden state properties */
+      opacity: 0;
+      visibility: hidden; /* Use visibility instead of display:none */
+      pointer-events: none;
+      
+      /* Transitions including visibility delay */
+      transition: opacity 0.25s cubic-bezier(0.33, 1, 0.68, 1),
+                  background 0.25s cubic-bezier(0.33, 1, 0.68, 1),
+                  backdrop-filter 0.25s cubic-bezier(0.33, 1, 0.68, 1),
+                  visibility 0s linear 0.25s; /* Delay hiding visibility */
     }
 
-    .modal-overlay.hidden {
+    /* Modal Overlay - Show State */
+    .modal-overlay.show {
+      opacity: 1;
+      visibility: visible;
+      pointer-events: auto;
+      background: rgba(0, 0, 0, 0.4);
+      backdrop-filter: blur(8px);
+      transition-delay: 0s; /* No delay when showing */
+    }
+
+    .modal {
+      width: 90%;
+      max-width: 360px;
+      background: var(--bg-card);
+      border-radius: var(--radius-l);
+      box-shadow: var(--shadow-lg);
+      padding: 20px;
+      transform: scale(0.92) translateY(20px);
+      opacity: 0;
+      transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1),
+                  opacity 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+      /* border: 1px solid var(--border); */
+      max-height: 85vh;
+      overflow-y: auto;
+    }
+
+    .modal-overlay:not(.hidden) .modal {
+      transform: scale(1) translateY(0);
+      opacity: 1;
+    }
+
+    /* Scrollable Command Wrapper with Gradient Fade */
+    .command-scroll-wrapper {
+      position: relative;
+      flex: 1;
+      min-width: 0; /* Allow flex shrinking */
+    }
+    
+    .command-scroll-wrapper::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      right: 0;
+      width: 8px;
+      height: 100%;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.2s ease;
+      background: linear-gradient(to right, transparent, var(--bg-app));
+    }
+    
+    .command-scroll-wrapper.has-scroll::after {
+      opacity: 1;
+    }
+    
+    @media (prefers-color-scheme: dark) {
+      .command-scroll-wrapper::after {
+        background: linear-gradient(to right, transparent, var(--bg-app));
+      }
+    }
+    
+    .command-scrollable {
+      font-family: 'SF Mono', monospace;
+      font-size: 12px;
+      overflow-x: auto;
+      white-space: nowrap;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+      width: 100%;
+    }
+    
+    .command-scrollable::-webkit-scrollbar {
       display: none;
     }
 
     .modal {
-      width: min(600px, calc(100% - 24px));
-      max-width: calc(100vw - 24px);
-      background: var(--surface);
-      border: 1px solid var(--separator);
-      border-radius: var(--radius-lg);
-      box-shadow: var(--shadow-md);
-      position: relative;
-      padding: 20px;
-      max-height: calc(100vh - 40px);
-      overflow-y: auto;
+      width: 90%;
+      max-width: 360px;
+      background: var(--bg-card);
+      border-radius: var(--radius-l);
+      box-shadow: var(--shadow-lg);
+      /* padding: 20px; Remove global padding to allow header to be full width */
+      padding: 0; /* Reset padding */
+      transform: scale(0.92) translateY(20px);
+      opacity: 0;
+      transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1),
+                  opacity 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+      max-height: 85vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden; /* Important for border-radius */
     }
 
-    .modal-title {
-      font-size: 17px;
-      font-weight: 700;
-      margin-top: 0;
-      margin-bottom: 20px;
-    }
-
-    /* Align mode title style with modal title */
-    .mode-title {
-      font-size: 17px;
-      font-weight: 700;
-      margin-bottom: 6px;
+    .modal-overlay:not(.hidden) .modal {
+      transform: scale(1) translateY(0);
+      opacity: 1;
     }
 
     .modal-content {
-      color: var(--subtext);
-      font-size: 13px;
-      line-height: 1.6;
+        padding: 20px 20px 20px 20px; /* Move padding here */
+        overflow-y: auto; /* Scroll content only */
+        flex: 1;
+        opacity: 0;
+        transform: translateY(10px);
+        transition: opacity 0.4s cubic-bezier(0.33, 1, 0.68, 1) 0.1s,
+                    transform 0.4s cubic-bezier(0.33, 1, 0.68, 1) 0.1s;
     }
 
-    .modal-close {
-      position: absolute;
-      top: 10px;
-      right: 10px;
-      width: 28px;
-      height: 28px;
-      border-radius: 8px;
-      border: 1px solid var(--separator);
-      background: var(--surface);
-      cursor: pointer;
-      display: inline-flex;
+    .modal-overlay:not(.hidden) .modal-content {
+        opacity: 1;
+        transform: translateY(0);
+    }
+
+    .modal-header {
+      /* position: sticky; Remove sticky, flex layout handles it */
+      /* top: 0; */
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      /* margin: 0 0 15px 0; */
+      padding: 14px 20px 14px 20px; 
+      border-bottom: 1px solid var(--divider);
+      background: var(--bg-card);
+      z-index: 10;
+      flex-shrink: 0; /* Prevent header from shrinking */
+      opacity: 0;
+      transform: translateY(-10px);
+      transition: opacity 0.3s cubic-bezier(0.33, 1, 0.68, 1) 0.05s,
+                  transform 0.3s cubic-bezier(0.33, 1, 0.68, 1) 0.05s;
+    }
+
+    .modal-overlay:not(.hidden) .modal-header {
+        opacity: 1;
+        transform: translateY(0);
+    }
+
+    .modal-title {
+      font-size: 15px;
+      font-weight: 700;
+    }
+    
+    /* Modal buttons - smaller height */
+    .modal .btn {
+      padding: 8px 12px;
+    }
+    
+    .close-btn {
+        width: 24px;
+        height: 24px;
+      border-radius: 50%;
+        background: rgba(0,0,0,0.05);
+      border: none;
+      display: flex;
       align-items: center;
       justify-content: center;
-      box-shadow: var(--shadow-sm);
+      cursor: pointer;
+      color: var(--text-secondary);
+      transition: all 0.2s cubic-bezier(0.33, 1, 0.68, 1);
+      transform: scale(1);
+    }
+    
+    .close-btn:hover {
+        background: var(--divider);
+        color: var(--text-primary);
+        transform: scale(1.1);
+    }
+    
+    .close-btn:active {
+        transform: scale(0.95);
+    }
+    
+    @media (prefers-color-scheme: dark) {
+        .close-btn {
+            background: rgba(255,255,255,0.1);
+        }
+    }
+    
+    /* Hide number input spinners */
+    input[type=number]::-webkit-inner-spin-button, 
+    input[type=number]::-webkit-outer-spin-button { 
+        -webkit-appearance: none; 
+        margin: 0; 
     }
 
-    .modal-close:hover {
-      border-color: var(--accent);
+    /* Input Styles - Inside Label Variant */
+    .input-wrapper {
+      display: flex;
+      align-items: center;
+        background: var(--bg-app);
+        border-radius: var(--radius-s);
+        padding: 0 12px;
+        height: 32px;
+        border: 1px solid transparent; /* Transparent border for alignment */
+        transition: all 0.2s ease;
+    }
+    
+    .input-wrapper:hover {
+        background: rgba(0, 0, 0, 0.02);
+    }
+    
+    @media (prefers-color-scheme: dark) {
+        .input-wrapper:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+    }
+    
+    .input-wrapper:focus-within {
+        background: var(--bg-app);
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px var(--accent-soft);
+    }
+
+    .input-prefix {
+        color: var(--text-secondary);
+        font-size: 13px;
+        margin-right: 8px;
+        font-weight: 500;
+        white-space: nowrap;
+    }
+
+    /* Reset default input styles for use inside wrapper */
+    .input-wrapper input {
+        border: none;
+        background: transparent;
+        padding: 0;
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        outline: none;
+        box-shadow: none;
+      color: var(--text-primary);
+        font-size: 13px;
+    }
+    
+    /* Placeholder color */
+    .input-wrapper input::placeholder {
+        color: var(--text-tertiary);
+    }
+
+    /* Toast */
+    .toast {
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%) translateY(-100px);
+      background: var(--bg-card);
+      /* border: 1px solid var(--border); */
+      border-radius: var(--radius-m);
+      padding: 8px 16px;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12), 0 0 1px rgba(0, 0, 0, 0.1);
+      font-size: 13px;
+      font-weight: 500;
+      color: #1D1D1F;
+      z-index: 1000;
+      opacity: 0;
+      pointer-events: none;
+      transition: all 0.5s var(--ease-spring);
+      white-space: nowrap;
+      width: fit-content;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    
+    @media (prefers-color-scheme: dark) {
+        .toast {
+            color: #F5F5F7;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4), 0 0 1px rgba(255, 255, 255, 0.1);
+        }
+    }
+    
+    .toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+      pointer-events: auto;
+    }
+    
+    .toast-icon {
+      width: 14px;
+      height: 14px;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    
+    .toast-icon svg {
+      width: 100%;
+      height: 100%;
+    }
+    
+    .toast.success .toast-icon {
+      color: var(--success);
+    }
+    
+    .toast.error .toast-icon {
+      color: var(--danger);
+    }
+    
+    .toast.loading .toast-icon {
+      color: var(--text-secondary);
+    }
+    
+    .toast.loading .toast-icon svg {
+      stroke: currentColor;
+    }
+
+    /* Utilities */
+    .hidden { display: none !important; }
+    
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    
+    @keyframes zoomIn {
+      from { opacity: 0; transform: scale(0.92); }
+      to { opacity: 1; transform: scale(1); }
+    }
+    
+    /* Minimized State Styles */
+    .minimized-toolbar {
+        display: none;
+        background: transparent;
+        border: none;
+        padding: 4px 4px 4px 12px;
+        align-items: center;
+        justify-content: space-between;
+        box-shadow: none;
+        height: 100%;
+        animation: zoomIn 0.3s var(--ease-spring);
+    }
+    
+    .app.minimized .minimized-toolbar {
+        display: flex;
+    }
+
+    .minimized-brand {
+        font-family: 'Archivo Black', sans-serif;
+        font-weight: 400;
+        font-size: 15px;
+      display: flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--text-primary);
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+    }
+    
+    .minimized-brand img {
+        width: 18px;
+        height: 18px;
+        display: block;
+    }
+    
+    .minimized-btn {
+        width: 28px; 
+        height: 28px;
+      border-radius: 50%;
+        border: none;
+        background: transparent;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+        cursor: pointer;
+        color: var(--text-secondary);
+    }
+    
+    .minimized-btn:hover {
+        background: var(--bg-app);
+        color: var(--text-primary);
+    }
+    
+    .app.minimized .header {
+        display: none;
+    }
+    
+    /* Theme Specific Images */
+    img.no-invert {
+        filter: none !important;
+      }
+
+    /* SVG Icons */
+    .svg-icon {
+        width: 18px;
+        height: 18px;
+        stroke-width: 2;
+        stroke: currentColor;
+        fill: none;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+    }
+    
+    .svg-icon-sm {
+        width: 15px;
+        height: 15px;
+    }
+
+    /* Apple Switch */
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 42px;
+      height: 26px;
+      flex-shrink: 0;
+    }
+
+    .switch input { 
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: #E9E9EA;
+      transition: .3s cubic-bezier(0.25, 0.8, 0.25, 1);
+      border-radius: 34px;
+    }
+
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 22px;
+      width: 22px;
+      left: 2px;
+      bottom: 2px;
+      background-color: white;
+      transition: .3s cubic-bezier(0.25, 0.8, 0.25, 1);
+      border-radius: 50%;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+    }
+
+    input:checked + .slider {
+      background-color: var(--accent);
+    }
+
+    input:checked + .slider:before {
+      transform: translateX(16px);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      .slider {
+        background-color: #39393D;
+      }
     }
   </style>
   <script>
@@ -671,262 +1248,422 @@
         icloudAlbum: IMAGE_BASE_URL + (isDark ? 'qr-icloud-album-white.png' : 'qr-icloud-album-black.png')
       };
     }
-    
-
   </script>
-  
 </head>
 
 <body>
   <div class="app">
-    <!-- Top Toolbar -->
-    <div class="toolbar card">
-      <div class="title">
-        <span class="logo-icon"><img class="no-invert" src="https://raw.githubusercontent.com/BorderWalker99/figma-plugin-figma_sync/refs/heads/main/images/logo.svg" alt="Figma Sync" width="20" height="20" /></span>
-        Figma Sync <span class="pill" id="toolbarPill">未连接</span>
+    <!-- Header -->
+    <div class="header">
+      <div class="brand">
+        <div class="logo-box">
+          <img src="https://raw.githubusercontent.com/BorderWalker99/figma-plugin-figma_sync/refs/heads/main/images/logo.svg" width="18" height="18" />
       </div>
-      <div class="subtitle-top">
-        <a id="viewUseCases" class="text-link" title="使用 tips">
-          <img src="https://raw.githubusercontent.com/BorderWalker99/figma-plugin-figma_sync/refs/heads/main/images/document.svg" alt="使用 tips" width="16" height="16" />
-        </a>
-        <a id="openSettings" class="text-link" title="设置">
-          <img src="https://raw.githubusercontent.com/BorderWalker99/figma-plugin-figma_sync/refs/heads/main/images/settings.svg" alt="设置" width="16" height="16" />
-        </a>
-        <a id="toggleMinimize" class="text-link" title="最小化">
-          <img id="minimizeIcon" src="https://raw.githubusercontent.com/BorderWalker99/figma-plugin-figma_sync/refs/heads/main/images/minimize.svg" alt="最小化" width="16" height="16" />
-        </a>
-      </div>
-    </div>
-
-    <!-- 模式选择界面 -->
-    <div class="mode-selection card" id="modeSelection">
-      <div class="mode-head">
-        <div class="mode-title">选择同步模式</div>
-        <div class="mode-subtitle">选择适合的工作方式，同步后自动删除源文件以节省空间</div>
-      </div>
-      <div class="mode-grid">
-        <button class="mode-button" id="realtimeBtn" aria-label="选择实时同步模式">
-          <div class="mode-icon"><img class="no-invert" src="https://raw.githubusercontent.com/BorderWalker99/figma-plugin-figma_sync/refs/heads/main/images/mode-realtime.svg" alt="实时同步" width="68" height="68" /></div>
-          <div class="mode-button-title">实时同步模式</div>
-          <div class="mode-button-desc">自动检测新截图并立即同步到画板</div>
-        </button>
-
-        <button class="mode-button" id="manualBtn" aria-label="选择手动同步模式">
-          <div class="mode-icon"><img class="no-invert" src="https://raw.githubusercontent.com/BorderWalker99/figma-plugin-figma_sync/refs/heads/main/images/mode-manual.svg" alt="手动同步" width="68" height="68" /></div>
-          <div class="mode-button-title">手动同步模式</div>
-          <div class="mode-button-desc">批量同步存储的所有截图</div>
-        </button>
-      </div>
-    </div>
-
-    <!-- 工作界面 -->
-    <div class="work-area card" id="workArea">
-      <div class="section">
-        <div class="modeTitleContainer">
-          <div id="modeTitle">
-            <span class="logo-icon"><img class="no-invert" src="https://raw.githubusercontent.com/BorderWalker99/figma-plugin-figma_sync/refs/heads/main/images/logo.svg" alt="Figma Sync" width="20" height="20" /></span>
-            Figma Sync
-          </div>
-          <div id="status" class="status waiting">等待连接</div>
+        <div>
+          <div class="app-title">SYNC</div>
         </div>
-        <div class="subtitle" id="modeSubtitle"></div>
+      </div>
+      <div class="header-actions">
+        <button id="viewUseCases" class="icon-btn" title="使用帮助">
+           <svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+             <circle cx="12" cy="12" r="10"></circle>
+             <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+             <line x1="12" y1="17" x2="12.01" y2="17"></line>
+           </svg>
+        </button>
+        <button id="openSettings" class="icon-btn" title="设置">
+           <svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+             <circle cx="12" cy="12" r="3"></circle>
+             <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+           </svg>
+        </button>
+        <button id="toggleMinimize" class="icon-btn" title="最小化">
+            <!-- Icon will be updated by JS, but default is minimize -->
+            <svg id="minimizeIcon" class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="4 14 10 14 10 20"></polyline>
+              <polyline points="20 10 14 10 14 4"></polyline>
+            </svg>
+        </button>
+      </div>
+    </div>
+    
+    <!-- Update Banner -->
+    <div class="update-banner" id="updateBanner">
+      <div class="update-banner-content">
+        <div class="update-banner-info">
+          <svg class="update-banner-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+          </svg>
+          <div class="update-banner-text">
+            <div class="update-banner-title" id="updateBannerTitle">发现新版本</div>
+            <div class="update-banner-version" id="updateBannerVersion">v1.0.0 → v1.0.1</div>
+          </div>
+        </div>
+        <div class="update-banner-actions">
+          <button class="update-banner-btn secondary" id="updateBannerLater">稍后</button>
+          <button class="update-banner-btn primary" id="updateBannerNow">立即更新</button>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Minimized Toolbar (Visible only when minimized) -->
+    <div class="minimized-toolbar">
+        <div class="minimized-brand">
+          <img src="https://raw.githubusercontent.com/BorderWalker99/figma-plugin-figma_sync/refs/heads/main/images/logo.svg" width="18" height="18" />
+             <span style="margin-top: 2px;">SYNC</span>
+          </div>
+         <button class="minimized-btn" onclick="toggleMinimize()">
+           <svg class="svg-icon" style="width: 15px; height: 15px;" viewBox="0 0 24 24"><polyline points="13 5 19 5 19 11"></polyline><polyline points="11 19 5 19 5 13"></polyline></svg>
+        </button>
+    </div>
 
-        <div class="stats">
-          <div class="stat-value" id="count">0</div>
-          <div class="stat-label">已同步截图</div>
+    <!-- Main Content -->
+    <div class="main-content">
+
+    <!-- Mode Selection -->
+    <div class="mode-selection" id="modeSelection">
+        <div>
+          <h2 class="section-title">选择同步模式</h2>
+          <!-- <div class="section-desc">同步后将自动清理源文件以释放空间</div> -->
+      </div>
+        
+        <div class="card-grid">
+          <div class="feature-card" id="realtimeBtn">
+            <div class="card-icon" style="color: #FFCC00; background: rgba(255, 204, 0, 0.15);">
+              <!-- Realtime: Lightning/Sync (Filled + Rounded) -->
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linejoin="round">
+              <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path>
+            </svg>
+          </div>
+            <div class="card-content">
+              <div class="card-title">实时模式</div>
+              <div class="card-desc">手机截图 实时导入</div>
+            </div>
+            <div class="chevron">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+            </div>
+        </div>
+
+          <div class="feature-card" id="manualBtn">
+            <div class="card-icon" style="color: #007AFF; background: rgba(0, 122, 255, 0.15);">
+               <!-- Manual: Download (Arrow + Bar) - Adjusted for visual weight -->
+               <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="0">
+                 <path d="M19 9h-4V3H9v6H5l7 8 7-8zM5 19v3h14v-3H5z"></path>
+            </svg>
+          </div>
+            <div class="card-content">
+              <div class="card-title">手动模式</div>
+              <div class="card-desc">云端截图 批量导入</div>
+            </div>
+            <div class="chevron">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+            </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Work Area -->
+      <div class="work-area" id="workArea">
+        
+        <!-- Compact Status Hero -->
+        <div class="status-hero">
+            <div class="hero-header">
+                <div class="hero-mode-info">
+                    <div class="hero-icon-sm" id="activeModeIcon">
+                        <!-- Dynamic SVG -->
+                    </div>
+                    <span class="hero-mode-title" id="activeModeTitle">模式名称</span>
+                </div>
+                <div id="status" class="connection-pill">等待中</div>
+        </div>
+
+            <div class="hero-main-metric">
+                <div class="count-display" id="count">0</div>
+                <div class="metric-label">张</div>
+          </div>
+            
+            <div id="modeSubtitle" style="display:none;"></div>
         </div>
 
         <div class="info-box" id="infoBox"></div>
-        <div class="log-container" id="logContainer">
+        
+        <!-- Log Area (Hidden) -->
+        <div class="log-wrapper" id="logContainer" style="display: none;">
           <div class="log-header" id="logHeader">
-            <span class="log-header-title">日志</span>
-            <span class="log-toggle">
-              <span class="log-toggle-icon">▲</span>
-              <span id="logToggleText">收起</span>
-            </span>
+                <span class="log-title">系统日志</span>
+                <span id="logToggleText" style="font-size:12px; color:var(--text-tertiary);">收起</span>
           </div>
-        <div class="log" id="log"></div>
+          <div class="log-content" id="log"></div>
         </div>
 
-        <button class="btn-success" id="syncBtn" style="display:none;">立即同步所有截图</button>
-        <button class="btn-danger" id="stopBtn" style="display:none;">停止实时同步</button>
-        <button class="btn-secondary" id="locateFrameBtn" style="display:none;">定位画板</button>
-        <button class="btn-secondary" id="backBtn">返回选择模式</button>
-
-        <!-- <div class="footnote">提示：支持系统深色模式 · ⌘/Ctrl + L 聚焦日志（浏览器）</div> -->
-      </div>
-    </div>
-  </div>
-
-  <!-- 使用场景 Modal -->
-  <div id="useCaseOverlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="useCaseTitle">
-    <div class="modal">
-      <button id="useCaseClose" class="modal-close" aria-label="关闭">
-        ✕
-      </button>
-      <h3 id="useCaseTitle" class="modal-title">使用 tips</h3>
-      <div class="modal-content" id="useCaseContent" style="white-space: normal;">
-        <div style="display: flex; flex-direction: column; gap: 16px;">
-          <div>
-            <div style="font-weight: 600; color: var(--text); margin-bottom: 8px;">1. 启动服务</div>
-            <div style="font-size: 12px; color: var(--subtext); line-height: 1.6;">
-              每次使用前，前往启动台打开终端，分别运行以下两行命令:
-              <div style="background: var(--surface); padding: 8px 12px; border-radius: 6px; margin-top: 6px; margin-bottom: 6px; font-family: monospace; font-size: 11px; border: 1px solid var(--separator);">
-                cd <span style="color: var(--accent);">[FigmaSync-UserPackage 文件夹路径]</span>
-              </div>
-              <div style="background: var(--surface); padding: 8px 12px; border-radius: 6px; margin-top: 6px; margin-bottom: 6px; font-family: monospace; font-size: 11px; border: 1px solid var(--separator);">
-                npm start
-              </div>
-              <div style="margin-top: 8px; margin-bottom: 8px;">
-                <img src="https://raw.githubusercontent.com/BorderWalker99/figma-plugin-figma_sync/refs/heads/main/images/start-demo.gif" alt="步骤2" style="max-width: 100%; border-radius: 6px; border: 1px solid var(--separator);" />
-              </div>
-              使用插件期间保持终端窗口打开，不要关闭。
+        <div class="action-buttons">
+            <button class="btn btn-primary" id="syncBtn" style="display:none;">
+                立即同步
+            </button>
+            <button class="btn btn-danger" id="stopBtn" style="display:none;">停止同步</button>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                <button class="btn btn-secondary" id="locateFrameBtn" style="display:none;">定位画板</button>
+                <button class="btn btn-secondary" id="backBtn" style="grid-column: span 2;">返回</button>
             </div>
-          </div>
-          
-          <div>
-            <div style="font-weight: 600; color: var(--text); margin-bottom: 8px;">2. 配置 iPhone 快捷指令</div>
-            <div style="font-size: 12px; color: var(--subtext); line-height: 1.6;">
-              <div style="margin-bottom: 12px;">
-                按需扫描下方二维码下载快捷指令:
-              </div>
-              <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-bottom: 16px;">
-                <div style="display: flex; flex-direction: column; align-items: center; gap: 8px;">
-                  <img id="qrGoogleScreenshot" alt="Google Drive 直接截图上传二维码" 
-                       style="width: 120px; height: 120px; color: var(--text);">
-                  <div style="font-size: 11px; color: var(--subtext); text-align: center;">Google Drive<br>直接截图上传</div>
-                </div>
-                <div style="display: flex; flex-direction: column; align-items: center; gap: 8px;">
-                  <img id="qrGoogleAlbum" alt="Google Drive 相册上传二维码" 
-                       style="width: 120px; height: 120px; color: var(--text);">
-                  <div style="font-size: 11px; color: var(--subtext); text-align: center;">Google Drive<br>相册上传 (支持录屏)</div>
-                </div>
-                <div style="display: flex; flex-direction: column; align-items: center; gap: 8px;">
-                  <img id="qrIcloudScreenshot" alt="iCloud 直接截图上传二维码" 
-                       style="width: 120px; height: 120px; color: var(--text);">
-                  <div style="font-size: 11px; color: var(--subtext); text-align: center;">iCloud<br>直接截图上传</div>
-                </div>
-                <div style="display: flex; flex-direction: column; align-items: center; gap: 8px;">
-                  <img id="qrIcloudAlbum" alt="iCloud 相册上传二维码" 
-                       style="width: 120px; height: 120px; color: var(--text);">
-                  <div style="font-size: 11px; color: var(--subtext); text-align: center;">iCloud<br>相册上传 (支持录屏)</div>
-                </div>
-              </div>
-              <div style="margin-top: 12px; font-size: 12px; color: var(--subtext); line-height: 2.4;">
-                使用 Google Drive 模式时，需在快捷指令的「获取URL内容」中填入 <span style="color: var(--accent);">x-user-id</span> (在 Mac 终端运行 <code style="background: var(--surface); padding: 6px 10px; margin-left: 4px; margin-right: 4px; border-radius: 4px; font-family: monospace; font-size: 11px; border: 1px solid var(--separator);">./get-user-id.sh</code> 获取)
-              </div>
-            </div>
-          </div>
-  
-          <div>
-          </div>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- 设置 Modal -->
-  <div id="settingsOverlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+  <!-- Use Case Modal -->
+  <div id="useCaseOverlay" class="modal-overlay">
     <div class="modal">
-      <button id="settingsClose" class="modal-close" aria-label="关闭">
-        ✕
-      </button>
-      <h3 id="settingsTitle" class="modal-title">上传模式设置</h3>
+      <div class="modal-header">
+        <div class="modal-title">使用指南</div>
+        <button id="useCaseClose" class="close-btn">✕</button>
+      </div>
+      <div class="modal-content" id="useCaseContent">
+         <div style="display: flex; flex-direction: column; gap: 16px;">
+          <div>
+            <div style="font-weight: 600; margin-bottom: 8px; font-size: 13px;">1. 启动服务</div>
+              <div style="font-size: 12px; color: var(--text-secondary); line-height: 1.6;">
+                前往启动台打开终端，运行:
+                <div style="background: var(--bg-app); padding: 8px 12px 8px 12px; border-radius: var(--radius-s); margin: 6px 0; display: flex; align-items: center; justify-content: space-between;">
+                  <div class="command-scroll-wrapper" id="commandScrollWrapper">
+                    <div class="command-scrollable" id="commandScrollable">
+                      cd <span id="server-path-placeholder" style="color: var(--accent);">[将 ScreenSync-UserPackage 文件夹拖入窗口]</span> && npm start
+            </div>
+            </div>
+                  <button id="copyCmdBtn" class="icon-btn" style="width: 24px; height: 24px; flex-shrink: 0; margin-left: 8px;" title="复制指令">
+                    <svg class="svg-icon" style="width: 14px; height: 14px;" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                  </button>
+            </div>
+          </div>
+        </div>
+
+          <div id="shortcutGuideSection">
+             <div style="font-weight: 600; margin-bottom: 8px; font-size: 13px;">2. 配置快捷指令</div>
+             <div style="font-size: 12px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 8px;" id="qrSubtitle">扫码获取快捷指令:</div>
+             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;" id="qrCodesContainer">
+                <div style="display: flex; flex-direction: column; align-items: center; gap: 6px;" id="qrGoogleScreenshotContainer">
+                  <img id="qrGoogleScreenshot" style="width: 80px; height: 80px;">
+                  <div style="font-size: 12px; color: var(--text-secondary); text-align: center;">直接截图</div>
+            </div>
+                <div style="display: flex; flex-direction: column; align-items: center; gap: 6px;" id="qrGoogleAlbumContainer">
+                  <img id="qrGoogleAlbum" style="width: 80px; height: 80px;">
+                  <div style="font-size: 12px; color: var(--text-secondary); text-align: center;">相册选择</div>
+              </div>
+                <div style="display: flex; flex-direction: column; align-items: center; gap: 6px;" id="qrIcloudScreenshotContainer">
+                  <img id="qrIcloudScreenshot" style="width: 80px; height: 80px;">
+                  <div style="font-size: 12px; color: var(--text-secondary); text-align: center;">直接截图</div>
+              </div>
+                <div style="display: flex; flex-direction: column; align-items: center; gap: 6px;" id="qrIcloudAlbumContainer">
+                  <img id="qrIcloudAlbum" style="width: 80px; height: 80px;">
+                  <div style="font-size: 12px; color: var(--text-secondary); text-align: center;">相册选择</div>
+              </div>
+              </div>
+             <div id="noModeMessage" style="font-size: 12px; color: var(--text-secondary); line-height: 1.6; display: none;">
+                请在"设置"中选择储存方式
+          </div>
+        </div>
+
+                    <!-- User ID Display -->
+                    <div id="userIdDisplaySection">
+                      <div style="font-weight: 600; margin-bottom: 8px; font-size: 13px;">3. 您的 User ID</div>
+                      <div style="font-size: 12px; color: var(--text-secondary); margin-top: 6px;">
+                        请在快捷指令的文本框中填入此 ID:
+          </div>
+                      <div style="background: var(--bg-app); padding: 8px 12px 8px 12px; border-radius: var(--radius-s); margin: 6px 0; display: flex; align-items: center; justify-content: space-between;">
+                        <div style="font-family: 'SF Mono', monospace; font-size: 12px; overflow-x: auto; white-space: nowrap; margin-right: 8px; -webkit-overflow-scrolling: touch; scrollbar-width: none; color: var(--text-secondary); user-select: text;">
+                          <span id="displayUserId">正在获取...</span>
+            </div>
+                        <button id="copyUserIdBtn" class="icon-btn" style="width: 24px; height: 24px; flex-shrink: 0;" title="复制 User ID">
+                          <svg class="svg-icon" style="width: 14px; height: 14px;" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                        </button>
+              </div>
+            </div>
+              </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings Modal -->
+  <div id="settingsOverlay" class="modal-overlay">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title">设置</div>
+        <button id="settingsClose" class="close-btn">✕</button>
+      </div>
       <div class="modal-content" id="settingsContent">
-        <div style="margin-bottom: 16px;">
-          <div style="display: flex; flex-direction: column; gap: 16px;">
-            <button class="mode-button" id="switchToDrive" style="text-align: left; padding: 16px;">
-              <div class="mode-icon"><img class="no-invert" src="https://raw.githubusercontent.com/BorderWalker99/figma-plugin-figma_sync/refs/heads/main/images/google.svg" alt="Google Drive" width="68" height="68" /></div>
-              <div class="mode-button-title">Google Drive 上传</div>
-              <div class="mode-button-desc">上传至 Google Drive 公共云，无需 iCloud</div>
-            </button>
-            <button class="mode-button" id="switchToAliyun" style="text-align: left; padding: 16px;">
-              <div class="mode-icon"><img class="no-invert" src="https://raw.githubusercontent.com/BorderWalker99/figma-plugin-figma_sync/refs/heads/main/images/google.svg" alt="阿里云 OSS" width="68" height="68" /></div>
-              <div class="mode-button-title">阿里云 OSS 上传</div>
-              <div class="mode-button-desc">上传至阿里云 OSS，适合中国大陆用户，网络更稳定</div>
-            </button>
-            <button class="mode-button" id="switchToIcloud" style="text-align: left; padding: 16px;">
-              <div class="mode-icon"><img class="no-invert" src="https://raw.githubusercontent.com/BorderWalker99/figma-plugin-figma_sync/refs/heads/main/images/icloud.svg" alt="iCloud" width="68" height="68" /></div>
-              <div class="mode-button-title">iCloud 上传</div>
-              <div class="mode-button-desc">上传至 iCloud 个人云，需手机电脑共用 iCloud 账号且空间充足</div>
-            </button>
-          </div>
-        </div>
-        <div id="switchStatus" style="margin-top: 16px; font-size: 13px; color: var(--subtext);"></div>
         
-        <!-- 尺寸设置 -->
-        <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--separator);">
-          <div style="font-size: 17px; font-weight: 700; color: var(--text); margin-bottom: 4px;">
-            截图尺寸设置
-          </div>
-          <div style="font-size: 13px; color: var(--subtext); margin-bottom: 20px;">
-            设置固定宽高，另一边会按比例自动计算；不填则默认取设备屏幕尺寸
-          </div>
-          <div style="display: flex; gap: 12px; align-items: center;">
-            <div style="flex: 1;">
-              <label style="display: block; font-size: 12px; color: var(--subtext); margin-bottom: 6px;">宽度 (px)</label>
-              <input type="number" id="imageWidthInput" placeholder="请输入宽度" 
-                     style="width: 100%; padding: 8px 12px; border: 1px solid var(--separator); border-radius: 6px; background: var(--surface); color: var(--text); font-size: 13px;"
-                     min="1" step="1">
+        <!-- Cloud Provider Selection -->
+        <div style="margin-bottom:15px;">
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+                <div class="feature-card mode-card" id="switchToDrive" style="padding: 12px; flex-direction: column; height: 100%;">
+                    <div class="checkmark">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                </div>
+                    <div class="card-icon" style="width:32px; height:32px;">
+                        <img class="no-invert" src="https://raw.githubusercontent.com/BorderWalker99/figma-plugin-figma_sync/refs/heads/main/images/google.svg" width="20" height="20">
+              </div>
+                    <div class="card-content" style="width:100%">
+                        <div class="card-title" style="margin-bottom:2px;">Google Cloud</div>
+                        <div class="card-desc">无需 iCloud</div>
             </div>
-            <div style="flex: 1;">
-              <label style="display: block; font-size: 12px; color: var(--subtext); margin-bottom: 6px;">高度 (px)</label>
-              <input type="number" id="imageHeightInput" placeholder="请输入高度"
-                     style="width: 100%; padding: 8px 12px; border: 1px solid var(--separator); border-radius: 6px; background: var(--surface); color: var(--text); font-size: 13px;"
-                     min="1" step="1">
+                </div>
+                 <div class="feature-card mode-card" id="switchToAliyun" style="display:none; padding: 12px; flex-direction: column; height: 100%;">
+                     <div class="checkmark">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              </div>
+                     <div class="card-icon" style="width:32px; height:32px;">
+                        <img class="no-invert" src="https://raw.githubusercontent.com/BorderWalker99/figma-plugin-figma_sync/refs/heads/main/images/aliyun.svg" width="20" height="20">
+            </div>
+                    <div class="card-content" style="width:100%">
+                        <div class="card-title" style="margin-bottom:2px;">阿里云 OSS</div>
+                        <div class="card-desc">对象存储</div>
+                </div>
+              </div>
+                 <div class="feature-card mode-card" id="switchToIcloud" style="padding: 12px; flex-direction: column; height: 100%;">
+                     <div class="checkmark">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+            </div>
+                     <div class="card-icon" style="width:32px; height:32px;">
+                        <img class="no-invert" src="https://raw.githubusercontent.com/BorderWalker99/figma-plugin-figma_sync/refs/heads/main/images/icloud.svg" width="20" height="20">
+          </div>
+                    <div class="card-content" style="width:100%">
+                        <div class="card-title" style="margin-bottom:2px;">iCloud</div>
+                        <div class="card-desc">iCloud 需有空间</div>
+              </div>
             </div>
           </div>
-          <div style="margin-top: 12px; display: flex; gap: 12px;">
-            <button id="saveSizeSettings" style="flex: 1; padding: 8px 16px; background: var(--accent); color: white; border: none; border-radius: 6px; font-size: 13px; cursor: pointer;">
-              保存
-            </button>
-            <button id="clearSizeSettings" style="flex: 1; padding: 8px 16px; background: transparent; color: var(--subtext); border: 1px solid var(--separator); border-radius: 6px; font-size: 13px; cursor: pointer;">
-              清除
-            </button>
-          </div>
-          <div id="sizeSettingsStatus" style="margin-top: 8px; font-size: 12px; color: var(--subtext);"></div>
         </div>
-        
-        <!-- 画板布局设置 -->
-        <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--separator);">
-          <div style="font-size: 17px; font-weight: 700; color: var(--text); margin-bottom: 4px;">
-            画板布局设置
+
+        <!-- Size Settings -->
+        <div style="padding-top:15px; margin-bottom:15px;">
+            <h3 style="font-size:13px; margin:0 0 12px 0;">截图尺寸</h3>
+             <div style="display: flex; gap: 8px;">
+                <div class="input-wrapper" style="flex: 1;">
+                  <span class="input-prefix">宽</span>
+                  <input type="number" id="imageWidthInput" placeholder="自适应">
+            </div>
+                <div class="input-wrapper" style="flex: 1;">
+                  <span class="input-prefix">高</span>
+                  <input type="number" id="imageHeightInput" placeholder="自适应">
+            </div>
           </div>
-          <div style="font-size: 13px; color: var(--subtext); margin-bottom: 20px;">
-            设置每行显示多少张截图，不填则默认一直横着排（不换行）
+             <div style="display: flex; gap: 6px; margin-top:12px;">
+                <button id="saveSizeSettings" class="btn btn-primary" style="flex:1;">保存</button>
+                <button id="clearSizeSettings" class="btn btn-secondary" style="flex:1;">重置</button>
           </div>
-          <div>
-            <label style="display: block; font-size: 12px; color: var(--subtext); margin-bottom: 6px;">每行显示 (张)</label>
-            <input type="number" id="frameColumnsInput" placeholder="不填则一直横着排" 
-                   style="width: 100%; padding: 8px 12px; border: 1px solid var(--separator); border-radius: 6px; background: var(--surface); color: var(--text); font-size: 13px;"
-                   min="1" step="1">
-          </div>
-          <div style="margin-top: 12px; display: flex; gap: 12px;">
-            <button id="saveLayoutSettings" style="flex: 1; padding: 8px 16px; background: var(--accent); color: white; border: none; border-radius: 6px; font-size: 13px; cursor: pointer;">
-              保存
-            </button>
-            <button id="clearLayoutSettings" style="flex: 1; padding: 8px 16px; background: transparent; color: var(--subtext); border: 1px solid var(--separator); border-radius: 6px; font-size: 13px; cursor: pointer;">
-              清除
-            </button>
-          </div>
-          <div id="layoutSettingsStatus" style="margin-top: 8px; font-size: 12px; color: var(--subtext);"></div>
         </div>
+
+        <!-- Layout Settings -->
+        <div style="padding-top: 15px;">
+            <h3 style="font-size:13px; margin:0 0 12px 0;">画板布局</h3>
+            <div style="margin-bottom:12px;">
+                <div class="input-wrapper">
+                    <span class="input-prefix">每行</span>
+                    <input type="number" id="frameColumnsInput" placeholder="一直横排">
+          </div>
+          </div>
+             <div style="display: flex; gap: 6px;">
+                <button id="saveLayoutSettings" class="btn btn-primary" style="flex:1;">保存</button>
+                <button id="clearLayoutSettings" class="btn btn-secondary" style="flex:1;">重置</button>
+            </div>
+        </div>
+
+                <!-- GIF Backup Setting (Google Drive Only) -->
+                <div id="gifBackupSection" style="display:none; padding-top:30px;">
+                  <div style="display: flex; justify-content: space-between; align-items: center;">
+                      <div>
+                          <div style="font-size:13px; font-weight: 600;">GIF 保存到本地</div>
+                      </div>
+                      <label class="switch">
+                          <input type="checkbox" id="gifBackupToggle">
+                          <span class="slider"></span>
+                      </label>
+                  </div>
+              </div>
+
+                <!-- Keep GIF in iCloud Setting (iCloud Only) -->
+                <div id="keepGifInIcloudSection" style="display:none; padding-top:30px;">
+                  <div style="display: flex; justify-content: space-between; align-items: center;">
+                      <div>
+                          <div style="font-size:13px; font-weight: 600;">GIF 保留在文件夹</div>
+                      </div>
+                      <label class="switch">
+                          <input type="checkbox" id="keepGifInIcloudToggle">
+                          <span class="slider"></span>
+                      </label>
+                  </div>
+              </div>
+
+                <!-- Plugin Update Notification Section -->
+                <div id="pluginUpdateSection" style="display:none; padding-top:30px; border-top: 1px solid var(--border); margin-top: 20px;">
+                  <div style="display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--bg-card); border-radius: var(--radius-s);">
+                    <div style="flex: 1;">
+                      <div style="font-size:13px; font-weight: 600; margin-bottom: 4px;">插件有新版本</div>
+                      <div style="font-size:12px; color: var(--text-secondary);">
+                        <span id="pluginUpdateCurrentVersion">当前版本: v1.0.0</span> → 
+                        <span id="pluginUpdateLatestVersion" style="color: var(--accent);">最新版本: v1.0.0</span>
+                      </div>
+                    </div>
+                    <button id="pluginUpdateBtn" class="btn btn-primary" style="flex-shrink: 0; padding: 8px 16px; font-size: 12px;">
+                      <span id="pluginUpdateBtnText">更新插件</span>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Server Update Notification Section -->
+                <div id="serverUpdateSection" style="display:none; padding-top:30px; border-top: 1px solid var(--border); margin-top: 20px;">
+                  <div style="display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--bg-card); border-radius: var(--radius-s);">
+                    <div style="flex: 1;">
+                      <div style="font-size:13px; font-weight: 600; margin-bottom: 4px;">服务器有新版本</div>
+                      <div style="font-size:12px; color: var(--text-secondary);">
+                        <span id="serverUpdateCurrentVersion">当前版本: v1.0.0</span> → 
+                        <span id="serverUpdateLatestVersion" style="color: var(--accent);">最新版本: v1.0.0</span>
+                      </div>
+                    </div>
+                    <button id="serverUpdateBtn" class="btn btn-primary" style="flex-shrink: 0; padding: 8px 16px; font-size: 12px;">
+                      <span id="serverUpdateBtnText">更新服务器</span>
+                    </button>
+                  </div>
+                </div>
+
       </div>
     </div>
   </div>
 
+  <!-- Toast -->
+  <div id="toast" class="toast">
+    <div class="toast-icon"></div>
+    <span class="toast-message"></span>
+  </div>
+
+  <!-- Logic Script (Preserved) -->
   <script>
-    // ========== 全局变量 ==========
+    // ========================================
+    // Google Drive 模式开关（默认启用）
+    // ========================================
+    const ENABLE_GOOGLE_DRIVE = true;
+    const ENABLE_ALIYUN = false;
+    
     const SERVER_URL = 'ws://localhost:8888';
     const connectionId = 'sync-session-1';
     
     let ws = null;
     let screenshotCount = 0;
-    let manualDragCount = 0; // 需要手动导入的文件数量（MP4 + 大于150MB的GIF）
+    let manualDragCount = 0;
     let heartbeatTimer = null;
-    let currentMode = null; // 'realtime' 或 'manual'
-    let currentSyncMode = null; // 'drive'、'aliyun'/'oss' 或 'icloud'，从服务器获取
-    let isMinimized = false; // 是否最小化
+    let updateCheckTimer = null; // 定期检查更新的定时器
+    let currentMode = null;
+    let currentSyncMode = null;
+    let serverInstallPath = null;
+    let isMinimized = false;
+    let gifBackupCount = 0;
+    let currentPluginVersion = '1.0.0'; // 当前插件版本
+    let latestPluginVersion = null; // 最新版本
+    let pluginUpdateUrl = null; // 更新下载地址
+    let dismissedPluginVersion = null; // 用户点击"稍后"后记录的版本
+    let dismissedServerVersion = null; // 用户点击"稍后"后记录的服务器版本
+    
+    // 配置：定期检查更新的间隔（毫秒）
+    const UPDATE_CHECK_INTERVAL = 60 * 60 * 1000; // 1小时检查一次
 
     // ========== 日志函数 ==========
     function log(msg) {
@@ -937,46 +1674,82 @@
 
       const lines = logEl.innerText.split('\n');
       if (lines.length > 200) {
-        // 保留前 200 条
         logEl.innerText = lines.slice(0, 200).join('\n');
       }
     }
 
     // ========== WebSocket连接 ==========
     function setToolbarPill(text) {
-      const pill = document.getElementById('toolbarPill');
-      pill.textContent = text;
+      // No longer using toolbar pill
     }
 
     function connect() {
-      updateStatus('waiting', '连接中');
-      setToolbarPill('连接中');
+      // 不要在连接开始时立即更新status，避免重连时频繁切换
+      // 只有在真正连接成功后才更新status
 
       ws = new WebSocket(SERVER_URL + '?id=' + connectionId + '&type=figma');
 
       ws.onopen = function () {
         log('✅ 已连接');
+        // 所有模式统一显示"已连接"
         updateStatus('connected', '已连接');
-        setToolbarPill('已连接');
 
-        // 启动心跳（保留功能逻辑不变）
+        if (ws.readyState === 1) {
+          ws.send(JSON.stringify({ type: 'get-sync-mode' }));
+          ws.send(JSON.stringify({ type: 'get-server-info' }));
+          // 自动检测更新（不需要打开设置）
+          ws.send(JSON.stringify({ type: 'check-update' }));
+        }
+        
         if (heartbeatTimer) clearInterval(heartbeatTimer);
         heartbeatTimer = setInterval(function () {
           if (ws.readyState === 1) {
             ws.send(JSON.stringify({ type: 'ping' }));
           }
         }, 5000);
+        
+        // 启动定期检查更新（每小时检查一次）
+        if (updateCheckTimer) clearInterval(updateCheckTimer);
+        updateCheckTimer = setInterval(function () {
+          if (ws.readyState === 1) {
+            console.log('🔄 定期检查更新...');
+            ws.send(JSON.stringify({ type: 'check-update' }));
+          }
+        }, UPDATE_CHECK_INTERVAL);
+        
+        console.log(`⏰ 已启动定期更新检查，间隔: ${UPDATE_CHECK_INTERVAL / 1000 / 60} 分钟`);
       };
 
       ws.onmessage = function (event) {
         var data = JSON.parse(event.data);
-
         if (data.type === 'pong') { return; }
 
-        if (data.type === 'screenshot') {
+        if (data.type === 'server-info') {
+          if (data.path) {
+            serverInstallPath = data.path;
+            
+            // 保存路径到本地存储
+            parent.postMessage({
+              pluginMessage: {
+                type: 'save-server-path',
+                path: data.path
+              }
+            }, '*');
+
+            const pathEl = document.getElementById('server-path-placeholder');
+            if (pathEl) {
+              pathEl.textContent = serverInstallPath;
+              // 移除占位符的特殊样式，使用普通文本样式
+              pathEl.style.color = 'inherit';
+            }
+          }
+        } else if (data.type === 'screenshot') {
+          if (data.backedUpLocally || data.keptInIcloud) {
+             gifBackupCount++;
+             updateStatus('connected', '');
+          }
           handleScreenshot(data);
         } else if (data.type === 'file-skipped') {
-          // 文件需要手动导入（MP4/MOV 视频或大于100MB的GIF）
           manualDragCount++;
           let reasonText = 'GIF过大';
           if (data.reason === 'mp4' || data.reason === 'video') {
@@ -991,171 +1764,251 @@
           }
           log(`⚠️  ${data.filename} 需手动导入（${reasonText}）`);
           
-          // 通过 WebSocket 通知服务器，不要删除源文件（iCloud 模式需要）
           if (ws && ws.readyState === WebSocket.OPEN) {
             try {
               ws.send(JSON.stringify({
                 type: 'screenshot-failed',
                 filename: data.filename,
                 error: reasonText,
-                keepFile: true // 标记保留文件
+                keepFile: true
               }));
             } catch (error) {
               console.error('发送失败消息失败:', error);
             }
           }
-          
-          // 更新状态显示，只显示手动导入的文件数量（不显示同步完成信息）
           updateStatus('connected', '');
         } else if (data.type === 'manual-sync-complete') {
-          // 如果有文件需要手动导入，不显示"同步完成"，只显示手动导入提示
-          if (manualDragCount > 0) {
-            // 有文件需要手动导入，不显示同步完成
-            log(`⚠️  有 ${manualDragCount} 个文件需手动导入`);
-            // 将状态从 syncing 更新为 connected，显示"需手动导入"的提示
-            // updateStatus('connected', '') 会在没有新状态文本时自动显示手动导入提示
-            updateStatus('connected', '');
-            return; // 提前返回，不处理同步完成消息
+          // 检查连接状态，只有在连接时才更新status
+          if (!ws || ws.readyState !== 1) {
+            updateStatus('disconnected', '连接断开');
+            return;
           }
           
-          // 没有需要手动导入的文件，正常显示同步完成
-          // 只要成功同步了至少一张（count > 0），就不弹窗
-          // 只有确实没有文件需要同步（count === 0 且 total === 0）时才弹出提示
+          if (manualDragCount > 0) {
+            log(`⚠️  有 ${manualDragCount} 个文件需手动导入`);
+            updateStatus('connected', '');
+             return;
+          }
+          
           if (data.count > 0) {
             log(`✅ 同步完成：${data.count} 张截图`);
-            // 更新状态，显示同步完成信息
+            if (gifBackupCount > 0) {
+              updateStatus('connected', '');
+            } else {
             updateStatus('connected', '同步完成 共' + data.count + '张');
-          } else if (data.total === 0) {
-            // 确实没有文件
+            }
+           } else if (data.total === 0) {
             log('ℹ️  文件夹中没有截图');
             alert('文件夹中没有截图需要同步');
             updateStatus('connected', '同步完成');
           } else {
-            // 有文件但处理失败的情况（count === 0 但 total > 0）
             log(`⚠️  同步完成，但 ${data.total} 张截图处理失败`);
             updateStatus('connected', '同步完成');
           }
         } else if (data.type === 'sync-mode-changed') {
           currentSyncMode = data.mode;
           updateSyncModeDisplay();
-          log('✅ 上传模式已切换');
+          if (useCaseOverlay && useCaseOverlay.classList.contains('show')) {
+          updateQRCodeDisplay();
+          }
+          log('✅ 储存方式已切换');
         } else if (data.type === 'sync-mode-info') {
           currentSyncMode = data.mode;
           updateSyncModeDisplay();
+          // 如果设置界面是打开的，确保立即更新显示
+          if (settingsOverlay && settingsOverlay.classList.contains('show')) {
+            // updateSyncModeDisplay() 已经在上面的调用中更新了，这里不需要再次调用
+            // 但可以确保显示是最新的
+          }
+          if (useCaseOverlay && useCaseOverlay.classList.contains('show')) {
+            updateQRCodeDisplay();
+          }
         } else if (data.type === 'switch-sync-mode-result') {
-          const statusEl = document.getElementById('switchStatus');
           if (data.success) {
-            statusEl.textContent = '✅ ' + data.message;
-            statusEl.style.color = 'var(--success-fg)';
+            // 简化消息：从"储存方式已切换为 XXX"改为"已切换为 XXX方式"
+            let modeName = '未知模式';
+            if (data.mode === 'drive' || data.mode === 'google') {
+              modeName = 'Google Drive';
+            } else if (data.mode === 'aliyun' || data.mode === 'oss') {
+              modeName = '阿里云';
+            } else if (data.mode === 'icloud') {
+              modeName = 'iCloud';
+            }
+            showToast('切换至 ' + modeName + ' 模式', 'success');
             currentSyncMode = data.mode;
             updateSyncModeDisplay();
+            if (useCaseOverlay && useCaseOverlay.classList.contains('show')) {
+              updateQRCodeDisplay();
+            }
             
-            // 停止实时模式并返回主界面
             stopRealtimeSync();
             showModeSelection();
             
-            // 2秒后关闭设置窗口
             setTimeout(() => {
               closeSettings();
             }, 2000);
           } else {
-            statusEl.textContent = '❌ ' + data.message;
-            statusEl.style.color = 'var(--danger)';
+            // 如果是空间不足错误，显示特定的错误消息
+            if (data.isSpaceError) {
+              showToast('iCloud 无空间', 'error');
+            } else {
+              showToast(data.message || '切换失败', 'error');
+            }
           }
+        } else if (data.type === 'user-id-info') {
+            const el = document.getElementById('displayUserId');
+            if (el) el.textContent = data.userId || '未知';
+        } else if (data.type === 'gif-backup-setting-info' || data.type === 'gif-backup-setting-updated') {
+          if (gifBackupToggle) {
+            gifBackupToggle.checked = !!data.enabled;
+          }
+        } else if (data.type === 'keep-gif-in-icloud-setting-info' || data.type === 'keep-gif-in-icloud-setting-updated') {
+          if (keepGifInIcloudToggle) {
+            keepGifInIcloudToggle.checked = !!data.enabled;
+          }
+        } else if (data.type === 'plugin-update-info') {
+          // 处理插件更新信息
+          handlePluginUpdateInfo(data);
+        } else if (data.type === 'server-update-info') {
+          // 处理服务器更新信息
+          handleServerUpdateInfo(data);
+        } else if (data.type === 'plugin-version-info') {
+          // 处理插件版本信息
+          handlePluginVersionInfo(data);
+        } else if (data.type === 'plugin-update-progress') {
+          // 处理插件更新进度
+          handlePluginUpdateProgress(data);
+        } else if (data.type === 'server-update-progress') {
+          // 处理服务器更新进度
+          handleServerUpdateProgress(data);
         }
       };
 
       ws.onerror = function () {
         log('❌ 连接失败');
-        updateStatus('waiting', '连接失败');
-        setToolbarPill('连接失败');
+        // 只有在当前显示连接状态时才更新为断开
+        const statusEl = document.getElementById('status');
+        if (statusEl && (statusEl.classList.contains('connected') || statusEl.textContent.includes('已连接') || statusEl.textContent.includes('运行中'))) {
+        updateStatus('disconnected', '连接失败');
+        }
       };
 
       ws.onclose = function () {
         log('⚠️ 连接断开，正在重连...');
-        updateStatus('waiting', '连接断开');
-        setToolbarPill('未连接');
+        // 只有在当前显示连接状态时才更新为断开，避免重连时频繁切换
+        const statusEl = document.getElementById('status');
+        if (statusEl && (statusEl.classList.contains('connected') || statusEl.textContent.includes('已连接'))) {
+        updateStatus('disconnected', '连接断开');
+        }
         if (heartbeatTimer) clearInterval(heartbeatTimer);
+        if (updateCheckTimer) clearInterval(updateCheckTimer); // 清除更新检查定时器
         setTimeout(connect, 3000);
       };
     }
 
-    // 保存最近处理的文件的 driveFileId（用于失败时取消删除）
-    let currentDriveFileId = null;
+    let currentFileId = null;
+    let currentFileIdType = null;
+    let currentFileBackedUp = false;
 
     function handleScreenshot(data) {
-      // 先不增加计数，等待 Figma 处理成功后再增加
-      // 这样可以避免在文件需要手动导入或处理失败时错误地增加计数
       log(`📸 ${data.filename || '截图'}`);
-
-      // 保存 driveFileId（如果存在）
-      currentDriveFileId = data.driveFileId || null;
+      currentFileId = data.ossFileId || data.driveFileId || null;
+      currentFileIdType = data.ossFileId ? 'oss' : (data.driveFileId ? 'drive' : null);
+      // 检查文件是否已备份（Google Drive）或保留（iCloud）
+      currentFileBackedUp = data.backedUpLocally || data.keptInIcloud || false;
 
       try {
-      // 发送到Figma主线程
       parent.postMessage({
         pluginMessage: {
           type: 'add-screenshot',
           bytes: data.bytes,
           timestamp: data.timestamp,
           filename: data.filename,
-          driveFileId: data.driveFileId // 传递 driveFileId 给 code.js
+          driveFileId: data.driveFileId,
+          ossFileId: data.ossFileId
         }
       }, '*');
-        } catch (error) {
+      } catch (error) {
         log('❌ 处理失败: ' + error.message);
         console.error('发送失败:', error);
+        
+        // 如果发送到 Figma 失败（例如消息过大），但已经备份到本地
+        // 那么我们也应该通知服务器可以删除云端文件，因为本地已经有了
+        if (currentFileBackedUp) {
+          log('⚠️  发送到 Figma 失败，但文件已备份到本地，确认删除云端文件');
+          showToast('Figma 导入失败，已保存到本地', 'warning');
+          
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            if (currentFileId) {
+              try {
+                const confirmMessage = {
+                  type: 'screenshot-received',
+                  filename: data.filename || '未命名文件',
+                  timestamp: Date.now()
+                };
+                if (currentFileIdType === 'oss') confirmMessage.ossFileId = currentFileId;
+                else if (currentFileIdType === 'drive') confirmMessage.driveFileId = currentFileId;
+                ws.send(JSON.stringify(confirmMessage));
+                
+                // Reset
+                currentFileId = null;
+                currentFileIdType = null;
+                currentFileBackedUp = false;
+              } catch (sendError) {
+                console.error('❌ 发送确认失败:', sendError);
+              }
+            }
+          }
         }
-
-      // 注意：不在这里立即发送确认消息
-      // 确认消息将在 code.js 处理成功后发送（在 screenshot-added 成功消息处理中）
+      }
     }
 
-    // ========== UI更新 ==========
     function updateStatus(type, text) {
       const statusEl = document.getElementById('status');
-      const pill = document.getElementById('toolbarPill');
 
-      // 更新主状态显示区域
-      statusEl.className = 'status ' + type;
-      
-      // 优先显示新传入的状态文本（完全替换旧状态）
-      if (text && text !== '') {
-        // 有新状态文本时，完全显示新状态，不追加警告
-        // 这样可以确保新状态能够替换掉"需手动导入"的警告
-      statusEl.textContent = text;
-        // 恢复默认样式（通过CSS类设置）
-        statusEl.style.color = '';
-        statusEl.style.background = '';
-        statusEl.style.borderColor = '';
-      } else if (manualDragCount > 0 && type === 'connected') {
-        // 没有新状态文本，但有需要手动导入的文件，显示警告
-        const warningText = `需手动导入 ${manualDragCount} 段录屏`;
-        statusEl.textContent = warningText;
-        // 只修改颜色和背景色，其他样式保持与status.connected一致
-        statusEl.style.color = '#ff9500'; // 黄色警示色
-        statusEl.style.background = 'rgba(255, 149, 0, 0.1)'; // 浅黄色背景
-        statusEl.style.borderColor = 'transparent'; // 保持与status.connected一致的透明边框
-      } else {
-        // 没有新状态文本，也没有需要手动导入的文件，显示空文本或默认文本
-        statusEl.textContent = text || '';
-        // 恢复默认样式（通过CSS类设置）
-        statusEl.style.color = '';
-        statusEl.style.background = '';
-        statusEl.style.borderColor = '';
+      // 如果尝试设置为 connected 状态，但实际连接已断开，则改为 disconnected
+      if (type === 'connected' && (!ws || ws.readyState !== WebSocket.OPEN)) {
+        type = 'disconnected';
+        if (!text || text === '') {
+          text = '连接断开';
+        }
       }
 
-      // 同步顶部标签样式（保持绿色，不变黄色）
-      if (type === 'connected') {
-        pill.textContent = '已连接';
-        pill.style.background = 'rgba(52, 199, 89, 0.05)';  // 绿色背景
-        pill.style.color = '#1d7a41';       // 深绿色文字
-        pill.style.borderColor = 'rgba(52, 199, 89, 0.3)';
-      } else if (type === 'waiting' || type === 'syncing') {
-        pill.textContent = '未连接';
-        pill.style.background = 'rgba(255, 255, 255, 0.05)';  // 灰色背景
-        pill.style.color = '#6e6e73';       // 灰色文字
-        pill.style.borderColor = 'rgba(255, 255, 255, 0.3)';
+      statusEl.className = 'connection-pill'; // Reset to base class
+
+      if (text && text !== '') {
+        statusEl.textContent = text;
+        statusEl.onclick = null;
+        statusEl.style.cursor = 'default';
+        
+        if(type === 'connected') statusEl.classList.add('connected');
+        else if(type === 'waiting') statusEl.classList.add('waiting');
+        // disconnected uses base class (gray)
+        
+      } else if (manualDragCount > 0 && type === 'connected') {
+        const warningText = `需手动导入 ${manualDragCount} 段 视频`;
+        statusEl.innerHTML = `${warningText} <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity: 0.8;"><polyline points="9 18 15 12 9 6"></polyline></svg>`;
+        statusEl.className = 'connection-pill waiting';
+        statusEl.style.cursor = 'pointer';
+        statusEl.onclick = function() {
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'open-local-folder' }));
+          }
+        };
+      } else if (gifBackupCount > 0 && type === 'connected') {
+        // 根据当前模式显示不同的文案
+        const actionText = (currentSyncMode === 'icloud') ? '已保留' : '已保存';
+        const backupText = `${actionText} ${gifBackupCount} 段 GIF`;
+        statusEl.innerHTML = `${backupText} <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity: 0.8;"><polyline points="9 18 15 12 9 6"></polyline></svg>`;
+        statusEl.className = 'connection-pill connected';
+        statusEl.style.cursor = 'pointer';
+        statusEl.onclick = function() {
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'open-local-folder' }));
+          }
+        };
+      } else {
+        statusEl.textContent = text || '';
       }
     }
 
@@ -1164,78 +2017,102 @@
       document.getElementById('modeSelection').classList.add('hidden');
       document.getElementById('workArea').classList.add('active');
       
-      // 进入模式时自动收起日志
       collapseLog();
+      
+      const activeModeIcon = document.getElementById('activeModeIcon');
+      const activeModeTitle = document.getElementById('activeModeTitle');
 
       if (mode === 'realtime') {
-        document.getElementById('modeTitle').innerHTML = '<span class="mode-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0.00 0.00 512.00 512.00" width="20" height="20"><path fill="#ffcf4a" d="M 400.39 0.00 Q 406.46 1.42 407.76 6.51 Q 408.80 10.63 407.10 13.33 Q 354.52 96.58 295.73 189.53 Q 293.22 193.50 293.01 195.71 C 292.55 200.60 296.74 205.58 301.51 205.58 Q 403.17 205.65 405.47 205.57 C 410.18 205.43 414.68 206.67 416.22 211.27 Q 418.13 217.00 414.94 220.44 Q 366.28 272.98 149.12 507.37 Q 145.54 511.24 141.80 512.00 L 140.09 512.00 Q 133.33 510.39 132.18 505.27 Q 131.50 502.28 133.92 494.56 Q 154.89 427.39 186.53 325.52 C 188.52 319.11 184.20 313.29 177.53 313.29 Q 113.93 313.24 110.15 313.32 Q 101.28 313.52 99.28 311.96 C 94.32 308.09 94.61 304.57 96.24 298.17 Q 98.55 289.09 167.92 12.79 C 169.65 5.89 170.15 1.66 176.88 0.00 L 400.39 0.00 Z"/></svg></span> 实时同步模式';
-        document.getElementById('modeSubtitle').textContent = '自动检测并同步新截图';
-        document.getElementById('stopBtn').style.display = 'block';
+        // Realtime Mode Setup
+        activeModeIcon.style.color = '#FFCC00';
+        activeModeIcon.style.background = 'rgba(255, 204, 0, 0.15)';
+        activeModeIcon.innerHTML = `<svg width: 12px; height: 12px; viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path></svg>`;
+        activeModeTitle.textContent = '实时模式';
+        document.getElementById('modeSubtitle').textContent = '监听中...';
+
         document.getElementById('syncBtn').style.display = 'none';
+        document.getElementById('stopBtn').style.display = 'flex';
         document.getElementById('infoBox').style.display = 'none';
 
-        // 通知Mac端启动实时模式
         if (ws && ws.readyState === 1) {
           ws.send(JSON.stringify({ type: 'start-realtime' }));
           log('⚡ 实时同步已启动');
-          updateStatus('connected', '实时监听中');
+          updateStatus('connected', '已连接');
+        } else {
+          // 如果未连接，显示连接断开状态
+          updateStatus('disconnected', '连接断开');
         }
       } else {
-        document.getElementById('modeTitle').innerHTML = '<span class="mode-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="20" height="20"><g><path d="m214.2 107-40.2-29.9c-9.5-7-20.9-10.8-32.7-10.8h-110.2c-16.6 0-30 13.4-30 30v349.5h404.1c15.2 0 27.4-12.3 27.4-27.4v-270.6c0-16.6-13.4-30-30-30h-155.6c-11.8 0-23.3-3.8-32.8-10.8z" fill="#f6c012"/><g><path d="m76.9 143.7h300c8.3 0 15 6.7 15 15v200c0 8.3-6.7 15-15 15h-300c-8.3 0-15-6.7-15-15v-200c0-8.3 6.7-15 15-15z" fill="#ffeac5"/><path d="m56.9 163.7h300c8.3 0 15 6.7 15 15v200c0 8.3-6.7 15-15 15h-300c-8.3 0-15-6.7-15-15v-200c0-8.3 6.7-15 15-15z" fill="#fff7e6"/></g><path d="m85.2 220.1-84.1 225.6h410.8c12.5 0 23.7-7.8 28.1-19.5l69-185.2c7.3-19.6-7.2-40.5-28.1-40.5h-367.6c-12.5.1-23.7 7.8-28.1 19.6z" fill="#fbd87c"/></g></svg></span> 手动同步模式';
-        document.getElementById('modeSubtitle').textContent = '批量同步存储的所有截图';
-        document.getElementById('syncBtn').style.display = 'block';
+        // Manual Mode Setup
+        activeModeIcon.style.color = '#007AFF';
+        activeModeIcon.style.background = 'rgba(0, 122, 255, 0.15)';
+        activeModeIcon.innerHTML = `<svg style="width: 14px; height: 14px;" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="0"><path d="M19 9h-4V3H9v6H5l7 8 7-8zM5 19v3h14v-3H5z"></path></svg>`;
+        activeModeTitle.textContent = '手动模式';
+        document.getElementById('modeSubtitle').textContent = '准备同步';
+
+        document.getElementById('syncBtn').style.display = 'flex';
         document.getElementById('stopBtn').style.display = 'none';
         document.getElementById('infoBox').style.display = 'none';
+        
+        // 只有在连接成功时才显示"已连接"
+        if (ws && ws.readyState === 1) {
         updateStatus('connected', '已连接');
+        } else {
+          updateStatus('disconnected', '连接断开');
+        }
       }
     }
 
     function showModeSelection() {
-      // 停止实时模式
       if (currentMode === 'realtime' && ws && ws.readyState === 1) {
         ws.send(JSON.stringify({ type: 'stop-realtime' }));
         log('⏸️  实时同步已停止');
       }
 
-      // 清零已同步截图计数和手动导入计数
       screenshotCount = 0;
       manualDragCount = 0;
+      gifBackupCount = 0;
       document.getElementById('count').textContent = '0';
-
+      
       currentMode = null;
       document.getElementById('workArea').classList.remove('active');
       document.getElementById('modeSelection').classList.remove('hidden');
-      updateStatus('waiting', '已返回模式选择');
+      updateStatus('connected', '已返回模式选择');
     }
 
-    // ========== 按钮事件 ==========
     document.getElementById('realtimeBtn').onclick = function () { showWorkArea('realtime'); };
     document.getElementById('manualBtn').onclick = function () { showWorkArea('manual'); };
 
     document.getElementById('syncBtn').onclick = function () {
-      log('🫳🏻 开始同步...');
-      updateStatus('syncing', '正在同步');
-      
-      // 清零手动拖入计数，开始新的同步周期
-      manualDragCount = 0;
-
-      if (ws && ws.readyState === 1) {
-        ws.send(JSON.stringify({ type: 'manual-sync' }));
-      } else {
+      // 检查连接状态
+      if (!ws || ws.readyState !== 1) {
         log('❌ 未连接');
-        updateStatus('waiting', '连接失败');
+        updateStatus('disconnected', '连接断开');
+        return;
       }
+      
+      log('🫳🏻 开始同步...');
+      updateStatus('connected', '正在同步');
+      manualDragCount = 0;
+      gifBackupCount = 0;
+        ws.send(JSON.stringify({ type: 'manual-sync' }));
     };
 
-    document.getElementById('stopBtn').onclick = function () {
-      if (confirm('确定要停止实时同步吗？')) { showModeSelection(); }
-    };
+    document.getElementById('stopBtn').onclick = function() {
+      stopRealtimeSync();
+      showModeSelection(); 
+    }
 
-    // 停止实时同步的通用函数
     function stopRealtimeSync() {
-      if (currentMode === 'realtime' && ws && ws.readyState === 1) {
+      // 无论当前模式是什么，只要 WebSocket 连接存在，就发送停止命令
+      // 这样可以确保在关闭插件时，所有正在运行的监听都会被停止
+      if (ws && ws.readyState === 1) {
+        try {
         ws.send(JSON.stringify({ type: 'stop-realtime' }));
-        log('⏸️  实时同步已停止');
+          log('⏸️  已停止同步监听');
+        } catch (error) {
+          console.error('停止同步监听失败:', error);
+        }
       }
     }
 
@@ -1248,54 +2125,53 @@
       showModeSelection(); 
     };
 
-    // ========== 加载二维码图片 ==========
-    // 根据主题动态选择二维码
     function setQRCodeImages() {
       const qrGoogleScreenshot = document.getElementById('qrGoogleScreenshot');
       const qrGoogleAlbum = document.getElementById('qrGoogleAlbum');
       const qrIcloudScreenshot = document.getElementById('qrIcloudScreenshot');
       const qrIcloudAlbum = document.getElementById('qrIcloudAlbum');
       
-      // 检测当前主题（dark 或 light）
       const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
       const uris = getQRCodeURI(isDark);
       
-      // 设置二维码图片
       if (qrGoogleScreenshot) qrGoogleScreenshot.src = uris.googleScreenshot || uris.google;
       if (qrGoogleAlbum) qrGoogleAlbum.src = uris.googleAlbum || uris.google;
       if (qrIcloudScreenshot) qrIcloudScreenshot.src = uris.icloudScreenshot || uris.icloud;
       if (qrIcloudAlbum) qrIcloudAlbum.src = uris.icloudAlbum || uris.icloud;
     }
 
-    // ========== 更新图标颜色以适配主题 ==========
-    function updateIconColors() {
+    function setIdStepImages() {
+      const idStep1Image = document.getElementById('idStep1Image');
+      const idStep2Image = document.getElementById('idStep2Image');
       const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
       
-      // 获取所有需要适配的单色图标（排除彩色图标）
-      const monochromeIcons = document.querySelectorAll('.text-link img, .logo-icon img');
-      
-      monochromeIcons.forEach(icon => {
-        // 如果图标有 no-invert 类，跳过（用于彩色图标）
-        if (icon.classList.contains('no-invert')) {
-          return;
-        }
-        
-        // 在 dark mode 下反转颜色，在 light mode 下恢复
-        if (isDark) {
-          icon.style.filter = 'invert(1) brightness(1)';
-        } else {
-          icon.style.filter = 'none';
-        }
-      });
+      if (idStep1Image) {
+        idStep1Image.src = IMAGE_BASE_URL + (isDark ? 'id-step1-black.png' : 'id-step1-white.png');
+      }
+      if (idStep2Image) {
+        idStep2Image.src = IMAGE_BASE_URL + (isDark ? 'id-step2-black.png' : 'id-step2-white.png');
+      }
     }
 
-    // 主题变化处理函数
+    function updateIconColors() {
+       const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+       const logoImg = document.querySelector('.logo-box img');
+       const minimizedLogoImg = document.querySelector('.minimized-brand img');
+       
+       if (logoImg) {
+         logoImg.src = IMAGE_BASE_URL + (isDark ? 'logo.svg' : 'logo.svg');
+       }
+       if (minimizedLogoImg) {
+         minimizedLogoImg.src = IMAGE_BASE_URL + (isDark ? 'logo.svg' : 'logo.svg');
+       }
+    }
+
     function handleThemeChange() {
       setQRCodeImages();
+      setIdStepImages();
       updateIconColors();
     }
     
-    // DOM 加载完成后设置二维码图片和图标颜色
     if (document.readyState === 'loading') {
       window.addEventListener('DOMContentLoaded', function() {
         handleThemeChange();
@@ -1304,25 +2180,68 @@
       handleThemeChange();
     }
     
-    // 监听主题变化
     const themeMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
     themeMediaQuery.addEventListener('change', handleThemeChange);
 
-    // ========== 使用场景 Modal ==========
     const useCaseOverlay = document.getElementById('useCaseOverlay');
     const viewUseCases = document.getElementById('viewUseCases');
     const useCaseClose = document.getElementById('useCaseClose');
 
-    function openUseCases() {
-      // 如果当前是最小化状态，先恢复
-      if (isMinimized) {
-        toggleMinimize();
+    function updateQRCodeDisplay() {
+      const qrGoogleScreenshotContainer = document.getElementById('qrGoogleScreenshotContainer');
+      const qrGoogleAlbumContainer = document.getElementById('qrGoogleAlbumContainer');
+      const qrIcloudScreenshotContainer = document.getElementById('qrIcloudScreenshotContainer');
+      const qrIcloudAlbumContainer = document.getElementById('qrIcloudAlbumContainer');
+      const googleDriveHint = document.getElementById('googleDriveHint');
+      const qrCodesContainer = document.getElementById('qrCodesContainer');
+      const userIdDisplaySection = document.getElementById('userIdDisplaySection');
+      const noModeMessage = document.getElementById('noModeMessage');
+      const qrSubtitle = document.getElementById('qrSubtitle');
+      
+      if (qrGoogleScreenshotContainer) qrGoogleScreenshotContainer.style.display = 'none';
+      if (qrGoogleAlbumContainer) qrGoogleAlbumContainer.style.display = 'none';
+      if (qrIcloudScreenshotContainer) qrIcloudScreenshotContainer.style.display = 'none';
+      if (qrIcloudAlbumContainer) qrIcloudAlbumContainer.style.display = 'none';
+      // if (googleDriveHint) googleDriveHint.style.display = 'none';
+      if (userIdDisplaySection) userIdDisplaySection.style.display = 'none';
+      if (noModeMessage) noModeMessage.style.display = 'none';
+      if (qrSubtitle) qrSubtitle.style.display = 'none';
+      if (qrCodesContainer) qrCodesContainer.style.display = 'none';
+      
+      if (currentSyncMode === 'drive' && typeof ENABLE_GOOGLE_DRIVE !== 'undefined' && ENABLE_GOOGLE_DRIVE) {
+        if (qrCodesContainer) qrCodesContainer.style.display = 'grid';
+        if (qrSubtitle) qrSubtitle.style.display = 'block';
+        if (qrGoogleScreenshotContainer) qrGoogleScreenshotContainer.style.display = 'flex';
+        if (qrGoogleAlbumContainer) qrGoogleAlbumContainer.style.display = 'flex';
+        // if (googleDriveHint) googleDriveHint.style.display = 'block';
+        if (userIdDisplaySection) userIdDisplaySection.style.display = 'block';
+      } else if (currentSyncMode === 'icloud') {
+        if (qrCodesContainer) qrCodesContainer.style.display = 'grid';
+        if (qrSubtitle) qrSubtitle.style.display = 'block';
+        if (qrIcloudScreenshotContainer) qrIcloudScreenshotContainer.style.display = 'flex';
+        if (qrIcloudAlbumContainer) qrIcloudAlbumContainer.style.display = 'flex';
+      } else {
+        // No mode selected or unknown mode
+        if (noModeMessage) noModeMessage.style.display = 'block';
       }
-      useCaseOverlay.classList.remove('hidden');
+    }
+
+    function openUseCases() {
+      if (isMinimized) toggleMinimize();
+      updateQRCodeDisplay();
+      if (ws && ws.readyState === 1) {
+        if (!currentSyncMode) {
+            ws.send(JSON.stringify({ type: 'get-sync-mode' }));
+        }
+        ws.send(JSON.stringify({ type: 'get-user-id' }));
+      }
+      useCaseOverlay.classList.add('show');
+      // Check scroll state after modal opens
+      setTimeout(checkCommandScroll, 400);
     }
 
     function closeUseCases() {
-      useCaseOverlay.classList.add('hidden');
+      useCaseOverlay.classList.remove('show');
     }
 
     viewUseCases.onclick = openUseCases;
@@ -1331,61 +2250,92 @@
       if (e.target === useCaseOverlay) closeUseCases();
     });
     document.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape' && !useCaseOverlay.classList.contains('hidden')) {
+      if (e.key === 'Escape' && useCaseOverlay.classList.contains('show')) {
         closeUseCases();
       }
     });
 
-    // ========== 设置 Modal ==========
     const settingsOverlay = document.getElementById('settingsOverlay');
     const openSettingsBtn = document.getElementById('openSettings');
     const settingsClose = document.getElementById('settingsClose');
     const switchToDrive = document.getElementById('switchToDrive');
     const switchToAliyun = document.getElementById('switchToAliyun');
     const switchToIcloud = document.getElementById('switchToIcloud');
+    
+    if (typeof ENABLE_GOOGLE_DRIVE !== 'undefined' && !ENABLE_GOOGLE_DRIVE) {
+      if (switchToDrive) switchToDrive.style.display = 'none';
+      // Hide others handled in updateQRCodeDisplay
+    }
+    
+    if (typeof ENABLE_ALIYUN !== 'undefined' && !ENABLE_ALIYUN) {
+      if (switchToAliyun) switchToAliyun.style.display = 'none';
+    }
+    
     const imageWidthInput = document.getElementById('imageWidthInput');
     const imageHeightInput = document.getElementById('imageHeightInput');
     const saveSizeSettingsBtn = document.getElementById('saveSizeSettings');
     const clearSizeSettingsBtn = document.getElementById('clearSizeSettings');
-    const sizeSettingsStatus = document.getElementById('sizeSettingsStatus');
     const frameColumnsInput = document.getElementById('frameColumnsInput');
     const saveLayoutSettingsBtn = document.getElementById('saveLayoutSettings');
     const clearLayoutSettingsBtn = document.getElementById('clearLayoutSettings');
-    const layoutSettingsStatus = document.getElementById('layoutSettingsStatus');
     const toggleMinimizeBtn = document.getElementById('toggleMinimize');
     const minimizeIcon = document.getElementById('minimizeIcon');
     const appRoot = document.querySelector('.app');
     
-    // 尺寸设置：从 Figma clientStorage 读取（通过消息传递）
-    function loadSizeSettings() {
-      // 请求 Figma 端读取设置
-      parent.postMessage({
-        pluginMessage: {
-          type: 'get-size-settings'
+    const gifBackupSection = document.getElementById('gifBackupSection');
+    const gifBackupToggle = document.getElementById('gifBackupToggle');
+    const keepGifInIcloudSection = document.getElementById('keepGifInIcloudSection');
+    const keepGifInIcloudToggle = document.getElementById('keepGifInIcloudToggle');
+
+    if (gifBackupToggle) {
+      gifBackupToggle.onchange = function() {
+        const enabled = this.checked;
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            type: 'update-gif-backup-setting',
+            enabled: enabled
+          }));
+        } else {
+          showToast('未连接服务器', 'error');
+          // Revert change
+          this.checked = !enabled;
         }
-      }, '*');
+      };
     }
     
-    // 尺寸设置：保存到 Figma clientStorage（通过消息传递）
+    if (keepGifInIcloudToggle) {
+      keepGifInIcloudToggle.onchange = function() {
+        const enabled = this.checked;
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            type: 'update-keep-gif-in-icloud-setting',
+            enabled: enabled
+          }));
+        } else {
+          showToast('未连接服务器', 'error');
+          // Revert change
+          this.checked = !enabled;
+        }
+      };
+    }
+    
+    function loadSizeSettings() {
+      parent.postMessage({ pluginMessage: { type: 'get-size-settings' } }, '*');
+    }
+    
     function saveSizeSettings() {
       const width = imageWidthInput.value.trim();
       const height = imageHeightInput.value.trim();
       
-      // 验证输入
       if (width && (isNaN(width) || parseInt(width) <= 0)) {
-        sizeSettingsStatus.textContent = '❌ 宽度必须是大于0的数字';
-        sizeSettingsStatus.style.color = 'var(--danger)';
+        showToast('宽度必须是大于0的数字', 'error');
         return;
       }
       if (height && (isNaN(height) || parseInt(height) <= 0)) {
-        sizeSettingsStatus.textContent = '❌ 高度必须是大于0的数字';
-        sizeSettingsStatus.style.color = 'var(--danger)';
+        showToast('高度必须是大于0的数字', 'error');
         return;
       }
       
-      // 注意：如果只输入了宽度或高度，另一个值会在添加截图时根据实际图片的宽高比自动计算
-      
-      // 发送给 Figma 保存
       parent.postMessage({
         pluginMessage: {
           type: 'update-size-settings',
@@ -1394,11 +2344,9 @@
         }
       }, '*');
       
-      sizeSettingsStatus.textContent = '⏳ 正在保存...';
-      sizeSettingsStatus.style.color = 'var(--subtext)';
+      showToast('正在保存', 'loading');
     }
     
-    // 清除尺寸设置
     function clearSizeSettings() {
       imageWidthInput.value = '';
       imageHeightInput.value = '';
@@ -1411,40 +2359,26 @@
         }
       }, '*');
       
-      sizeSettingsStatus.textContent = '✅ 已清除尺寸设置，将使用截图实际尺寸';
-      sizeSettingsStatus.style.color = 'var(--success-fg)';
-      setTimeout(() => {
-        sizeSettingsStatus.textContent = '';
-      }, 2000);
+      showToast('已重置', 'success');
     }
-    
-    // 不再实时自动计算，只在保存时计算
     
     saveSizeSettingsBtn.onclick = saveSizeSettings;
     clearSizeSettingsBtn.onclick = clearSizeSettings;
     
-    // 布局设置：从 Figma clientStorage 读取（通过消息传递）
     function loadLayoutSettings() {
-      // 请求 Figma 端读取设置
-      parent.postMessage({
-        pluginMessage: {
-          type: 'get-layout-settings'
-        }
-      }, '*');
+      parent.postMessage({ pluginMessage: { type: 'get-layout-settings' } }, '*');
     }
     
-    // 布局设置：保存到 Figma clientStorage（通过消息传递）
+    function loadServerPath() {
+      parent.postMessage({ pluginMessage: { type: 'get-server-path' } }, '*');
+    }
+    
     function saveLayoutSettings() {
       const columns = frameColumnsInput.value.trim();
-      
-      // 验证输入
       if (columns && (isNaN(columns) || parseInt(columns) <= 0)) {
-        layoutSettingsStatus.textContent = '❌ 每行显示数量必须是大于0的数字';
-        layoutSettingsStatus.style.color = 'var(--danger)';
+        showToast('必须是大于0的数字', 'error');
         return;
       }
-      
-      // 发送给 Figma 保存
       parent.postMessage({
         pluginMessage: {
           type: 'update-layout-settings',
@@ -1452,50 +2386,380 @@
         }
       }, '*');
       
-      layoutSettingsStatus.textContent = '⏳ 正在保存...';
-      layoutSettingsStatus.style.color = 'var(--subtext)';
+      showToast('正在保存', 'loading');
     }
     
-    // 清除布局设置
     function clearLayoutSettings() {
       frameColumnsInput.value = '';
-      
       parent.postMessage({
         pluginMessage: {
           type: 'update-layout-settings',
           columns: null
         }
       }, '*');
-      
-      layoutSettingsStatus.textContent = '✅ 已清除布局设置，将一直横着排（不换行）';
-      layoutSettingsStatus.style.color = 'var(--success-fg)';
-      setTimeout(() => {
-        layoutSettingsStatus.textContent = '';
-      }, 2000);
+      showToast('已重置', 'success');
     }
     
     saveLayoutSettingsBtn.onclick = saveLayoutSettings;
     clearLayoutSettingsBtn.onclick = clearLayoutSettings;
     
-    // 打开设置时加载保存的尺寸设置和布局设置
     openSettingsBtn.onclick = function() {
-      // 如果当前是最小化状态，先恢复
-      if (isMinimized) {
-        toggleMinimize();
-      }
-      updateSyncModeDisplay();
-      loadSizeSettings();
-      loadLayoutSettings();
-      settingsOverlay.classList.remove('hidden');
+      if (isMinimized) toggleMinimize();
+      // 先请求同步模式（如果还没有收到）
       if (ws && ws.readyState === 1) {
         ws.send(JSON.stringify({ type: 'get-sync-mode' }));
       }
+      // 请求当前插件版本
+      parent.postMessage({ pluginMessage: { type: 'get-plugin-version' } }, '*');
+      // 更新显示（使用当前已知的模式，如果还没有收到响应，会在收到响应后自动更新）
+      updateSyncModeDisplay();
+      loadSizeSettings();
+      loadLayoutSettings();
+      settingsOverlay.classList.add('show');
     };
+    
+    // 全局变量：跟踪待更新的类型
+    let pendingUpdateType = null; // 'plugin' or 'server'
+    let pendingUpdateData = {};
+    
+    // 处理插件更新信息
+    function handlePluginUpdateInfo(data) {
+      latestPluginVersion = data.latestVersion;
+      pluginUpdateUrl = data.updateUrl;
+      
+      // 比较版本号
+      if (data.hasUpdate && compareVersions(latestPluginVersion, currentPluginVersion) > 0) {
+        // 检查是否是用户已经点击"稍后"忽略的版本
+        const shouldShow = !dismissedPluginVersion || compareVersions(latestPluginVersion, dismissedPluginVersion) > 0;
+        
+        if (shouldShow) {
+          // 有新版本，且不是用户已忽略的版本，显示顶部通知条
+          pendingUpdateType = 'plugin';
+          pendingUpdateData = data;
+          showUpdateBanner('插件', currentPluginVersion, latestPluginVersion);
+          console.log(`📢 发现插件新版本: v${currentPluginVersion} → v${latestPluginVersion}`);
+        } else {
+          console.log(`🔕 用户已忽略插件版本 v${dismissedPluginVersion}，不再显示`);
+        }
+        
+        // 同时更新设置页面的显示（如果用户之后打开设置）
+        const updateSection = document.getElementById('pluginUpdateSection');
+        const updateCurrentVersion = document.getElementById('pluginUpdateCurrentVersion');
+        const updateLatestVersion = document.getElementById('pluginUpdateLatestVersion');
+        
+        if (updateSection && updateCurrentVersion && updateLatestVersion) {
+          updateCurrentVersion.textContent = `当前版本: v${currentPluginVersion}`;
+          updateLatestVersion.textContent = `最新版本: v${latestPluginVersion}`;
+          updateSection.style.display = 'block';
+        }
+      } else {
+        // 已是最新版本，隐藏更新提示
+        const updateSection = document.getElementById('pluginUpdateSection');
+        if (updateSection) {
+          updateSection.style.display = 'none';
+        }
+      }
+    }
+    
+    // 处理服务器更新信息
+    function handleServerUpdateInfo(data) {
+      if (data.hasUpdate) {
+        // 检查是否是用户已经点击"稍后"忽略的版本
+        const shouldShow = !dismissedServerVersion || compareVersions(data.latestVersion, dismissedServerVersion) > 0;
+        
+        if (shouldShow) {
+          // 优先显示服务器更新（如果同时有插件和服务器更新）
+          if (pendingUpdateType === 'plugin') {
+            // 如果已经有插件更新待处理，优先显示服务器更新
+            pendingUpdateType = 'server';
+          } else {
+            pendingUpdateType = 'server';
+          }
+          pendingUpdateData = data;
+          showUpdateBanner('服务器', data.currentVersion, data.latestVersion);
+          console.log(`📢 发现服务器新版本: v${data.currentVersion} → v${data.latestVersion}`);
+        } else {
+          console.log(`🔕 用户已忽略服务器版本 v${dismissedServerVersion}，不再显示`);
+        }
+        
+        // 同时更新设置页面的显示
+        const updateSection = document.getElementById('serverUpdateSection');
+        const updateCurrentVersion = document.getElementById('serverUpdateCurrentVersion');
+        const updateLatestVersion = document.getElementById('serverUpdateLatestVersion');
+        
+        if (updateSection && updateCurrentVersion && updateLatestVersion) {
+          updateCurrentVersion.textContent = `当前版本: v${data.currentVersion}`;
+          updateLatestVersion.textContent = `最新版本: v${data.latestVersion}`;
+          updateSection.style.display = 'block';
+        }
+      } else {
+        // 已是最新版本，隐藏更新提示
+        const updateSection = document.getElementById('serverUpdateSection');
+        if (updateSection) {
+          updateSection.style.display = 'none';
+        }
+      }
+    }
+    
+    // 显示顶部更新通知条
+    function showUpdateBanner(componentName, currentVer, latestVer) {
+      const banner = document.getElementById('updateBanner');
+      const title = document.getElementById('updateBannerTitle');
+      const version = document.getElementById('updateBannerVersion');
+      
+      if (banner && title && version) {
+        title.textContent = `${componentName}有新版本`;
+        version.textContent = `v${currentVer} → v${latestVer}`;
+        banner.classList.add('show');
+      }
+    }
+    
+    // 隐藏顶部更新通知条
+    function hideUpdateBanner() {
+      const banner = document.getElementById('updateBanner');
+      if (banner) {
+        banner.classList.remove('show');
+      }
+    }
+    
+    // 处理插件版本信息
+    function handlePluginVersionInfo(data) {
+      currentPluginVersion = data.version || '1.0.0';
+      console.log('📦 当前插件版本:', currentPluginVersion);
+    }
+    
+    // 比较版本号（简单版本，支持 x.y.z 格式）
+    function compareVersions(v1, v2) {
+      const parts1 = v1.split('.').map(Number);
+      const parts2 = v2.split('.').map(Number);
+      const maxLength = Math.max(parts1.length, parts2.length);
+      
+      for (let i = 0; i < maxLength; i++) {
+        const part1 = parts1[i] || 0;
+        const part2 = parts2[i] || 0;
+        if (part1 > part2) return 1;
+        if (part1 < part2) return -1;
+      }
+      return 0;
+    }
+    
+    // 处理插件更新进度
+    function handlePluginUpdateProgress(data) {
+      const updateBtn = document.getElementById('pluginUpdateBtn');
+      const updateBtnText = document.getElementById('pluginUpdateBtnText');
+      const bannerBtn = document.getElementById('updateBannerNow');
+      
+      if (data.status === 'downloading') {
+        showToast(data.message || '正在下载...', 'loading');
+        if (updateBtnText) {
+          updateBtnText.textContent = '下载中...';
+        }
+      } else if (data.status === 'installing') {
+        showToast(data.message || '正在安装...', 'loading');
+        if (updateBtnText) {
+          updateBtnText.textContent = '安装中...';
+        }
+      } else if (data.status === 'completed') {
+        showToast(data.message || '更新完成！请重启插件', 'success');
+        if (updateBtn) {
+          updateBtn.disabled = false;
+        }
+        if (updateBtnText) {
+          updateBtnText.textContent = '更新完成';
+        }
+        // 重置通知条按钮
+        if (bannerBtn) {
+          bannerBtn.disabled = false;
+          bannerBtn.textContent = '立即更新';
+        }
+        // 更新版本显示
+        if (data.version) {
+          currentPluginVersion = data.version.replace(/^v/, '');
+          const updateCurrentVersion = document.getElementById('pluginUpdateCurrentVersion');
+          if (updateCurrentVersion) {
+            updateCurrentVersion.textContent = `当前版本: v${currentPluginVersion}`;
+          }
+          // 隐藏更新提示
+          const updateSection = document.getElementById('pluginUpdateSection');
+          if (updateSection) {
+            updateSection.style.display = 'none';
+          }
+        }
+        // 清除待更新标记和忽略记录
+        pendingUpdateType = null;
+        pendingUpdateData = {};
+        dismissedPluginVersion = null; // 清除忽略记录，更新完成后可以提示新版本
+      } else if (data.status === 'error') {
+        showToast(data.message || '更新失败', 'error');
+        if (updateBtn) {
+          updateBtn.disabled = false;
+        }
+        if (updateBtnText) {
+          updateBtnText.textContent = '更新插件';
+        }
+        // 重置通知条按钮
+        if (bannerBtn) {
+          bannerBtn.disabled = false;
+          bannerBtn.textContent = '立即更新';
+        }
+      }
+    }
+    
+    // 处理服务器更新进度
+    function handleServerUpdateProgress(data) {
+      const updateBtn = document.getElementById('serverUpdateBtn');
+      const updateBtnText = document.getElementById('serverUpdateBtnText');
+      const bannerBtn = document.getElementById('updateBannerNow');
+      
+      if (data.status === 'downloading') {
+        showToast(data.message || '正在下载...', 'loading');
+        if (updateBtnText) {
+          updateBtnText.textContent = '下载中...';
+        }
+      } else if (data.status === 'installing') {
+        showToast(data.message || '正在安装...', 'loading');
+        if (updateBtnText) {
+          updateBtnText.textContent = '安装中...';
+        }
+      } else if (data.status === 'completed') {
+        showToast(data.message || '更新完成！请重启服务器', 'success');
+        if (updateBtn) {
+          updateBtn.disabled = false;
+        }
+        if (updateBtnText) {
+          updateBtnText.textContent = '更新完成';
+        }
+        // 重置通知条按钮
+        if (bannerBtn) {
+          bannerBtn.disabled = false;
+          bannerBtn.textContent = '立即更新';
+        }
+        // 更新版本显示
+        if (data.version) {
+          const updateCurrentVersion = document.getElementById('serverUpdateCurrentVersion');
+          if (updateCurrentVersion) {
+            updateCurrentVersion.textContent = `当前版本: v${data.version.replace(/^v/, '')}`;
+          }
+          // 隐藏更新提示
+          const updateSection = document.getElementById('serverUpdateSection');
+          if (updateSection) {
+            updateSection.style.display = 'none';
+          }
+        }
+        // 清除待更新标记和忽略记录
+        pendingUpdateType = null;
+        pendingUpdateData = {};
+        dismissedServerVersion = null; // 清除忽略记录，更新完成后可以提示新版本
+      } else if (data.status === 'error') {
+        showToast(data.message || '更新失败', 'error');
+        if (updateBtn) {
+          updateBtn.disabled = false;
+        }
+        if (updateBtnText) {
+          updateBtnText.textContent = '更新服务器';
+        }
+        // 重置通知条按钮
+        if (bannerBtn) {
+          bannerBtn.disabled = false;
+          bannerBtn.textContent = '立即更新';
+        }
+      }
+    }
+    
+    // 更新按钮点击处理
+    const updateBtn = document.getElementById('updateBtn');
+    const updateBtnText = document.getElementById('updateBtnText');
+    if (updateBtn) {
+      updateBtn.onclick = function() {
+        // 检查连接状态
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          showToast('未连接到服务器', 'error');
+          return;
+        }
+        
+        // 禁用按钮并显示加载状态
+        updateBtn.disabled = true;
+        if (updateBtnText) {
+          updateBtnText.textContent = '更新中...';
+        }
+        
+        // 发送自动更新请求
+        ws.send(JSON.stringify({ type: 'update-plugin' }));
+        showToast('开始自动更新...', 'loading');
+      };
+    }
+
+    // SVG Icons for Toast
+    function getToastIcon(type) {
+      if (type === 'success') {
+        return '<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="12" fill="currentColor"/><path d="M17.5 8L10 15.5L6.5 12" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+      } else if (type === 'error') {
+        return '<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="12" fill="currentColor"/><path d="M12 8v4M12 16h.01" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+      } else if (type === 'loading') {
+        return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="animation: spin 1s linear infinite;"><circle cx="12" cy="12" r="10" stroke-dasharray="31.416" stroke-dashoffset="7.854" opacity="0.3"></circle><circle cx="12" cy="12" r="10" stroke-dasharray="31.416" stroke-dashoffset="23.562"></circle></svg>';
+      }
+      return '';
+    }
+    
+    // Add spin animation for loading icon
+    const style = document.createElement('style');
+    style.textContent = '@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }';
+    document.head.appendChild(style);
+    
+    function showToast(message, type = 'info') {
+      const toast = document.getElementById('toast');
+      if (!toast) return;
+      
+      const iconEl = toast.querySelector('.toast-icon');
+      const messageEl = toast.querySelector('.toast-message');
+      
+      if (!iconEl || !messageEl) return;
+      
+      // Remove emoji and trailing ellipsis from message
+      let cleanMessage = message
+        .replace(/✅|❌|⏳|⚠️|📸|📍/g, '')
+        .replace(/\.\.\./g, '')
+        .trim();
+      
+      // Set icon
+      if (type === 'success' || type === 'error' || type === 'loading') {
+        iconEl.innerHTML = getToastIcon(type);
+        iconEl.style.display = 'flex';
+      } else {
+        iconEl.innerHTML = '';
+        iconEl.style.display = 'none';
+      }
+      
+      // Set message
+      messageEl.textContent = cleanMessage;
+      
+      // Set toast class
+      toast.className = 'toast';
+      if (type === 'success') {
+        toast.classList.add('success');
+      } else if (type === 'error') {
+        toast.classList.add('error');
+      } else if (type === 'loading') {
+        toast.classList.add('loading');
+      }
+      
+      // Show toast
+      setTimeout(() => {
+        toast.classList.add('show');
+      }, 10);
+      
+      // Hide toast after 2 seconds
+      setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => {
+          iconEl.innerHTML = '';
+          messageEl.textContent = '';
+        }, 300);
+      }, 2000);
+    }
 
     function closeSettings() {
-      // 立即隐藏模态框
-      settingsOverlay.classList.add('hidden');
-      document.getElementById('switchStatus').textContent = '';
+      settingsOverlay.classList.remove('show');
     }
 
     function updateSyncModeDisplay() {
@@ -1503,18 +2767,63 @@
       const aliyunBtn = document.getElementById('switchToAliyun');
       const icloudBtn = document.getElementById('switchToIcloud');
       
-      // 移除所有选中状态
-      driveBtn.classList.remove('selected');
-      aliyunBtn.classList.remove('selected');
-      icloudBtn.classList.remove('selected');
+      if (driveBtn) driveBtn.style.display = (typeof ENABLE_GOOGLE_DRIVE !== 'undefined' && ENABLE_GOOGLE_DRIVE) ? 'flex' : 'none';
       
-      // 根据当前模式添加选中状态
-      if (currentSyncMode === 'drive') {
-        driveBtn.classList.add('selected');
-      } else if (currentSyncMode === 'aliyun' || currentSyncMode === 'oss') {
-        aliyunBtn.classList.add('selected');
-      } else if (currentSyncMode === 'icloud') {
-        icloudBtn.classList.add('selected');
+      const showGoogleDrive = (currentSyncMode === 'drive' && typeof ENABLE_GOOGLE_DRIVE !== 'undefined' && ENABLE_GOOGLE_DRIVE);
+      const qrGoogleScreenshotContainer = document.getElementById('qrGoogleScreenshotContainer');
+      const qrGoogleAlbumContainer = document.getElementById('qrGoogleAlbumContainer');
+      const googleDriveHint = document.getElementById('googleDriveHint');
+
+      if (qrGoogleScreenshotContainer) qrGoogleScreenshotContainer.style.display = showGoogleDrive ? 'flex' : 'none';
+      if (qrGoogleAlbumContainer) qrGoogleAlbumContainer.style.display = showGoogleDrive ? 'flex' : 'none';
+      // if (googleDriveHint) googleDriveHint.style.display = showGoogleDrive ? 'block' : 'none';
+      
+      if (aliyunBtn) aliyunBtn.style.display = (typeof ENABLE_ALIYUN !== 'undefined' && ENABLE_ALIYUN) ? 'flex' : 'none';
+      
+      // Use box-shadow for selected state instead of border color for better visibility on cards
+      if (driveBtn) {
+          driveBtn.style.borderColor = (currentSyncMode === 'drive') ? 'var(--accent)' : 'var(--border)';
+          driveBtn.style.background = (currentSyncMode === 'drive') ? 'var(--bg-card-hover)' : 'var(--bg-card)';
+          if (currentSyncMode === 'drive') driveBtn.classList.add('selected');
+          else driveBtn.classList.remove('selected');
+      }
+      if (aliyunBtn) {
+          aliyunBtn.style.borderColor = (currentSyncMode === 'aliyun' || currentSyncMode === 'oss') ? 'var(--accent)' : 'var(--border)';
+          aliyunBtn.style.background = (currentSyncMode === 'aliyun' || currentSyncMode === 'oss') ? 'var(--bg-card-hover)' : 'var(--bg-card)';
+          if (currentSyncMode === 'aliyun' || currentSyncMode === 'oss') aliyunBtn.classList.add('selected');
+          else aliyunBtn.classList.remove('selected');
+      }
+      if (icloudBtn) {
+          icloudBtn.style.borderColor = (currentSyncMode === 'icloud') ? 'var(--accent)' : 'var(--border)';
+          icloudBtn.style.background = (currentSyncMode === 'icloud') ? 'var(--bg-card-hover)' : 'var(--bg-card)';
+          if (currentSyncMode === 'icloud') icloudBtn.classList.add('selected');
+          else icloudBtn.classList.remove('selected');
+      }
+      
+      // Show/Hide GIF Backup Section (Google Drive Only)
+      if (gifBackupSection) {
+        if (currentSyncMode === 'drive' && typeof ENABLE_GOOGLE_DRIVE !== 'undefined' && ENABLE_GOOGLE_DRIVE) {
+          gifBackupSection.style.display = 'block';
+          // Request setting state when showing
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'get-gif-backup-setting' }));
+          }
+        } else {
+          gifBackupSection.style.display = 'none';
+        }
+      }
+      
+      // Show/Hide Keep GIF in iCloud Section (iCloud Only)
+      if (keepGifInIcloudSection) {
+        if (currentSyncMode === 'icloud') {
+          keepGifInIcloudSection.style.display = 'block';
+          // Request setting state when showing
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'get-keep-gif-in-icloud-setting' }));
+          }
+        } else {
+          keepGifInIcloudSection.style.display = 'none';
+        }
       }
     }
 
@@ -1523,108 +2832,118 @@
       if (e.target === settingsOverlay) closeSettings();
     });
     document.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape' && !settingsOverlay.classList.contains('hidden')) {
+      if (e.key === 'Escape' && settingsOverlay.classList.contains('show')) {
         closeSettings();
       }
     });
 
-    // 切换同步模式
-    switchToDrive.onclick = function () {
-      if (currentSyncMode === 'drive') {
-        document.getElementById('switchStatus').textContent = 'ℹ️ 已经是 Google Drive 上传模式';
-        document.getElementById('switchStatus').style.color = 'var(--subtext)';
-        return;
-      }
-      document.getElementById('switchStatus').textContent = '⏳ 正在切换...';
-      document.getElementById('switchStatus').style.color = 'var(--subtext)';
-      if (ws && ws.readyState === 1) {
-        ws.send(JSON.stringify({ type: 'switch-sync-mode', mode: 'drive' }));
-      } else {
-        document.getElementById('switchStatus').textContent = '❌ 未连接到服务器';
-        document.getElementById('switchStatus').style.color = 'var(--danger)';
-      }
-    };
+    if (switchToDrive) {
+      switchToDrive.onclick = function () {
+        if (!ENABLE_GOOGLE_DRIVE) return;
+        if (currentSyncMode === 'drive') return;
+        
+        showToast('正在切换', 'loading');
+        if (ws && ws.readyState === 1) {
+          ws.send(JSON.stringify({ type: 'switch-sync-mode', mode: 'drive' }));
+        }
+      };
+    }
 
-    switchToAliyun.onclick = function () {
-      if (currentSyncMode === 'aliyun' || currentSyncMode === 'oss') {
-        document.getElementById('switchStatus').textContent = 'ℹ️ 已经是阿里云 OSS 上传模式';
-        document.getElementById('switchStatus').style.color = 'var(--subtext)';
-        return;
-      }
-      document.getElementById('switchStatus').textContent = '⏳ 正在切换...';
-      document.getElementById('switchStatus').style.color = 'var(--subtext)';
-      if (ws && ws.readyState === 1) {
-        ws.send(JSON.stringify({ type: 'switch-sync-mode', mode: 'aliyun' }));
-      } else {
-        document.getElementById('switchStatus').textContent = '❌ 未连接到服务器';
-        document.getElementById('switchStatus').style.color = 'var(--danger)';
-      }
-    };
+    if (switchToAliyun) {
+      switchToAliyun.onclick = function () {
+        if (typeof ENABLE_ALIYUN !== 'undefined' && !ENABLE_ALIYUN) return;
+        if (currentSyncMode === 'aliyun') return;
+
+        showToast('正在切换', 'loading');
+        if (ws && ws.readyState === 1) {
+          ws.send(JSON.stringify({ type: 'switch-sync-mode', mode: 'aliyun' }));
+        }
+      };
+    }
 
     switchToIcloud.onclick = function () {
-      if (currentSyncMode === 'icloud') {
-        document.getElementById('switchStatus').textContent = 'ℹ️ 已经是 iCloud 上传模式';
-        document.getElementById('switchStatus').style.color = 'var(--subtext)';
-        return;
-      }
-      document.getElementById('switchStatus').textContent = '⏳ 正在切换...';
-      document.getElementById('switchStatus').style.color = 'var(--subtext)';
+      if (currentSyncMode === 'icloud') return;
+      showToast('正在切换', 'loading');
       if (ws && ws.readyState === 1) {
         ws.send(JSON.stringify({ type: 'switch-sync-mode', mode: 'icloud' }));
-      } else {
-        document.getElementById('switchStatus').textContent = '❌ 未连接到服务器';
-        document.getElementById('switchStatus').style.color = 'var(--danger)';
       }
     };
 
-    // ========== 最小化/恢复功能 ==========
     function toggleMinimize() {
       isMinimized = !isMinimized;
-      
-      // 获取当前图标元素（每次重新获取，避免引用失效）
       const currentIcon = document.getElementById('minimizeIcon');
-      if (!currentIcon) return; // 如果元素不存在，直接返回
+      if (!currentIcon) return;
       
       if (isMinimized) {
-        // 最小化：只显示 toolbar
         appRoot.classList.add('minimized');
-        // 关闭所有弹窗
-        settingsOverlay.classList.add('hidden');
-        useCaseOverlay.classList.add('hidden');
-        // 更新图标为最大化图标（maximize.svg）- 使用 img src 替换
-        currentIcon.src = IMAGE_BASE_URL + 'maximize.svg';
-        toggleMinimizeBtn.setAttribute('title', '恢复');
+        settingsOverlay.classList.remove('show');
+        useCaseOverlay.classList.remove('show');
         
-        // 调整窗口大小到最小（只显示 toolbar）
-        // toolbar 高度大约 60px
+        // Toggle icon path to Maximize (No slash)
+        toggleMinimizeBtn.setAttribute('title', '恢复');
+        currentIcon.innerHTML = '<polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline>';
+        
         parent.postMessage({
-          pluginMessage: {
-            type: 'resize',
-            width: 480,
-            height: 60
-          }
+          pluginMessage: { type: 'resize', width: 130, height: 44 }
         }, '*');
       } else {
-        // 恢复：显示完整内容
         appRoot.classList.remove('minimized');
-        // 更新图标为最小化图标（minimize.svg）- 使用 img src 替换
-        currentIcon.src = IMAGE_BASE_URL + 'minimize.svg';
+        // Toggle icon path to Minimize
         toggleMinimizeBtn.setAttribute('title', '最小化');
+        currentIcon.innerHTML = '<polyline points="4 14 10 14 10 20"></polyline><polyline points="20 10 14 10 14 4"></polyline>';
         
-        // 恢复窗口大小
         parent.postMessage({
-          pluginMessage: {
-            type: 'resize',
-            width: 480,
-            height: 700
-          }
+          pluginMessage: { type: 'resize', width: 360, height: 400 }
         }, '*');
       }
     }
 
     toggleMinimizeBtn.onclick = toggleMinimize;
+    
+    // 更新通知条按钮事件
+    const updateBannerLaterBtn = document.getElementById('updateBannerLater');
+    const updateBannerNowBtn = document.getElementById('updateBannerNow');
+    
+    if (updateBannerLaterBtn) {
+      updateBannerLaterBtn.onclick = function() {
+        // 记录用户忽略的版本，避免重复提示同一版本
+        if (pendingUpdateType === 'plugin' && latestPluginVersion) {
+          dismissedPluginVersion = latestPluginVersion;
+          console.log(`🔕 用户选择稍后更新插件 v${latestPluginVersion}`);
+        } else if (pendingUpdateType === 'server' && pendingUpdateData.latestVersion) {
+          dismissedServerVersion = pendingUpdateData.latestVersion;
+          console.log(`🔕 用户选择稍后更新服务器 v${pendingUpdateData.latestVersion}`);
+        }
+        
+        hideUpdateBanner();
+        showToast('稍后提醒', 'success');
+      };
+    }
+    
+    if (updateBannerNowBtn) {
+      updateBannerNowBtn.onclick = function() {
+        // 禁用按钮防止重复点击
+        updateBannerNowBtn.disabled = true;
+        updateBannerNowBtn.textContent = '更新中...';
+        
+        if (pendingUpdateType === 'plugin') {
+          // 更新插件
+          if (ws && ws.readyState === 1) {
+            ws.send(JSON.stringify({ type: 'update-plugin' }));
+            hideUpdateBanner();
+            showToast('开始更新插件...', 'loading');
+          }
+        } else if (pendingUpdateType === 'server') {
+          // 更新服务器
+          if (ws && ws.readyState === 1) {
+            ws.send(JSON.stringify({ type: 'update-server' }));
+            hideUpdateBanner();
+            showToast('开始更新服务器...', 'loading');
+          }
+        }
+      };
+    }
 
-    // ========== 接收Figma消息 ==========
     window.onmessage = function (event) {
       var msg = event.data.pluginMessage;
       if (!msg) return;
@@ -1634,129 +2953,225 @@
       } else if (msg.type === 'frame-created') {
         log('✅ 画板已创建');
       } else if (msg.type === 'frame-located') {
-        if (msg.success) {
-          log('📍 ' + msg.message);
-        } else {
-          log('❌ ' + msg.message);
-        }
+        if (msg.success) log('📍 ' + msg.message);
+        else log('❌ ' + msg.message);
       } else if (msg.type === 'screenshot-added') {
         if (msg.success) {
-          // 只有在成功导入时才增加计数
           screenshotCount++;
           document.getElementById('count').textContent = screenshotCount;
           
-          // 不记录成功日志，避免信息过载（已在收到截图时记录）
-          // 发送确认消息给Mac端，表示文件已成功导入
-          if (ws && ws.readyState === WebSocket.OPEN && currentDriveFileId) {
-            try {
-              ws.send(JSON.stringify({
-                type: 'screenshot-received',
-                filename: msg.filename || '未命名文件',
-                driveFileId: currentDriveFileId,
-                timestamp: Date.now()
-              }));
-              // 成功发送确认后，清除保存的 driveFileId
-              currentDriveFileId = null;
-            } catch (error) {
-              console.error('发送确认失败:', error);
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            if (currentFileId) {
+              try {
+                const confirmMessage = {
+                  type: 'screenshot-received',
+                  filename: msg.filename || '未命名文件',
+                  timestamp: Date.now()
+                };
+                if (currentFileIdType === 'oss') confirmMessage.ossFileId = currentFileId;
+                else if (currentFileIdType === 'drive') confirmMessage.driveFileId = currentFileId;
+                ws.send(JSON.stringify(confirmMessage));
+                currentFileId = null;
+                currentFileIdType = null;
+              } catch (error) {
+                console.error('❌ 发送确认失败:', error);
+              }
             }
           }
         } else {
           log('❌ 添加失败: ' + (msg.error || '未知错误'));
+          
+          // 如果添加失败，但已经备份到本地，也发送确认以删除云端文件
+          if (currentFileBackedUp) {
+            log('⚠️  导入 Figma 失败，但文件已备份到本地，确认删除云端文件');
+            showToast('Figma 导入失败，已保存到本地', 'warning');
+            
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              if (currentFileId) {
+                try {
+                  const confirmMessage = {
+                    type: 'screenshot-received',
+                    filename: msg.filename || '未命名文件',
+                    timestamp: Date.now()
+                  };
+                  if (currentFileIdType === 'oss') confirmMessage.ossFileId = currentFileId;
+                  else if (currentFileIdType === 'drive') confirmMessage.driveFileId = currentFileId;
+                  ws.send(JSON.stringify(confirmMessage));
+                  
+                  // Reset
+                  currentFileId = null;
+                  currentFileIdType = null;
+                  currentFileBackedUp = false;
+                } catch (error) {
+                  console.error('❌ 发送确认失败:', error);
+                }
+              }
+            }
+          }
         }
       } else if (msg.type === 'file-needs-manual-drag') {
-        // undefined 错误：需要手动导入，保留源文件
         manualDragCount++;
-        const reasonText = msg.reason === 'undefined-error' ? '导入失败（undefined错误）' : '未知原因';
-        log(`⚠️  ${msg.filename} 需手动导入（${reasonText}）`);
+        const reasonText = msg.reason === 'undefined-error' ? '导入失败' : '未知原因';
+        log(`⚠️  ${msg.filename} 需手动导入`);
         
-        // 通过 WebSocket 通知服务器，不要删除源文件
         if (ws && ws.readyState === WebSocket.OPEN) {
           try {
-            ws.send(JSON.stringify({
+            const failMessage = {
               type: 'screenshot-failed',
               filename: msg.filename,
-              driveFileId: currentDriveFileId, // 使用保存的 driveFileId
               error: msg.error || 'undefined错误',
-              keepFile: true // 标记保留文件
-            }));
-            // 清除保存的 driveFileId
-            currentDriveFileId = null;
+               keepFile: true
+            };
+             if (currentFileIdType === 'oss') failMessage.ossFileId = currentFileId;
+            else if (currentFileIdType === 'drive') failMessage.driveFileId = currentFileId;
+            ws.send(JSON.stringify(failMessage));
+            currentFileId = null;
+            currentFileIdType = null;
           } catch (error) {
             console.error('发送失败消息失败:', error);
           }
         }
-        
-        // 更新状态显示
         updateStatus('connected', '');
       } else if (msg.type === 'size-settings-loaded') {
-        // 从 Figma clientStorage 加载的尺寸设置
         if (msg.width) imageWidthInput.value = msg.width;
         if (msg.height) imageHeightInput.value = msg.height;
       } else if (msg.type === 'size-settings-updated') {
-        // 尺寸设置保存成功
         if (msg.success) {
-          sizeSettingsStatus.textContent = '✅ 尺寸设置已保存';
-          sizeSettingsStatus.style.color = 'var(--success-fg)';
-          setTimeout(() => {
-            sizeSettingsStatus.textContent = '';
-          }, 2000);
+          showToast('已保存', 'success');
         }
       } else if (msg.type === 'layout-settings-loaded') {
-        // 从 Figma clientStorage 加载的布局设置
         if (msg.columns) frameColumnsInput.value = msg.columns;
       } else if (msg.type === 'layout-settings-updated') {
-        // 布局设置保存成功
         if (msg.success) {
-          layoutSettingsStatus.textContent = '✅ 布局设置已保存';
-          layoutSettingsStatus.style.color = 'var(--success-fg)';
-          setTimeout(() => {
-            layoutSettingsStatus.textContent = '';
-          }, 2000);
+          showToast('已保存', 'success');
         }
+      } else if (msg.type === 'server-path-loaded') {
+        if (msg.path) {
+          serverInstallPath = msg.path;
+          const pathEl = document.getElementById('server-path-placeholder');
+          if (pathEl) {
+            pathEl.textContent = serverInstallPath;
+            pathEl.style.color = 'inherit';
+            console.log('✅ 已加载保存的服务器路径:', serverInstallPath);
+          }
+        }
+      } else if (msg.type === 'plugin-version-info') {
+        // 获取插件版本信息
+        currentPluginVersion = msg.version || '1.0.0';
+        console.log('📦 当前插件版本:', currentPluginVersion);
       }
     };
 
-    // ========== 日志展开/收起功能 ==========
     const logContainer = document.getElementById('logContainer');
     const logHeader = document.getElementById('logHeader');
     const logToggleText = document.getElementById('logToggleText');
-    const logToggleIcon = document.querySelector('.log-toggle-icon');
 
-    // 收起日志的函数
     function collapseLog() {
       logContainer.classList.add('collapsed');
       logToggleText.textContent = '展开';
-      logToggleIcon.textContent = '▼';
     }
 
-    // 展开日志的函数
     function expandLog() {
       logContainer.classList.remove('collapsed');
       logToggleText.textContent = '收起';
-      logToggleIcon.textContent = '▲';
     }
 
     logHeader.addEventListener('click', function () {
       const isCollapsed = logContainer.classList.contains('collapsed');
-      if (isCollapsed) {
-        expandLog();
-      } else {
-        collapseLog();
-      }
+      if (isCollapsed) expandLog();
+      else collapseLog();
     });
 
-    // ========== 启动 ==========
     connect();
+    loadServerPath(); // 加载保存的服务器路径
 
-    // ========== 监听插件关闭事件 ==========
-    // 当用户点击右上角×关闭插件时，确保停止实时同步
     window.addEventListener('beforeunload', function () {
       stopRealtimeSync();
     });
-
-    // 窗口高度固定，不再自适应调整
+    
+    // Check scrollable state and show/hide gradient fade
+    function checkCommandScroll() {
+      const scrollable = document.getElementById('commandScrollable');
+      const wrapper = document.getElementById('commandScrollWrapper');
+      if (!scrollable || !wrapper) return;
+      
+      const hasScroll = scrollable.scrollWidth > scrollable.clientWidth;
+      if (hasScroll) {
+        wrapper.classList.add('has-scroll');
+      } else {
+        wrapper.classList.remove('has-scroll');
+      }
+    }
+    
+    // Initialize scroll check
+    const commandScrollable = document.getElementById('commandScrollable');
+    if (commandScrollable) {
+      // Check on load
+      setTimeout(checkCommandScroll, 100);
+      
+      // Check on resize
+      window.addEventListener('resize', checkCommandScroll);
+      
+      // Check on scroll (to hide gradient when scrolled to end)
+      commandScrollable.addEventListener('scroll', function() {
+        const wrapper = document.getElementById('commandScrollWrapper');
+        if (!wrapper) return;
+        
+        const isAtEnd = commandScrollable.scrollWidth - commandScrollable.scrollLeft <= commandScrollable.clientWidth + 1;
+        if (isAtEnd) {
+          wrapper.classList.remove('has-scroll');
+        } else {
+          wrapper.classList.add('has-scroll');
+        }
+      });
+    }
+    
+    // Copy Command Logic
+    const copyCmdBtn = document.getElementById('copyCmdBtn');
+    if (copyCmdBtn) {
+      copyCmdBtn.onclick = function() {
+        const path = serverInstallPath || "[将 ScreenSync-UserPackage 文件夹拖入窗口]";
+        const cmdText = `cd "${path}" && npm start`;
+        const textArea = document.createElement("textarea");
+        textArea.value = cmdText;
+        document.body.appendChild(textArea);
+        textArea.select();
+        try {
+          document.execCommand('copy');
+          showToast('指令已复制', 'success');
+        } catch (err) {
+          showToast('复制失败', 'error');
+        }
+        document.body.removeChild(textArea);
+      };
+    }
+    
+    // Copy User ID Logic
+    const copyUserIdBtn = document.getElementById('copyUserIdBtn');
+    if (copyUserIdBtn) {
+      copyUserIdBtn.onclick = function() {
+        const userIdEl = document.getElementById('displayUserId');
+        if (!userIdEl) return;
+        
+        const userId = userIdEl.textContent.trim();
+        if (!userId || userId === '正在获取...') {
+          showToast('User ID 尚未获取', 'error');
+          return;
+        }
+        
+        const textArea = document.createElement("textarea");
+        textArea.value = userId;
+        document.body.appendChild(textArea);
+        textArea.select();
+        try {
+          document.execCommand('copy');
+          showToast('User ID 已复制', 'success');
+        } catch (err) {
+          showToast('复制失败', 'error');
+        }
+        document.body.removeChild(textArea);
+      };
+    }
   </script>
 </body>
-
 </html>
