@@ -603,6 +603,24 @@ xattr -cr "ScreenSync Installer.app"
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 ```
 
+**调试步骤**（如果开发环境测试）：
+```bash
+# 1. 重新构建 installer（包含最新修复）
+cd installer
+npm run build
+cd ..
+
+# 2. 测试运行
+# 打开 installer/dist/mac-arm64/ScreenSync Installer.app
+# 或者开发模式：
+cd installer
+npm start
+
+# 3. 打开开发者工具查看日志
+# 在 installer/main.js 中取消注释：
+# mainWindow.webContents.openDevTools();
+```
+
 ### 问题 13：版本号不一致
 
 **可能原因**：
