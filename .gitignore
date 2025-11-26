@@ -32,6 +32,16 @@ Thumbs.db
 # 部署文件
 deploy-web/
 FigmaSync-UserPackage.tar.gz
+ScreenSync-UserPackage.tar.gz
+
+# 打包文件（不应提交到 Git）
+figma-plugin-v*.zip
+*.tar.gz
+*.dmg
+
+# Installer 构建产物
+installer/dist/
+installer/ScreenSyncImg/
 
 # 临时文件
 *.tmp
