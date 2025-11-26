@@ -177,49 +177,35 @@ ipcMain.handle('enable-anywhere', async () => {
 
 ipcMain.handle('install-homebrew', async () => {
   return new Promise((resolve) => {
-    // Homebrew 安装需要交互式终端，所以使用 AppleScript 打开终端运行
-    const installScript = '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"';
+    // Homebrew 官方安装命令
+    const installCommand = '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"';
     
-    // 使用 AppleScript 在终端中运行安装脚本
-    // 简化版本，避免复杂的转义问题
-    const tempScriptPath = path.join(os.tmpdir(), 'homebrew-install.sh');
-    fs.writeFileSync(tempScriptPath, installScript, { mode: 0o755 });
-    
+    // 使用 AppleScript 打开终端并运行命令
+    // 注意：不使用临时文件，直接在 AppleScript 中运行命令
     const appleScript = `tell application "Terminal"
 	activate
-	do script "${tempScriptPath}"
+	do script "${installCommand}"
 end tell`;
     
-    const tempAppleScriptPath = path.join(os.tmpdir(), 'open-terminal.scpt');
-    fs.writeFileSync(tempAppleScriptPath, appleScript, 'utf8');
+    console.log('Opening Terminal to install Homebrew...');
+    console.log('Command:', installCommand);
     
-    console.log('Running AppleScript to open Terminal...');
-    console.log('Script path:', tempAppleScriptPath);
-    
-    exec(`osascript "${tempAppleScriptPath}"`, (error, stdout, stderr) => {
-      console.log('AppleScript result:', { error, stdout, stderr });
-      
-      // 清理临时文件
-      try {
-        fs.unlinkSync(tempScriptPath);
-        fs.unlinkSync(tempAppleScriptPath);
-      } catch (e) {
-        console.error('Failed to cleanup temp files:', e);
-      }
+    exec(`osascript -e '${appleScript}'`, (error, stdout, stderr) => {
+      console.log('AppleScript result:', { error: error ? error.message : null, stdout, stderr });
       
       if (error) {
-        console.error('AppleScript error:', error.message);
+        console.error('Failed to open Terminal:', error.message);
         resolve({ 
           success: false, 
-          error: `无法打开终端: ${error.message}\n\n请手动在终端中运行:\n${installScript}`,
-          details: stderr || error.message
+          error: `无法打开终端: ${error.message}\n\n请手动在终端中运行以下命令:\n${installCommand}`,
+          manualCommand: installCommand
         });
       } else {
         console.log('Terminal opened successfully');
-        // 终端已打开，用户需要完成安装
+        // 终端已打开，用户需要在终端中完成安装
         resolve({ 
           success: true, 
-          message: '终端已打开，请按照提示完成 Homebrew 安装。\n\n安装完成后，请点击"重新检测"按钮。',
+          message: '终端已打开，请按照提示完成 Homebrew 安装。\n\n安装步骤：\n1. 按 RETURN 继续\n2. 输入密码\n3. 等待安装完成\n\n完成后请点击"重新检测"按钮。',
           needsRestart: true
         });
       }
@@ -231,24 +217,29 @@ ipcMain.handle('install-node', async () => {
   return new Promise((resolve) => {
     // 使用 AppleScript 在终端中运行 Node.js 安装
     const installCommand = 'brew install node';
-    const appleScript = `
-      tell application "Terminal"
-        activate
-        do script "${installCommand}"
-      end tell
-    `;
+    const appleScript = `tell application "Terminal"
+	activate
+	do script "${installCommand}"
+end tell`;
     
-    exec(`osascript -e '${appleScript.replace(/'/g, "'\\''")}'`, (error, stdout, stderr) => {
+    console.log('Opening Terminal to install Node.js...');
+    console.log('Command:', installCommand);
+    
+    exec(`osascript -e '${appleScript}'`, (error, stdout, stderr) => {
+      console.log('AppleScript result:', { error: error ? error.message : null, stdout, stderr });
+      
       if (error) {
+        console.error('Failed to open Terminal:', error.message);
         resolve({ 
           success: false, 
-          error: '无法打开终端。请手动在终端中运行: brew install node'
+          error: `无法打开终端: ${error.message}\n\n请手动在终端中运行:\nbrew install node`
         });
       } else {
+        console.log('Terminal opened successfully for Node.js installation');
         // 终端已打开，用户需要等待安装完成
         resolve({ 
           success: true, 
-          message: '终端已打开，正在安装 Node.js。安装完成后，请点击"重新检测"按钮。',
+          message: '终端已打开，正在安装 Node.js。\n\n通常需要 2-3 分钟。\n完成后请点击"重新检测"按钮。',
           needsRestart: true
         });
       }
