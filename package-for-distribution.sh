@@ -258,8 +258,16 @@ A: 是的，服务器已配置为：
 
 Q: 插件显示"连接断开"怎么办？
 A: 这种情况很少见，但如果发生：
-   方法1（推荐）：将 "Manual_Start_Server.command" 拖入终端运行
+   
+   方法1（推荐）：使用手动启动脚本
+   1. 将 "Manual_Start_Server.command" 拖入终端
+   2. 选择模式：
+      - [1] 前台运行：可查看日志，关闭终端会停止
+      - [2] 后台运行：关闭终端也不影响
+      - [3] 重新配置自动启动：修复 launchd 服务（最推荐）
+   
    方法2：终端运行：launchctl restart com.screensync.server
+   
    方法3：在安装目录运行：npm start
 
 Q: 如何检查服务器是否在运行？
