@@ -175,75 +175,87 @@ ipcMain.handle('enable-anywhere', async () => {
   });
 });
 
-ipcMain.handle('install-homebrew', async () => {
-  return new Promise((resolve) => {
-    // Homebrew 官方安装命令
-    const installCommand = '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"';
-    
-    // 使用 AppleScript 打开终端并运行命令
-    // 注意：不使用临时文件，直接在 AppleScript 中运行命令
-    const appleScript = `tell application "Terminal"
-	activate
-	do script "${installCommand}"
-end tell`;
-    
-    console.log('Opening Terminal to install Homebrew...');
-    console.log('Command:', installCommand);
-    
-    exec(`osascript -e '${appleScript}'`, (error, stdout, stderr) => {
-      console.log('AppleScript result:', { error: error ? error.message : null, stdout, stderr });
-      
+// 辅助函数：运行 AppleScript
+function runAppleScript(script) {
+  return new Promise((resolve, reject) => {
+    const tempScriptPath = path.join(os.tmpdir(), `temp_script_${Date.now()}.scpt`);
+    fs.writeFileSync(tempScriptPath, script, 'utf8');
+
+    exec(`osascript "${tempScriptPath}"`, (error, stdout, stderr) => {
+      // 清理临时文件
+      try { fs.unlinkSync(tempScriptPath); } catch (e) {}
+
       if (error) {
-        console.error('Failed to open Terminal:', error.message);
-        resolve({ 
-          success: false, 
-          error: `无法打开终端: ${error.message}\n\n请手动在终端中运行以下命令:\n${installCommand}`,
-          manualCommand: installCommand
-        });
+        reject(error);
       } else {
-        console.log('Terminal opened successfully');
-        // 终端已打开，用户需要在终端中完成安装
-        resolve({ 
-          success: true, 
-          message: '终端已打开，请按照提示完成 Homebrew 安装。\n\n安装步骤：\n1. 按 RETURN 继续\n2. 输入密码\n3. 等待安装完成\n\n完成后请点击"重新检测"按钮。',
-          needsRestart: true
-        });
+        resolve(stdout);
       }
     });
+  });
+}
+
+ipcMain.handle('install-homebrew', async () => {
+  return new Promise(async (resolve) => {
+    // Homebrew 官方安装命令 (注意：双引号需要转义用于 AppleScript)
+    // 原始命令: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    const installCommand = '/bin/bash -c \\"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\\"';
+    
+    const appleScript = `
+      tell application "Terminal"
+        activate
+        do script "${installCommand}"
+      end tell
+    `;
+    
+    console.log('Opening Terminal to install Homebrew...');
+    
+    try {
+      await runAppleScript(appleScript);
+      console.log('Terminal opened successfully');
+      resolve({ 
+        success: true, 
+        message: '终端已打开，请按照提示完成 Homebrew 安装。\n\n安装步骤：\n1. 按 RETURN 继续\n2. 输入密码\n3. 等待安装完成\n\n完成后请点击"重新检测"按钮。',
+        needsRestart: true
+      });
+    } catch (error) {
+      console.error('Failed to run AppleScript:', error);
+      const rawCommand = '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"';
+      resolve({ 
+        success: false, 
+        error: `无法打开终端: ${error.message}\n\n请手动在终端中运行以下命令:\n${rawCommand}`,
+        manualCommand: rawCommand
+      });
+    }
   });
 });
 
 ipcMain.handle('install-node', async () => {
-  return new Promise((resolve) => {
-    // 使用 AppleScript 在终端中运行 Node.js 安装
+  return new Promise(async (resolve) => {
     const installCommand = 'brew install node';
-    const appleScript = `tell application "Terminal"
-	activate
-	do script "${installCommand}"
-end tell`;
+    const appleScript = `
+      tell application "Terminal"
+        activate
+        do script "${installCommand}"
+      end tell
+    `;
     
     console.log('Opening Terminal to install Node.js...');
-    console.log('Command:', installCommand);
     
-    exec(`osascript -e '${appleScript}'`, (error, stdout, stderr) => {
-      console.log('AppleScript result:', { error: error ? error.message : null, stdout, stderr });
-      
-      if (error) {
-        console.error('Failed to open Terminal:', error.message);
-        resolve({ 
-          success: false, 
-          error: `无法打开终端: ${error.message}\n\n请手动在终端中运行:\nbrew install node`
-        });
-      } else {
-        console.log('Terminal opened successfully for Node.js installation');
-        // 终端已打开，用户需要等待安装完成
-        resolve({ 
-          success: true, 
-          message: '终端已打开，正在安装 Node.js。\n\n通常需要 2-3 分钟。\n完成后请点击"重新检测"按钮。',
-          needsRestart: true
-        });
-      }
-    });
+    try {
+      await runAppleScript(appleScript);
+      console.log('Terminal opened successfully');
+      resolve({ 
+        success: true, 
+        message: '终端已打开，正在安装 Node.js。\n\n通常需要 2-3 分钟。\n完成后请点击"重新检测"按钮。',
+        needsRestart: true
+      });
+    } catch (error) {
+      console.error('Failed to run AppleScript:', error);
+      resolve({ 
+        success: false, 
+        error: `无法打开终端: ${error.message}\n\n请手动在终端中运行:\nbrew install node`
+      });
+    }
   });
 });
 
