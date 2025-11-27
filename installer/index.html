@@ -592,12 +592,14 @@
       align-items: center;
       justify-content: center;
       overflow: visible;
+      padding: 1px; /* 增加微小内边距防止边缘裁切 */
     }
     
     .toast-icon svg {
       width: 100%;
       height: 100%;
       overflow: visible;
+      transform: scale(0.9); /* 稍微缩小图标以留出呼吸空间 */
     }
 
     .toast-message {
@@ -786,7 +788,7 @@
       <div style="background: var(--bg-card); border-radius: var(--radius-m); padding: 16px; margin-top: 8px; border: 1px solid var(--border);">
         <div style="display: flex; align-items: flex-start; gap: 12px;">
           <!-- Figma Logo SVG -->
-          <svg width="20" height="20" viewBox="0 0 200 300" style="flex-shrink: 0; margin-top: 2px;">
+          <svg width="16" height="16" viewBox="0 0 200 300" style="flex-shrink: 0; margin-top: 2px;">
             <path fill="#0acf83" d="M50 300c27.6 0 50-22.4 50-50v-50H50c-27.6 0-50 22.4-50 50s22.4 50 50 50z"/>
             <path fill="#a259ff" d="M0 150c0-27.6 22.4-50 50-50h50v100H50c-27.6 0-50-22.4-50-50z"/>
             <path fill="#f24e1e" d="M0 50C0 22.4 22.4 0 50 0h50v100H50C22.4 100 0 77.6 0 50z"/>
