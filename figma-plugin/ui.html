@@ -1266,11 +1266,12 @@
         </div>
       </div>
       <div class="header-actions">
-        <button id="viewUseCases" class="icon-btn" title="使用帮助">
+        <button id="viewUseCases" class="icon-btn" title="快捷指令">
            <svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-             <circle cx="12" cy="12" r="10"></circle>
-             <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
-             <line x1="12" y1="17" x2="12.01" y2="17"></line>
+             <rect x="3" y="3" width="7" height="7" rx="2"></rect>
+             <rect x="14" y="3" width="7" height="7" rx="2"></rect>
+             <rect x="3" y="14" width="7" height="7" rx="2"></rect>
+             <path d="M16 16h3v3h-3z"></path>
            </svg>
         </button>
         <button id="openSettings" class="icon-btn" title="设置">
@@ -1416,7 +1417,7 @@
   <div id="useCaseOverlay" class="modal-overlay">
     <div class="modal">
       <div class="modal-header">
-        <div class="modal-title">使用指南</div>
+        <div class="modal-title">快捷指令</div>
         <button id="useCaseClose" class="close-btn">✕</button>
       </div>
       <div class="modal-content" id="useCaseContent">

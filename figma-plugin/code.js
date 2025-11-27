@@ -904,7 +904,7 @@ figma.ui.onmessage = async (msg) => {
     });
     // 延迟关闭，确保停止命令有时间发送
     setTimeout(() => {
-      figma.closePlugin('已同步 ' + screenshotCount + ' 张截图');
+    figma.closePlugin('已同步 ' + screenshotCount + ' 张截图');
     }, 200);
   }
   
