@@ -91,28 +91,58 @@ ipcMain.handle('get-project-root', async () => {
   return parentPath;
 });
 
+// 辅助函数：查找可执行文件并更新 PATH
+function findExecutable(name) {
+  // 1. 检查常见路径
+  const commonPaths = [
+    `/opt/homebrew/bin/${name}`, // Apple Silicon
+    `/usr/local/bin/${name}`,    // Intel Mac
+    path.join(os.homedir(), `.nvm/versions/node/${name}`) // NVM (简化检查)
+  ];
+
+  for (const p of commonPaths) {
+    if (fs.existsSync(p)) {
+      // 如果找到了，把它的目录添加到 PATH 中，以便后续 exec 调用能找到
+      const binDir = path.dirname(p);
+      if (!process.env.PATH.includes(binDir)) {
+        console.log(`Adding ${binDir} to PATH`);
+        process.env.PATH = `${binDir}:${process.env.PATH}`;
+      }
+      return p;
+    }
+  }
+
+  // 2. 尝试 'which'
+  try {
+    const output = require('child_process').execSync(`which ${name}`, { encoding: 'utf8' }).trim();
+    if (output) return output;
+  } catch (e) {}
+
+  return null;
+}
+
 ipcMain.handle('check-homebrew', async () => {
   return new Promise((resolve) => {
-    exec('which brew', (error) => {
-      resolve({ installed: !error });
-    });
+    const brewPath = findExecutable('brew');
+    console.log('Check Homebrew:', brewPath);
+    resolve({ installed: !!brewPath });
   });
 });
 
 ipcMain.handle('check-node', async () => {
   return new Promise((resolve) => {
-    exec('which node', (error, stdout) => {
-      if (!error && stdout.trim()) {
-        exec('node -v', (error, version) => {
-          resolve({ 
-            installed: true, 
-            version: version ? version.trim() : 'unknown' 
-          });
+    const nodePath = findExecutable('node');
+    
+    if (nodePath) {
+      exec('node -v', (error, version) => {
+        resolve({ 
+          installed: true, 
+          version: version ? version.trim() : 'unknown' 
         });
-      } else {
-        resolve({ installed: false });
-      }
-    });
+      });
+    } else {
+      resolve({ installed: false });
+    }
   });
 });
 

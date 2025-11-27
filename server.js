@@ -1223,12 +1223,12 @@ console.log('🚀 服务器启动\n');
 // 健康检查端点（Cloud Run 需要）
 app.get('/health', (req, res) => {
   try {
-    const queueStats = uploadQueue ? uploadQueue.getStats() : null;
+  const queueStats = uploadQueue ? uploadQueue.getStats() : null;
     res.status(200).json({ 
-      status: 'ok',
-      connections: connections.size,
-      googleDriveEnabled,
-      uploadQueue: queueStats,
+    status: 'ok',
+    connections: connections.size,
+    googleDriveEnabled,
+    uploadQueue: queueStats,
       timestamp: new Date().toISOString()
     });
   } catch (error) {
@@ -2550,10 +2550,10 @@ const HOST = process.env.HOST || '0.0.0.0';
 
 // 启动服务器，添加错误处理
 try {
-  server.listen(PORT, HOST, () => {
-    console.log('✅ 服务器运行在: http://' + HOST + ':' + PORT);
-    console.log('📊 健康检查: http://' + HOST + ':' + PORT + '/health');
-    console.log('⏳ 等待连接...\n');
+server.listen(PORT, HOST, () => {
+  console.log('✅ 服务器运行在: http://' + HOST + ':' + PORT);
+  console.log('📊 健康检查: http://' + HOST + ':' + PORT + '/health');
+  console.log('⏳ 等待连接...\n');
     
     // Cloud Run 环境检测
     if (process.env.PORT) {
