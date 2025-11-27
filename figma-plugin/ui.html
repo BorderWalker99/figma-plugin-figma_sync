@@ -857,49 +857,6 @@
       opacity: 1;
     }
 
-    /* Scrollable Command Wrapper with Gradient Fade */
-    .command-scroll-wrapper {
-      position: relative;
-      flex: 1;
-      min-width: 0; /* Allow flex shrinking */
-    }
-    
-    .command-scroll-wrapper::after {
-      content: '';
-      position: absolute;
-      top: 0;
-      right: 0;
-      width: 8px;
-      height: 100%;
-      pointer-events: none;
-      opacity: 0;
-      transition: opacity 0.2s ease;
-      background: linear-gradient(to right, transparent, var(--bg-app));
-    }
-    
-    .command-scroll-wrapper.has-scroll::after {
-      opacity: 1;
-    }
-    
-    @media (prefers-color-scheme: dark) {
-      .command-scroll-wrapper::after {
-        background: linear-gradient(to right, transparent, var(--bg-app));
-      }
-    }
-    
-    .command-scrollable {
-      font-family: 'SF Mono', monospace;
-      font-size: 12px;
-      overflow-x: auto;
-      white-space: nowrap;
-      -webkit-overflow-scrolling: touch;
-      scrollbar-width: none;
-      width: 100%;
-    }
-    
-    .command-scrollable::-webkit-scrollbar {
-      display: none;
-    }
 
     .modal {
       width: 90%;
@@ -1464,25 +1421,9 @@
       </div>
       <div class="modal-content" id="useCaseContent">
          <div style="display: flex; flex-direction: column; gap: 16px;">
-          <div>
-            <div style="font-weight: 600; margin-bottom: 8px; font-size: 13px;">1. 启动服务</div>
-              <div style="font-size: 12px; color: var(--text-secondary); line-height: 1.6;">
-                前往启动台打开终端，运行:
-                <div style="background: var(--bg-app); padding: 8px 12px 8px 12px; border-radius: var(--radius-s); margin: 6px 0; display: flex; align-items: center; justify-content: space-between;">
-                  <div class="command-scroll-wrapper" id="commandScrollWrapper">
-                    <div class="command-scrollable" id="commandScrollable">
-                      cd <span id="server-path-placeholder" style="color: var(--accent);">[将 ScreenSync-UserPackage 文件夹拖入窗口]</span> && npm start
-            </div>
-            </div>
-                  <button id="copyCmdBtn" class="icon-btn" style="width: 24px; height: 24px; flex-shrink: 0; margin-left: 8px;" title="复制指令">
-                    <svg class="svg-icon" style="width: 14px; height: 14px;" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-                  </button>
-            </div>
-          </div>
-        </div>
 
           <div id="shortcutGuideSection">
-             <div style="font-weight: 600; margin-bottom: 8px; font-size: 13px;">2. 配置快捷指令</div>
+             <div style="font-weight: 600; margin-bottom: 8px; font-size: 13px;">1. 配置快捷指令</div>
              <div style="font-size: 12px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 8px;" id="qrSubtitle">扫码获取快捷指令:</div>
              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;" id="qrCodesContainer">
                 <div style="display: flex; flex-direction: column; align-items: center; gap: 6px;" id="qrGoogleScreenshotContainer">
@@ -1509,7 +1450,7 @@
 
                     <!-- User ID Display -->
                     <div id="userIdDisplaySection">
-                      <div style="font-weight: 600; margin-bottom: 8px; font-size: 13px;">3. 您的 User ID</div>
+                      <div style="font-weight: 600; margin-bottom: 8px; font-size: 13px;">2. 您的 User ID</div>
                       <div style="font-size: 12px; color: var(--text-secondary); margin-top: 6px;">
                         请在快捷指令的文本框中填入此 ID:
           </div>
@@ -1670,17 +1611,6 @@
                   </div>
                 </div>
 
-                <!-- Start Server Info -->
-                <div style="padding-top:30px; border-top: 1px solid var(--border); margin-top: 20px;">
-                  <div style="background: var(--bg-card); border-radius: var(--radius-s); padding: 16px; border: 1px solid var(--border);">
-                    <div style="font-size:13px; font-weight: 600; margin-bottom: 4px;">服务器未连接？</div>
-                    <div style="font-size:12px; color: var(--text-secondary); line-height: 1.5;">
-                      服务器通常会开机自动启动。<br>
-                      如果连接断开，点击上方的"重新连接"按钮即可自动修复。<br>
-                      插件会自动尝试重新连接并修复服务。
-                    </div>
-                  </div>
-                </div>
 
       </div>
     </div>
@@ -3237,62 +3167,6 @@
       stopRealtimeSync();
     });
     
-    // Check scrollable state and show/hide gradient fade
-    function checkCommandScroll() {
-      const scrollable = document.getElementById('commandScrollable');
-      const wrapper = document.getElementById('commandScrollWrapper');
-      if (!scrollable || !wrapper) return;
-      
-      const hasScroll = scrollable.scrollWidth > scrollable.clientWidth;
-      if (hasScroll) {
-        wrapper.classList.add('has-scroll');
-      } else {
-        wrapper.classList.remove('has-scroll');
-      }
-    }
-    
-    // Initialize scroll check
-    const commandScrollable = document.getElementById('commandScrollable');
-    if (commandScrollable) {
-      // Check on load
-      setTimeout(checkCommandScroll, 100);
-      
-      // Check on resize
-      window.addEventListener('resize', checkCommandScroll);
-      
-      // Check on scroll (to hide gradient when scrolled to end)
-      commandScrollable.addEventListener('scroll', function() {
-        const wrapper = document.getElementById('commandScrollWrapper');
-        if (!wrapper) return;
-        
-        const isAtEnd = commandScrollable.scrollWidth - commandScrollable.scrollLeft <= commandScrollable.clientWidth + 1;
-        if (isAtEnd) {
-          wrapper.classList.remove('has-scroll');
-        } else {
-          wrapper.classList.add('has-scroll');
-        }
-      });
-    }
-    
-    // Copy Command Logic
-    const copyCmdBtn = document.getElementById('copyCmdBtn');
-    if (copyCmdBtn) {
-      copyCmdBtn.onclick = function() {
-        const path = serverInstallPath || "[将 ScreenSync-UserPackage 文件夹拖入窗口]";
-        const cmdText = `cd "${path}" && npm start`;
-        const textArea = document.createElement("textarea");
-        textArea.value = cmdText;
-        document.body.appendChild(textArea);
-        textArea.select();
-        try {
-          document.execCommand('copy');
-          showToast('指令已复制', 'success');
-        } catch (err) {
-          showToast('复制失败', 'error');
-        }
-        document.body.removeChild(textArea);
-      };
-    }
     
     // Copy User ID Logic
     const copyUserIdBtn = document.getElementById('copyUserIdBtn');
