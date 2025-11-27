@@ -1673,7 +1673,7 @@
     function attemptReconnect() {
       reconnectAttempts++;
       log(`🔄 尝试重新连接 (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`);
-      updateStatus('waiting', '正在重新连接');
+      updateStatus('waiting', '正在连接');
       
       // 首先尝试普通重连
       setTimeout(() => {
