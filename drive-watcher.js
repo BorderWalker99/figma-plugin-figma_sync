@@ -1286,7 +1286,9 @@ async function start() {
     process.exit(1);
   }
 
-  await initializeKnownFiles();
+  // 不再在启动时初始化已知文件列表
+  // 改为在实时模式首次启动时初始化，这样手动模式可以同步所有历史文件
+  // await initializeKnownFiles();
   connectWebSocket();
 
   // 启动定期缓存清理
