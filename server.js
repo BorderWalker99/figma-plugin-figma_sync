@@ -1623,41 +1623,6 @@ wss.on('connection', (ws, req) => {
       return;
     }
     
-    // 启动服务器终端消息处理
-    if (data.type === 'start-server-terminal') {
-      const installPath = path.resolve(__dirname);
-      const npmCommand = `cd "${installPath}" && npm start`;
-      
-      // 使用 AppleScript 打开终端并运行命令
-      const appleScript = `tell application "Terminal"
-        activate
-        do script "${npmCommand.replace(/"/g, '\\"')}"
-      end tell`;
-      
-      exec(`osascript -e '${appleScript}'`, (error, stdout, stderr) => {
-        if (error) {
-          console.log('   ❌ 打开终端失败:', error.message);
-          if (targetGroup.figma && targetGroup.figma.readyState === WebSocket.OPEN) {
-            targetGroup.figma.send(JSON.stringify({
-              type: 'start-server-terminal-result',
-              success: false,
-              error: `无法打开终端: ${error.message}`
-            }));
-          }
-        } else {
-          console.log('   ✅ 终端已打开，正在运行 npm start');
-          if (targetGroup.figma && targetGroup.figma.readyState === WebSocket.OPEN) {
-            targetGroup.figma.send(JSON.stringify({
-              type: 'start-server-terminal-result',
-              success: true,
-              message: '终端已打开，服务器正在启动'
-            }));
-          }
-        }
-      });
-      return;
-    }
-    
     // 同步模式切换消息处理
     if (data.type === 'switch-sync-mode' || data.type === 'get-sync-mode' || data.type === 'get-user-id' || data.type === 'get-server-info') {
       if (data.type === 'get-server-info') {

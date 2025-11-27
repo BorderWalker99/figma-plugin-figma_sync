@@ -20,6 +20,14 @@
     "files": [
       "**/*",
       "!node_modules/**/*"
+    ],
+    "protocols": [
+      {
+        "name": "ScreenSync Protocol",
+        "schemes": [
+          "screensync"
+        ]
+      }
     ]
   },
   "dependencies": {},

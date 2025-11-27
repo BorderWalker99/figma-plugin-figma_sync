@@ -52,6 +52,38 @@ echo -e "${GREEN}📦 开始打包...${NC}\n"
 # 0. 创建 README 和使用说明
 echo -e "${YELLOW}📝 创建说明文档...${NC}"
 
+# 0. 创建修复安全提示 App
+echo -e "${YELLOW}🔧 创建修复安全提示 App...${NC}"
+FIX_SCRIPT='
+set appPath to POSIX path of (path to me)
+if appPath ends with "/" then set appPath to text 1 thru -2 of appPath
+do shell script "dirname " & quoted form of appPath
+set parentDir to result
+set installerPath to parentDir & "/ScreenSync Installer.app"
+
+try
+    do shell script "xattr -cr " & quoted form of installerPath
+    display dialog "✅ 修复成功！\n\n现在您可以正常打开 ScreenSync Installer 了。" buttons {"好"} default button "好" with icon note
+on error errMsg
+    display dialog "⚠️ 修复可能未完全成功，或者无需修复。\n\n请尝试直接打开安装器。\n\n错误信息: " & errMsg buttons {"好"} default button "好" with icon stop
+end try
+'
+osacompile -o "$TEMP_DIR/🔧 第一步-解决安全提示.app" -e "$FIX_SCRIPT"
+
+# 创建一键启动 App (比脚本更友好)
+echo -e "${YELLOW}🚀 创建一键启动 App...${NC}"
+START_SCRIPT='
+set appPath to POSIX path of (path to me)
+if appPath ends with "/" then set appPath to text 1 thru -2 of appPath
+do shell script "dirname " & quoted form of appPath
+set parentDir to result
+tell application "Terminal"
+    activate
+    do script "cd " & quoted form of parentDir & " && npm start"
+end tell
+'
+osacompile -o "$TEMP_DIR/🚀 手动启动服务器.app" -e "$START_SCRIPT"
+
 # 1. 复制核心服务器文件
 echo -e "${YELLOW}📄 复制核心服务器文件...${NC}"
 cp server.js "$TEMP_DIR/"
@@ -146,11 +178,12 @@ ScreenSync - iPhone截图自动同步到Figma
 
 ⚠️ 步骤 1：第一次运行（解决安全提示）
 1. 解压此文件包
-2. 【右键点击】"ScreenSync Installer.app"
-3. 选择【打开】，然后在弹窗中点击【打开】
+2. 双击 "🔧 第一步-解决安全提示.app"（如打不开请右键打开）
+3. 等待提示成功
 
 步骤 2：配置安装
-1. 安装器启动后，按照图形界面提示完成以下配置：
+1. 双击 "ScreenSync Installer.app"
+2. 安装器启动后，按照图形界面提示完成以下配置：
    - 选择储存方式（Google Cloud 或 iCloud）
    - 自动检测并安装 Homebrew 和 Node.js
    - 自动安装项目依赖
@@ -262,13 +295,18 @@ cat > "$TEMP_DIR/README_请先阅读.txt" << 'EOF'
 ⚠️ 第一次打开必须这样做（解决 macOS 安全提示）
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-由于应用未经 Apple 公证，直接双击会被 macOS 阻止。请按照以下步骤打开：
+由于应用未经 Apple 公证，直接双击会被 macOS 阻止。
 
+方法 1（推荐）：
+1. 双击 "🔧 第一步-解决安全提示.app"
+   ⚠️ 如果双击打不开，请【右键点击】它，选择【打开】
+2. 看到成功提示后，即可正常打开安装器
+
+方法 2（手动）：
 1. 【右键点击】"ScreenSync Installer.app"
-2. 在菜单中选择【打开】
-3. 在弹出的安全警告窗口中，点击【打开】
+2. 选择【打开】，然后在弹窗中点击【打开】
 
-✅ 此时安装器将正常启动。以后您可以直接双击打开。
+✅ 完成后，安装器即可正常运行
 
 
 第二步：完成安装
