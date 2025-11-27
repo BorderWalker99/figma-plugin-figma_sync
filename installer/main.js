@@ -56,39 +56,62 @@ app.on('window-all-closed', () => {
 // IPC 处理函数
 // 自动检测项目根目录
 ipcMain.handle('get-project-root', async () => {
-  // 获取应用资源路径
+  // 获取 Installer.app 的实际路径
+  // app.getAppPath() 返回 .app 内部的 Resources 路径
   let appPath = app.getAppPath();
+  
+  console.log('原始 appPath:', appPath);
   
   // 如果是打包后的应用（app.asar），需要特殊处理
   if (appPath.includes('.asar')) {
-    // 在 asar 中，需要找到实际的资源目录
-    appPath = appPath.replace(/\.asar.*$/, '');
+    // 移除 .asar 及其后的路径
+    appPath = appPath.replace(/\.asar.*$/, '.asar');
   }
   
-  // 如果安装器在 installer/ 子目录中，向上查找项目根目录
-  // 检查当前目录是否有 package.json
-  if (fs.existsSync(path.join(appPath, 'package.json'))) {
-    return appPath;
-  }
-  
-  // 检查父目录是否有 package.json（安装器在 installer/ 子目录中）
-  const parentPath = path.dirname(appPath);
-  if (fs.existsSync(path.join(parentPath, 'package.json'))) {
-    return parentPath;
-  }
-  
-  // 如果都没找到，尝试向上查找最多 3 层
+  // 打包后的路径通常是: .../ScreenSync Installer.app/Contents/Resources/app.asar
+  // 我们需要向上找到 .app，然后再向上一级找到 UserPackage 根目录
   let currentPath = appPath;
-  for (let i = 0; i < 3; i++) {
+  
+  // 1. 先找到 .app 包
+  while (currentPath !== '/' && !currentPath.endsWith('.app')) {
     currentPath = path.dirname(currentPath);
-    if (fs.existsSync(path.join(currentPath, 'package.json'))) {
-      return currentPath;
+  }
+  
+  console.log('找到 .app 路径:', currentPath);
+  
+  // 2. .app 的父目录就是 UserPackage 根目录
+  const userPackageRoot = path.dirname(currentPath);
+  
+  console.log('UserPackage 根目录:', userPackageRoot);
+  
+  // 3. 验证该目录下是否有 package.json
+  const packageJsonPath = path.join(userPackageRoot, 'package.json');
+  if (fs.existsSync(packageJsonPath)) {
+    console.log('✅ 找到 package.json:', packageJsonPath);
+    return userPackageRoot;
+  }
+  
+  console.warn('⚠️ 未在预期位置找到 package.json，尝试备用路径');
+  
+  // 备用方案：检查当前目录及其父目录
+  const fallbackPaths = [
+    appPath,
+    path.dirname(appPath),
+    path.dirname(path.dirname(appPath)),
+    path.dirname(path.dirname(path.dirname(appPath)))
+  ];
+  
+  for (const testPath of fallbackPaths) {
+    const testPackageJson = path.join(testPath, 'package.json');
+    if (fs.existsSync(testPackageJson)) {
+      console.log('✅ 备用路径找到 package.json:', testPackageJson);
+      return testPath;
     }
   }
   
-  // 如果还是找不到，返回父目录（用户解压的位置）
-  // 这通常发生在用户从解压后的目录运行安装器时
-  return parentPath;
+  console.error('❌ 无法找到 package.json');
+  // 最后的退路：返回 UserPackage 根目录（即使没有验证）
+  return userPackageRoot;
 });
 
 // 辅助函数：查找可执行文件并更新 PATH
@@ -291,11 +314,43 @@ ipcMain.handle('install-node', async () => {
 
 ipcMain.handle('install-dependencies', async (event, installPath) => {
   return new Promise((resolve) => {
-    const npmPath = process.platform === 'darwin' 
-      ? (process.arch === 'arm64' ? '/opt/homebrew/bin/npm' : '/usr/local/bin/npm')
-      : 'npm';
+    console.log('📦 开始安装依赖...');
+    console.log('📂 安装路径:', installPath);
     
-    const child = spawn(npmPath, ['install'], {
+    // 验证 package.json 是否存在
+    const packageJsonPath = path.join(installPath, 'package.json');
+    if (!fs.existsSync(packageJsonPath)) {
+      console.error('❌ 未找到 package.json:', packageJsonPath);
+      resolve({ 
+        success: false, 
+        error: `未找到 package.json 文件\n路径: ${packageJsonPath}\n请确保安装路径正确。` 
+      });
+      return;
+    }
+    
+    console.log('✅ 找到 package.json');
+    
+    // 清理可能的冲突文件
+    const lockFilePath = path.join(installPath, 'package-lock.json');
+    if (fs.existsSync(lockFilePath)) {
+      try {
+        fs.unlinkSync(lockFilePath);
+        console.log('🗑️  已删除旧的 package-lock.json');
+      } catch (err) {
+        console.warn('⚠️  无法删除 package-lock.json:', err.message);
+      }
+    }
+    
+    // 查找 npm 路径
+    const npmPath = findExecutable('npm') || 
+      (process.platform === 'darwin' 
+        ? (process.arch === 'arm64' ? '/opt/homebrew/bin/npm' : '/usr/local/bin/npm')
+        : 'npm');
+    
+    console.log('📦 npm 路径:', npmPath);
+    
+    // 使用 --legacy-peer-deps 避免依赖冲突
+    const child = spawn(npmPath, ['install', '--legacy-peer-deps', '--verbose'], {
       cwd: installPath,
       stdio: 'pipe',
       shell: true
@@ -305,25 +360,63 @@ ipcMain.handle('install-dependencies', async (event, installPath) => {
     let errorOutput = '';
     
     child.stdout.on('data', (data) => {
-      output += data.toString();
-      event.sender.send('install-output', { type: 'stdout', data: data.toString() });
+      const text = data.toString();
+      output += text;
+      console.log('[npm stdout]', text);
+      event.sender.send('install-output', { type: 'stdout', data: text });
     });
     
     child.stderr.on('data', (data) => {
-      errorOutput += data.toString();
-      event.sender.send('install-output', { type: 'stderr', data: data.toString() });
+      const text = data.toString();
+      errorOutput += text;
+      console.log('[npm stderr]', text);
+      event.sender.send('install-output', { type: 'stderr', data: text });
     });
     
     child.on('close', (code) => {
+      console.log('📦 npm install 完成，退出码:', code);
+      
       if (code === 0) {
+        // 验证 node_modules 是否存在且包含关键依赖
+        const nodeModulesPath = path.join(installPath, 'node_modules');
+        const dotenvPath = path.join(nodeModulesPath, 'dotenv');
+        const wsPath = path.join(nodeModulesPath, 'ws');
+        
+        if (!fs.existsSync(nodeModulesPath)) {
+          console.error('❌ node_modules 未创建');
+          resolve({ 
+            success: false, 
+            error: 'node_modules 文件夹未创建，安装可能失败。\n请检查网络连接和磁盘空间。' 
+          });
+          return;
+        }
+        
+        if (!fs.existsSync(dotenvPath)) {
+          console.error('❌ 关键依赖 dotenv 未安装');
+          resolve({ 
+            success: false, 
+            error: '关键依赖安装不完整。\n请检查网络连接，或尝试重新安装。' 
+          });
+          return;
+        }
+        
+        console.log('✅ 依赖安装验证成功');
         resolve({ success: true });
       } else {
-        resolve({ success: false, error: errorOutput || `退出码: ${code}` });
+        console.error('❌ npm install 失败');
+        resolve({ 
+          success: false, 
+          error: errorOutput || `npm 安装失败（退出码: ${code}）\n\n${output.slice(-500)}` 
+        });
       }
     });
     
     child.on('error', (error) => {
-      resolve({ success: false, error: error.message });
+      console.error('❌ 启动 npm 失败:', error);
+      resolve({ 
+        success: false, 
+        error: `无法启动 npm: ${error.message}\n请确保 Node.js 和 npm 已正确安装。` 
+      });
     });
   });
 });

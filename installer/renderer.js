@@ -340,22 +340,32 @@ async function installDependencies() {
   progressBar.classList.remove('success');
   progressBar.style.width = '10%';
   if (statusLabel) {
-    statusLabel.textContent = '正在安装';
+    statusLabel.textContent = '正在安装依赖（可能需要几分钟）';
   }
   
-  // 监听安装输出（静默处理，不显示）
+  // 创建日志显示区域（默认隐藏，出错时显示）
+  let logOutput = '';
+  
+  // 监听安装输出
   ipcRenderer.on('install-output', (event, data) => {
-    // 静默处理输出，不显示日志
+    logOutput += data.data;
+    // 实时更新进度（基于输出行数估算）
+    const lines = logOutput.split('\n').length;
+    const progress = Math.min(10 + (lines / 5), 90);
+    progressBar.style.width = `${progress}%`;
   });
   
   const result = await ipcRenderer.invoke('install-dependencies', installPath);
+  
+  // 移除监听器
+  ipcRenderer.removeAllListeners('install-output');
   
   if (result.success) {
     progressBar.style.width = '100%';
     progressBar.classList.add('success');
     const statusLabel = document.getElementById('installStatusLabel');
     if (statusLabel) {
-      statusLabel.textContent = '安装完成';
+      statusLabel.textContent = '依赖安装完成';
     }
     document.getElementById('step3Next').disabled = false;
   } else {
@@ -369,11 +379,17 @@ async function installDependencies() {
           </svg>
         </div>
         <div>
-          <div style="font-weight: 600; margin-bottom: 4px;">安装失败</div>
+          <div style="font-weight: 600; margin-bottom: 4px;">依赖安装失败</div>
           <div style="opacity: 0.9; font-size: 12px; white-space: pre-wrap; word-break: break-word;">${result.error}</div>
         </div>
       </div>`;
     errorAlert.style.display = 'block';
+    
+    // 重置进度条
+    progressBar.style.width = '0%';
+    if (statusLabel) {
+      statusLabel.textContent = '安装失败';
+    }
   }
   
   document.getElementById('step3Buttons').style.display = 'flex';
