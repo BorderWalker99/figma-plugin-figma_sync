@@ -363,8 +363,25 @@ ipcMain.handle('setup-config', async (event, installPath, syncMode, localFolder)
   });
 });
 
-ipcMain.handle('start-server', async (event, installPath) => {
+// 辅助函数：检查端口是否被占用
+function checkPort(port) {
   return new Promise((resolve) => {
+    exec(`lsof -i :${port} -sTCP:LISTEN`, (error, stdout) => {
+      resolve(!!stdout);
+    });
+  });
+}
+
+ipcMain.handle('start-server', async (event, installPath) => {
+  return new Promise(async (resolve) => {
+    // 1. 先检查服务是否已经在运行 (端口 8888)
+    const isRunning = await checkPort(8888);
+    if (isRunning) {
+      console.log('Server already running on port 8888');
+      resolve({ success: true, message: '服务器已在运行' });
+      return;
+    }
+
     const nodePath = process.platform === 'darwin'
       ? (process.arch === 'arm64' ? '/opt/homebrew/bin/node' : '/usr/local/bin/node')
       : 'node';
@@ -396,13 +413,19 @@ ipcMain.handle('start-server', async (event, installPath) => {
     });
     
     // 等待几秒检查服务器是否正常启动
-    setTimeout(() => {
+    setTimeout(async () => {
       // 检查进程是否还在运行
       try {
         process.kill(child.pid, 0); // 检查进程是否存在
         resolve({ success: true, pid: child.pid });
       } catch (error) {
-        resolve({ success: false, error: '服务器启动失败' });
+        // 进程退出了，再次检查端口，也许是刚才启动成功了但脱离了子进程，或者被自动重启管理接管了
+        const isRunningNow = await checkPort(8888);
+        if (isRunningNow) {
+           resolve({ success: true, message: '服务器已启动' });
+        } else {
+           resolve({ success: false, error: '服务器启动失败' });
+        }
       }
     }, 3000);
     
