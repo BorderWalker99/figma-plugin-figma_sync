@@ -123,13 +123,12 @@ function showToast(message, type = 'info') {
   const iconEl = toast.querySelector('.toast-icon');
   const messageEl = toast.querySelector('.toast-message');
   
-  // 设置图标
+  // 设置图标（统一的圆形背景 + 白色图标设计）
   if (type === 'success') {
-    iconEl.innerHTML = '<svg viewBox="0 0 24 24" fill="none" style="overflow: visible;"><circle cx="12" cy="12" r="12" fill="currentColor"/><path d="M17.5 8L10 15.5L6.5 12" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    iconEl.innerHTML = '<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="currentColor"/><path d="M16.5 8.5l-5.5 5.5-3-3" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
     toast.className = 'toast success';
   } else if (type === 'error') {
-    // 红色感叹号图标
-    iconEl.innerHTML = '<svg viewBox="0 0 24 24" fill="none" style="overflow: visible;"><circle cx="12" cy="12" r="12" fill="currentColor"/><path d="M12 8v4M12 16h.01" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    iconEl.innerHTML = '<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="currentColor"/><path d="M12 8v5M12 16.5v.5" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
     toast.className = 'toast error';
   } else {
     iconEl.innerHTML = '';
@@ -374,8 +373,8 @@ async function installDependencies() {
       <div class="alert alert-error">
         <div class="alert-icon" style="flex-shrink: 0; color: var(--danger);">
           <svg viewBox="0 0 24 24" fill="none">
-            <circle cx="12" cy="12" r="11" fill="currentColor"/>
-            <path d="M12 8v4M12 16h.01" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <circle cx="12" cy="12" r="10" fill="currentColor"/>
+            <path d="M12 8v5M12 16.5v.5" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
         </div>
         <div>

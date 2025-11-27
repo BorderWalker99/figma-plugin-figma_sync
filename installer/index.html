@@ -518,15 +518,18 @@
 
     /* Alert icons */
     .alert-icon {
-      width: 16px !important;
-      height: 16px !important;
-      overflow: visible;
+      width: 20px !important;
+      height: 20px !important;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
     }
     
     .alert-icon svg {
       width: 100%;
       height: 100%;
-      overflow: visible;
+      display: block;
     }
 
     /* Icons */
@@ -604,21 +607,18 @@
     }
 
     .toast-icon {
-      width: 14px;
-      height: 14px;
+      width: 16px;
+      height: 16px;
       flex-shrink: 0;
       display: flex;
       align-items: center;
       justify-content: center;
-      overflow: visible;
-      padding: 1px; /* 增加微小内边距防止边缘裁切 */
     }
     
     .toast-icon svg {
       width: 100%;
       height: 100%;
-      overflow: visible;
-      transform: scale(0.9); /* 稍微缩小图标以留出呼吸空间 */
+      display: block;
     }
 
     .toast-message {
