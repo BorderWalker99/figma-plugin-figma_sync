@@ -88,6 +88,13 @@ if [ -f "将此文件拖入终端运行.command" ]; then
     echo "   ✅ Gatekeeper 修复脚本已包含"
 fi
 
+# 复制手动启动脚本
+if [ -f "Manual_Start_Server.command" ]; then
+    cp "Manual_Start_Server.command" "$TEMP_DIR/"
+    chmod +x "$TEMP_DIR/Manual_Start_Server.command"
+    echo "   ✅ 手动启动脚本已包含"
+fi
+
 # 4. 复制 Figma 插件文件（排除 node_modules）
 echo -e "${YELLOW}🎨 复制 Figma 插件文件...${NC}"
 mkdir -p "$TEMP_DIR/figma-plugin"
@@ -244,13 +251,24 @@ Q: Google Cloud 模式的 User ID 在哪里？
 A: 安装完成后会显示，也可在安装目录下的 .user-config.json 文件中查看
 
 Q: 服务器会自动启动吗？
-A: 是的，服务器已配置为开机自动启动，打开插件时自动运行，无需手动操作
+A: 是的，服务器已配置为：
+   - 开机自动启动
+   - 崩溃自动恢复（最多3次）
+   - 打开 Figma 插件时应该已经在后台运行
 
-Q: 如何重启服务？
-A: 服务器会持续在后台运行。如需重启，运行：launchctl restart com.screensync.server
+Q: 插件显示"连接断开"怎么办？
+A: 这种情况很少见，但如果发生：
+   方法1（推荐）：将 "Manual_Start_Server.command" 拖入终端运行
+   方法2：终端运行：launchctl restart com.screensync.server
+   方法3：在安装目录运行：npm start
+
+Q: 如何检查服务器是否在运行？
+A: 终端运行：lsof -i :8888
+   如果有输出，说明服务器正在运行
 
 Q: 如何停止服务？
-A: 运行：launchctl stop com.screensync.server
+A: 终端运行：launchctl stop com.screensync.server
+   （服务器会在下次开机时自动启动）
 
 Q: 如何更换储存方式？
 A: 在 Figma 插件的设置中可以直接切换
@@ -363,6 +381,7 @@ echo -e "${GREEN}✅ 大小: ${PACKAGE_SIZE}${NC}\n"
 echo -e "${YELLOW}📦 包含内容：${NC}"
 echo "   ✅ GUI 安装器（ScreenSync Installer.app）"
 echo "   ✅ Gatekeeper 修复脚本（将此文件拖入终端运行.command）"
+echo "   ✅ 手动启动脚本（Manual_Start_Server.command）"
 echo "   ✅ 核心服务器文件（server.js, start.js, update-manager.js）"
 echo "   ✅ 监听器文件（drive-watcher.js, icloud-watcher.js, aliyun-watcher.js）"
 echo "   ✅ 云服务集成（googleDrive.js, aliyunOSS.js）"

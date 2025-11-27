@@ -89,79 +89,116 @@ checkUpdateAsync().catch(() => {
 
 const services = [];
 let watcher = null;
+let server = null;
+let serverRestartCount = 0;
+const MAX_RESTART_ATTEMPTS = 3;
 
-// 1. 检查依赖是否安装
-console.log('🔍 检查环境...');
-const nodeModulesPath = path.join(__dirname, 'node_modules');
-if (!fs.existsSync(nodeModulesPath)) {
-  console.error('❌ 错误: 未找到 node_modules 文件夹');
-  console.error('   依赖可能未安装完成');
-  console.error('   请运行: npm install');
-  process.exit(1);
-}
-
-// 检查关键依赖
-const requiredDeps = ['dotenv', 'ws', 'express', 'sharp'];
-for (const dep of requiredDeps) {
-  const depPath = path.join(nodeModulesPath, dep);
-  if (!fs.existsSync(depPath)) {
-    console.error(`❌ 错误: 缺少关键依赖 "${dep}"`);
+// 检查环境（只在启动时检查一次）
+function checkEnvironment() {
+  console.log('🔍 检查环境...');
+  const nodeModulesPath = path.join(__dirname, 'node_modules');
+  if (!fs.existsSync(nodeModulesPath)) {
+    console.error('❌ 错误: 未找到 node_modules 文件夹');
+    console.error('   依赖可能未安装完成');
     console.error('   请运行: npm install');
-    process.exit(1);
+    return false;
   }
+
+  // 检查关键依赖
+  const requiredDeps = ['dotenv', 'ws', 'express', 'sharp'];
+  for (const dep of requiredDeps) {
+    const depPath = path.join(nodeModulesPath, dep);
+    if (!fs.existsSync(depPath)) {
+      console.error(`❌ 错误: 缺少关键依赖 "${dep}"`);
+      console.error('   请运行: npm install');
+      return false;
+    }
+  }
+  console.log('✅ 环境检查通过');
+  return true;
 }
-console.log('✅ 环境检查通过');
 
-// 2. 启动服务器
-console.log('🚀 启动WebSocket服务器...');
-// 增加 Node.js 内存限制到 4GB，以支持大文件（GIF/视频）处理
-// 如果系统内存不足，可以减小这个值（如 2048 表示 2GB）
-const NODE_MEMORY_LIMIT = process.env.NODE_MEMORY_LIMIT || '4096';
-const server = spawn('node', [`--max-old-space-size=${NODE_MEMORY_LIMIT}`, 'server.js'], {
-  stdio: 'inherit',
-  cwd: __dirname,
-  env: { ...process.env, SYNC_MODE }
-});
-services.push(server);
-
-// 监听服务器进程退出
-server.on('exit', (code, signal) => {
-  if (code !== 0 && code !== null) {
-    console.error(`\n❌ 服务器异常退出 (code: ${code})`);
-    console.error('   这可能是由于：');
-    console.error('   1. 依赖未正确安装');
-    console.error('   2. 端口 8888 被占用');
-    console.error('   3. 配置文件损坏');
-    console.error('\n   请检查 server-error.log 文件查看详细错误信息');
-    console.error('   或尝试手动运行: npm start\n');
-    
-    // 记录到错误日志文件
-    try {
-      const errorLogPath = path.join(__dirname, 'server-error.log');
-      const errorMsg = `[${new Date().toISOString()}] 服务器异常退出 (code: ${code}, signal: ${signal})\n`;
-      fs.appendFileSync(errorLogPath, errorMsg, 'utf8');
-    } catch (e) {
-      // 忽略日志写入错误
+// 启动服务器（支持自动重启）
+function startServer() {
+  console.log('🚀 启动WebSocket服务器...');
+  
+  // 增加 Node.js 内存限制到 4GB，以支持大文件（GIF/视频）处理
+  const NODE_MEMORY_LIMIT = process.env.NODE_MEMORY_LIMIT || '4096';
+  server = spawn('node', [`--max-old-space-size=${NODE_MEMORY_LIMIT}`, 'server.js'], {
+    stdio: 'inherit',
+    cwd: __dirname,
+    env: { ...process.env, SYNC_MODE }
+  });
+  
+  // 监听服务器进程退出
+  server.on('exit', (code, signal) => {
+    // 从 services 数组中移除
+    const index = services.indexOf(server);
+    if (index > -1) {
+      services.splice(index, 1);
     }
     
-    // 停止所有服务并退出
-    console.log('🛑 正在停止所有服务...');
-    services.forEach(s => {
-      if (s && s !== server) {
-        try { s.kill(); } catch (e) {}
+    if (code !== 0 && code !== null) {
+      console.error(`\n❌ 服务器异常退出 (code: ${code})`);
+      
+      // 记录到错误日志文件
+      try {
+        const errorLogPath = path.join(__dirname, 'server-error.log');
+        const errorMsg = `[${new Date().toISOString()}] 服务器异常退出 (code: ${code}, signal: ${signal})\n`;
+        fs.appendFileSync(errorLogPath, errorMsg, 'utf8');
+      } catch (e) {
+        // 忽略日志写入错误
       }
-    });
-    
-    process.exit(1);
-  } else if (signal) {
-    console.log(`\n⚠️  服务器被信号终止 (signal: ${signal})`);
-  }
-});
+      
+      // 尝试自动重启
+      if (serverRestartCount < MAX_RESTART_ATTEMPTS) {
+        serverRestartCount++;
+        console.log(`\n🔄 尝试自动重启服务器 (${serverRestartCount}/${MAX_RESTART_ATTEMPTS})...`);
+        setTimeout(() => {
+          startServer();
+        }, 3000); // 等待3秒后重启
+      } else {
+        console.error('\n❌ 服务器重启次数超过限制');
+        console.error('   这可能是由于：');
+        console.error('   1. 依赖未正确安装');
+        console.error('   2. 端口 8888 被占用');
+        console.error('   3. 配置文件损坏');
+        console.error('\n   请检查 server-error.log 文件查看详细错误信息');
+        console.error('   或使用 Manual_Start_Server.command 手动启动\n');
+        
+        // 停止所有服务并退出
+        console.log('🛑 正在停止所有服务...');
+        services.forEach(s => {
+          try { s.kill(); } catch (e) {}
+        });
+        process.exit(1);
+      }
+    } else if (signal) {
+      console.log(`\n⚠️  服务器被信号终止 (signal: ${signal})`);
+      // 被信号终止通常是用户主动操作，不自动重启
+    } else {
+      // 正常退出 (code === 0)，重置重启计数
+      serverRestartCount = 0;
+    }
+  });
 
-server.on('error', (error) => {
-  console.error('\n❌ 无法启动服务器:', error.message);
+  server.on('error', (error) => {
+    console.error('\n❌ 无法启动服务器:', error.message);
+    // 不立即退出，让 exit 事件处理重启逻辑
+  });
+  
+  services.push(server);
+}
+
+// 初始环境检查
+if (!checkEnvironment()) {
+  console.error('\n❌ 环境检查失败，无法启动服务');
+  console.error('   请使用 Manual_Start_Server.command 查看详细错误\n');
   process.exit(1);
-});
+}
+
+// 启动服务器
+startServer();
 
 // 启动监听器
 function startWatcher() {
