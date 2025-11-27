@@ -2034,12 +2034,11 @@
 
       // 特殊处理：disconnected 状态显示为可点击的"重新连接"按钮
       if (type === 'disconnected') {
-        // 使用与 toast 风格一致的重试图标（圆形背景 + 重试箭头）
+        // 纯线条重试图标，无背景，间距优化
         statusEl.innerHTML = `
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" style="flex-shrink: 0; margin-right: 6px;">
-            <circle cx="12" cy="12" r="10" fill="currentColor" opacity="0.9"/>
-            <path d="M16.5 8.5v3h-3M7.5 15.5v-3h3" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-            <path d="M16.5 11.5a4.5 4.5 0 1 1-7.5-3.3M7.5 12.5a4.5 4.5 0 1 1 7.5 3.3" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0; margin-right: 4px;">
+            <path d="M23 4v6h-6"></path>
+            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
           </svg>
           <span>点击重新连接</span>
         `;
