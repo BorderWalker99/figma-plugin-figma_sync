@@ -447,7 +447,7 @@ async function pollDrive() {
 
     // 立即处理新文件，不等待下一个轮询周期
     if (newFiles.length > 0) {
-      console.log(`🔄 [Drive] 检测到 ${newFiles.length} 个新文件，立即处理...`);
+      console.log(`🔄 [Drive] 检测到 ${newFiles.length} 个新文件（总文件: ${imageFiles.length}，已知: ${knownFileIds.size - newFiles.length}），立即处理...`);
       for (const file of newFiles) {
         try {
           await handleDriveFile(file, true);
@@ -1163,9 +1163,13 @@ function connectWebSocket() {
       if (message.type === 'start-realtime') {
         console.log('\n🎯 [Drive] 启动实时同步模式...');
         // 先确保已知文件列表已初始化，避免处理已有文件
+        console.log(`📊 [Drive] 当前 knownFileIds 数量: ${knownFileIds.size}`);
         if (knownFileIds.size === 0) {
           console.log('📂 [Drive] 初始化已知文件列表（避免处理已有文件）...');
           await initializeKnownFiles();
+          console.log(`✅ [Drive] 初始化完成，已记录 ${knownFileIds.size} 个现有文件`);
+        } else {
+          console.log(`ℹ️  [Drive] 已知文件列表已存在，跳过初始化`);
         }
         isRealTimeMode = true;
         startPolling();
