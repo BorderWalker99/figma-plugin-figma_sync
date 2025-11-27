@@ -158,9 +158,9 @@ while true; do
                 if dd if=/dev/zero of="$TEST_FILE" bs=1024 count=1024 2>/dev/null; then
                     # 写入成功，删除测试文件
                     rm -f "$TEST_FILE" 2>/dev/null
-                    print_success "iCloud 文件夹验证成功: $ICLOUD_PATH"
+                print_success "iCloud 文件夹验证成功: $ICLOUD_PATH"
                     print_success "iCloud 空间充足"
-                    break
+                break
                 else
                     # 写入失败，可能是空间不足
                     rm -f "$TEST_FILE" 2>/dev/null

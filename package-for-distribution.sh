@@ -49,58 +49,39 @@ mkdir -p "$TEMP_DIR"
 
 echo -e "${GREEN}📦 开始打包...${NC}\n"
 
-# 0. 创建 macOS 安全提示解决脚本
-echo -e "${YELLOW}📄 创建 macOS 安全提示解决脚本...${NC}"
-cat > "$TEMP_DIR/解决macOS安全提示.command" << 'EOFSCRIPT'
+# 0. 创建 macOS 安全提示解决脚本（必须第一步运行）
+echo -e "${YELLOW}🔧 创建 macOS 安全提示解决脚本...${NC}"
+cat > "$TEMP_DIR/🔧 第一步-解决安全提示.command" << 'EOF'
 #!/bin/bash
 
 # 获取脚本所在目录
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
-echo "═══════════════════════════════════════════════════════"
-echo "  ScreenSync - 解决 macOS 安全提示"
-echo "═══════════════════════════════════════════════════════"
+clear
 echo ""
-echo "正在删除 ScreenSync Installer.app 的隔离属性..."
+echo "╔════════════════════════════════════════════════════════╗"
+echo "║                                                        ║"
+echo "║       ScreenSync - 解决 macOS 安全提示                ║"
+echo "║                                                        ║"
+echo "╚════════════════════════════════════════════════════════╝"
 echo ""
-
-if [ -d "$DIR/ScreenSync Installer.app" ]; then
-    xattr -cr "$DIR/ScreenSync Installer.app"
-    echo "✅ 完成！现在可以双击 ScreenSync Installer.app 运行了。"
-else
-    echo "❌ 错误：未找到 ScreenSync Installer.app"
-    echo "请确保此脚本在 ScreenSync-UserPackage 文件夹中运行。"
-fi
-
+echo "macOS 会阻止未经 Apple 公证的应用程序运行。"
+echo "此脚本将移除隔离属性，允许 ScreenSync Installer 运行。"
 echo ""
-echo "按任意键关闭窗口..."
-read -n 1
-EOFSCRIPT
-
-chmod +x "$TEMP_DIR/解决macOS安全提示.command"
-
-# 1. 复制核心服务器文件
-echo -e "${YELLOW}📄 复制核心服务器文件...${NC}"
-
-# 创建 macOS 安装提示脚本
-cat > "$TEMP_DIR/解决macOS安全提示.command" << 'EOF'
-#!/bin/bash
-
-# 获取脚本所在目录
-DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-
-echo "═══════════════════════════════════════════════════════"
-echo "  ScreenSync - 解决 macOS 安全提示"
-echo "═══════════════════════════════════════════════════════"
-echo ""
-echo "正在删除 ScreenSync Installer.app 的隔离属性..."
+echo "正在处理..."
 echo ""
 
 if [ -d "$DIR/ScreenSync Installer.app" ]; then
     xattr -cr "$DIR/ScreenSync Installer.app"
-    echo "✅ 完成！现在可以双击 ScreenSync Installer.app 运行了。"
+    echo "✅ 完成！安全属性已移除。"
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "  下一步："
+    echo "  关闭此窗口，然后双击 'ScreenSync Installer.app'"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 else
     echo "❌ 错误：未找到 ScreenSync Installer.app"
+    echo ""
     echo "请确保此脚本在 ScreenSync-UserPackage 文件夹中运行。"
 fi
 
@@ -109,7 +90,10 @@ echo "按任意键关闭窗口..."
 read -n 1
 EOF
 
-chmod +x "$TEMP_DIR/解决macOS安全提示.command"
+chmod +x "$TEMP_DIR/🔧 第一步-解决安全提示.command"
+
+# 1. 复制核心服务器文件
+echo -e "${YELLOW}📄 复制核心服务器文件...${NC}"
 
 echo -e "${YELLOW}📄 复制核心服务器文件...${NC}"
 cp server.js "$TEMP_DIR/"
@@ -202,10 +186,14 @@ ScreenSync - iPhone截图自动同步到Figma
 
 📦 安装步骤
 
-步骤 1：运行 GUI 安装器
+⚠️ 步骤 0：解决 macOS 安全提示（必须！）
 1. 解压此文件包
-2. 双击 "ScreenSync Installer.app"
-3. 按照图形界面提示完成以下配置：
+2. 双击 "🔧 第一步-解决安全提示.command"
+3. 等待完成后关闭窗口
+
+步骤 1：运行 GUI 安装器
+1. 双击 "ScreenSync Installer.app"
+2. 按照图形界面提示完成以下配置：
    - 选择储存方式（Google Cloud 或 iCloud）
    - 自动检测并安装 Homebrew 和 Node.js
    - 自动安装项目依赖
@@ -314,7 +302,19 @@ cat > "$TEMP_DIR/README_请先阅读.txt" << 'EOF'
 📖 快速开始指南
 ═══════════════════════════════════════════════════════
 
-第一步：运行安装器
+⚠️ 重要：第一步 - 解决 macOS 安全提示
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+由于应用未经 Apple 公证，macOS 会阻止运行。请先：
+
+1. 双击 "🔧 第一步-解决安全提示.command"
+2. 等待脚本执行完成（约 2 秒）
+3. 关闭脚本窗口
+
+✅ 完成后，安装器即可正常运行
+
+
+第二步：运行安装器
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 1. 双击 "ScreenSync Installer.app"

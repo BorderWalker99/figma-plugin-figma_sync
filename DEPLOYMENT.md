@@ -517,9 +517,17 @@ git push origin main --force
 **原因**：
 macOS Gatekeeper 安全机制阻止未签名的应用运行
 
-**用户端解决方法（3 种方案）**：
+**✅ 已自动化解决方案（推荐）**：
 
-**方案 1：删除隔离属性（推荐）**
+UserPackage 中已包含 `🔧 第一步-解决安全提示.command` 脚本：
+
+1. 用户双击此脚本
+2. 脚本自动移除隔离属性
+3. 然后即可正常运行 ScreenSync Installer.app
+
+**手动解决方法（如果自动化脚本无效）**：
+
+**方案 1：命令行删除隔离属性**
 ```bash
 # 在终端中运行（最安全）
 cd ~/Downloads/ScreenSync-UserPackage
