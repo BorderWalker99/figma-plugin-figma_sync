@@ -1424,7 +1424,7 @@
          <div style="display: flex; flex-direction: column; gap: 16px;">
 
           <div id="shortcutGuideSection">
-             <div style="font-weight: 600; margin-bottom: 8px; font-size: 13px;">1. 配置快捷指令</div>
+             <div id="shortcutGuideTitle" style="font-weight: 600; margin-bottom: 8px; font-size: 13px;">1. 配置快捷指令</div>
              <div style="font-size: 12px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 8px;" id="qrSubtitle">扫码获取快捷指令:</div>
              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;" id="qrCodesContainer">
                 <div style="display: flex; flex-direction: column; align-items: center; gap: 6px;" id="qrGoogleScreenshotContainer">
@@ -2276,6 +2276,7 @@
       const userIdDisplaySection = document.getElementById('userIdDisplaySection');
       const noModeMessage = document.getElementById('noModeMessage');
       const qrSubtitle = document.getElementById('qrSubtitle');
+      const shortcutGuideTitle = document.getElementById('shortcutGuideTitle');
       
       if (qrGoogleScreenshotContainer) qrGoogleScreenshotContainer.style.display = 'none';
       if (qrGoogleAlbumContainer) qrGoogleAlbumContainer.style.display = 'none';
@@ -2294,11 +2295,13 @@
         if (qrGoogleAlbumContainer) qrGoogleAlbumContainer.style.display = 'flex';
         // if (googleDriveHint) googleDriveHint.style.display = 'block';
         if (userIdDisplaySection) userIdDisplaySection.style.display = 'block';
+        if (shortcutGuideTitle) shortcutGuideTitle.textContent = '1. 配置快捷指令';
       } else if (currentSyncMode === 'icloud') {
         if (qrCodesContainer) qrCodesContainer.style.display = 'grid';
         if (qrSubtitle) qrSubtitle.style.display = 'block';
         if (qrIcloudScreenshotContainer) qrIcloudScreenshotContainer.style.display = 'flex';
         if (qrIcloudAlbumContainer) qrIcloudAlbumContainer.style.display = 'flex';
+        if (shortcutGuideTitle) shortcutGuideTitle.textContent = '配置快捷指令';
       } else {
         // No mode selected or unknown mode
         if (noModeMessage) noModeMessage.style.display = 'block';
