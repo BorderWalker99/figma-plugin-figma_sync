@@ -49,55 +49,10 @@ mkdir -p "$TEMP_DIR"
 
 echo -e "${GREEN}📦 开始打包...${NC}\n"
 
-# 0. 创建 macOS 安全提示解决脚本（必须第一步运行）
-echo -e "${YELLOW}🔧 创建 macOS 安全提示解决脚本...${NC}"
-cat > "$TEMP_DIR/🔧 第一步-解决安全提示.command" << 'EOF'
-#!/bin/bash
-
-# 获取脚本所在目录
-DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-
-clear
-echo ""
-echo "╔════════════════════════════════════════════════════════╗"
-echo "║                                                        ║"
-echo "║       ScreenSync - 解决 macOS 安全提示                ║"
-echo "║                                                        ║"
-echo "╚════════════════════════════════════════════════════════╝"
-echo ""
-echo "⚠️  如果此脚本被阻止打开："
-echo "请【右键点击】此文件，选择【打开】，然后在弹窗中点击【打开】。"
-echo ""
-echo "macOS 会阻止未经 Apple 公证的应用程序运行。"
-echo "此脚本将移除隔离属性，允许 ScreenSync Installer 运行。"
-echo ""
-echo "正在处理..."
-echo ""
-
-if [ -d "$DIR/ScreenSync Installer.app" ]; then
-    xattr -cr "$DIR/ScreenSync Installer.app"
-    echo "✅ 完成！安全属性已移除。"
-    echo ""
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "  下一步："
-    echo "  关闭此窗口，然后双击 'ScreenSync Installer.app'"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-else
-    echo "❌ 错误：未找到 ScreenSync Installer.app"
-    echo ""
-    echo "请确保此脚本在 ScreenSync-UserPackage 文件夹中运行。"
-fi
-
-echo ""
-echo "按任意键关闭窗口..."
-read -n 1
-EOF
-
-chmod +x "$TEMP_DIR/🔧 第一步-解决安全提示.command"
+# 0. 创建 README 和使用说明
+echo -e "${YELLOW}📝 创建说明文档...${NC}"
 
 # 1. 复制核心服务器文件
-echo -e "${YELLOW}📄 复制核心服务器文件...${NC}"
-
 echo -e "${YELLOW}📄 复制核心服务器文件...${NC}"
 cp server.js "$TEMP_DIR/"
 cp googleDrive.js "$TEMP_DIR/"
@@ -189,14 +144,13 @@ ScreenSync - iPhone截图自动同步到Figma
 
 📦 安装步骤
 
-⚠️ 步骤 0：解决 macOS 安全提示（必须！）
+⚠️ 步骤 1：第一次运行（解决安全提示）
 1. 解压此文件包
-2. 双击 "🔧 第一步-解决安全提示.command"
-3. 等待完成后关闭窗口
+2. 【右键点击】"ScreenSync Installer.app"
+3. 选择【打开】，然后在弹窗中点击【打开】
 
-步骤 1：运行 GUI 安装器
-1. 双击 "ScreenSync Installer.app"
-2. 按照图形界面提示完成以下配置：
+步骤 2：配置安装
+1. 安装器启动后，按照图形界面提示完成以下配置：
    - 选择储存方式（Google Cloud 或 iCloud）
    - 自动检测并安装 Homebrew 和 Node.js
    - 自动安装项目依赖
@@ -305,25 +259,22 @@ cat > "$TEMP_DIR/README_请先阅读.txt" << 'EOF'
 📖 快速开始指南
 ═══════════════════════════════════════════════════════
 
-⚠️ 重要：第一步 - 解决 macOS 安全提示
+⚠️ 第一次打开必须这样做（解决 macOS 安全提示）
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-由于应用未经 Apple 公证，macOS 可能会阻止运行。请先：
+由于应用未经 Apple 公证，直接双击会被 macOS 阻止。请按照以下步骤打开：
 
-1. 双击 "🔧 第一步-解决安全提示.command"
-   ⚠️ 如果双击无法打开，请【右键点击】该文件，选择【打开】
-   
-2. 等待脚本执行完成（约 2 秒）
-3. 关闭脚本窗口
+1. 【右键点击】"ScreenSync Installer.app"
+2. 在菜单中选择【打开】
+3. 在弹出的安全警告窗口中，点击【打开】
 
-✅ 完成后，安装器即可正常运行
+✅ 此时安装器将正常启动。以后您可以直接双击打开。
 
 
-第二步：运行安装器
+第二步：完成安装
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-1. 双击 "ScreenSync Installer.app"
-2. 按照图形界面提示完成安装：
+1. 按照图形界面提示完成安装：
    ✓ 选择储存方式（Google Cloud 或 iCloud）
    ✓ 自动安装依赖（Homebrew、Node.js）
    ✓ 自动配置并启动服务
