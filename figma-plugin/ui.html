@@ -1625,6 +1625,21 @@
                   </div>
                 </div>
 
+                <!-- Start Server Section -->
+                <div style="padding-top:30px; border-top: 1px solid var(--border); margin-top: 20px;">
+                  <div style="display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--bg-card); border-radius: var(--radius-s);">
+                    <div style="flex: 1;">
+                      <div style="font-size:13px; font-weight: 600; margin-bottom: 4px;">手动启动服务器</div>
+                      <div style="font-size:12px; color: var(--text-secondary);">
+                        如果服务器未自动启动，点击此按钮将在终端中运行 npm start
+                      </div>
+                    </div>
+                    <button id="startServerBtn" class="btn btn-primary" style="flex-shrink: 0; padding: 8px 16px; font-size: 12px;">
+                      启动服务器
+                    </button>
+                  </div>
+                </div>
+
       </div>
     </div>
   </div>
@@ -1881,6 +1896,19 @@
         } else if (data.type === 'server-update-progress') {
           // 处理服务器更新进度
           handleServerUpdateProgress(data);
+        } else if (data.type === 'start-server-terminal-result') {
+          // 处理启动服务器终端的结果
+          const startServerBtn = document.getElementById('startServerBtn');
+          if (startServerBtn) {
+            startServerBtn.disabled = false;
+            startServerBtn.textContent = '启动服务器';
+          }
+          
+          if (data.success) {
+            showToast(data.message || '终端已打开', 'success');
+          } else {
+            showToast(data.error || '打开终端失败', 'error');
+          }
         }
       };
 
@@ -3168,6 +3196,26 @@
           showToast('复制失败', 'error');
         }
         document.body.removeChild(textArea);
+      };
+    }
+    
+    // Start Server Button Logic
+    const startServerBtn = document.getElementById('startServerBtn');
+    if (startServerBtn) {
+      startServerBtn.onclick = function() {
+        // 检查连接状态
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          showToast('未连接到服务器', 'error');
+          return;
+        }
+        
+        // 禁用按钮并显示加载状态
+        startServerBtn.disabled = true;
+        startServerBtn.textContent = '正在启动...';
+        
+        // 发送启动服务器请求
+        ws.send(JSON.stringify({ type: 'start-server-terminal' }));
+        showToast('正在打开终端...', 'loading');
       };
     }
   </script>
