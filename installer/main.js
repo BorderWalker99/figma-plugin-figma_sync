@@ -574,13 +574,48 @@ ipcMain.handle('setup-autostart', async (event, installPath) => {
           }
           
           // 立即启动服务
-          exec(`launchctl start com.screensync.server`, (startError) => {
-             // 无论启动是否成功（可能已经在运行），只要 plist 写入成功就算配置完成
-             // 返回 success: true 以便安装器能正常结束
-             resolve({ 
-               success: true, 
-               message: '服务器已配置为开机自动启动' 
-             });
+          exec(`launchctl start com.screensync.server`, (startError, startStdout, startStderr) => {
+            if (startError) {
+              console.error('⚠️  启动服务失败:', startError.message);
+              console.error('   stdout:', startStdout);
+              console.error('   stderr:', startStderr);
+            }
+            
+            // 等待2秒后检查服务是否真的在运行
+            setTimeout(() => {
+              // 检查端口 8888 是否在监听
+              exec(`lsof -i :8888 | grep LISTEN`, (checkError, checkStdout) => {
+                if (checkError || !checkStdout) {
+                  console.error('❌ 服务器启动验证失败');
+                  console.error('   端口 8888 未监听');
+                  
+                  // 读取错误日志（如果存在）
+                  const errorLogPath = path.join(installPath, 'server-error.log');
+                  let errorDetails = '';
+                  if (fs.existsSync(errorLogPath)) {
+                    try {
+                      const errorLog = fs.readFileSync(errorLogPath, 'utf8');
+                      // 只取最后500字符
+                      errorDetails = errorLog.slice(-500);
+                    } catch (e) {
+                      // 忽略
+                    }
+                  }
+                  
+                  resolve({ 
+                    success: false, 
+                    error: '服务器启动失败\n\n可能原因：\n1. 依赖未完全安装\n2. 端口被占用\n\n请查看安装目录下的 server-error.log 文件' + (errorDetails ? '\n\n最近的错误：\n' + errorDetails : '')
+                  });
+                } else {
+                  console.log('✅ 服务器运行验证成功');
+                  console.log('   端口 8888 正在监听');
+                  resolve({ 
+                    success: true, 
+                    message: '服务器已配置为开机自动启动并已成功运行' 
+                  });
+                }
+              });
+            }, 2000);
           });
         });
       });

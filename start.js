@@ -90,7 +90,29 @@ checkUpdateAsync().catch(() => {
 const services = [];
 let watcher = null;
 
-// 1. 启动服务器
+// 1. 检查依赖是否安装
+console.log('🔍 检查环境...');
+const nodeModulesPath = path.join(__dirname, 'node_modules');
+if (!fs.existsSync(nodeModulesPath)) {
+  console.error('❌ 错误: 未找到 node_modules 文件夹');
+  console.error('   依赖可能未安装完成');
+  console.error('   请运行: npm install');
+  process.exit(1);
+}
+
+// 检查关键依赖
+const requiredDeps = ['dotenv', 'ws', 'express', 'sharp'];
+for (const dep of requiredDeps) {
+  const depPath = path.join(nodeModulesPath, dep);
+  if (!fs.existsSync(depPath)) {
+    console.error(`❌ 错误: 缺少关键依赖 "${dep}"`);
+    console.error('   请运行: npm install');
+    process.exit(1);
+  }
+}
+console.log('✅ 环境检查通过');
+
+// 2. 启动服务器
 console.log('🚀 启动WebSocket服务器...');
 // 增加 Node.js 内存限制到 4GB，以支持大文件（GIF/视频）处理
 // 如果系统内存不足，可以减小这个值（如 2048 表示 2GB）
@@ -101,6 +123,45 @@ const server = spawn('node', [`--max-old-space-size=${NODE_MEMORY_LIMIT}`, 'serv
   env: { ...process.env, SYNC_MODE }
 });
 services.push(server);
+
+// 监听服务器进程退出
+server.on('exit', (code, signal) => {
+  if (code !== 0 && code !== null) {
+    console.error(`\n❌ 服务器异常退出 (code: ${code})`);
+    console.error('   这可能是由于：');
+    console.error('   1. 依赖未正确安装');
+    console.error('   2. 端口 8888 被占用');
+    console.error('   3. 配置文件损坏');
+    console.error('\n   请检查 server-error.log 文件查看详细错误信息');
+    console.error('   或尝试手动运行: npm start\n');
+    
+    // 记录到错误日志文件
+    try {
+      const errorLogPath = path.join(__dirname, 'server-error.log');
+      const errorMsg = `[${new Date().toISOString()}] 服务器异常退出 (code: ${code}, signal: ${signal})\n`;
+      fs.appendFileSync(errorLogPath, errorMsg, 'utf8');
+    } catch (e) {
+      // 忽略日志写入错误
+    }
+    
+    // 停止所有服务并退出
+    console.log('🛑 正在停止所有服务...');
+    services.forEach(s => {
+      if (s && s !== server) {
+        try { s.kill(); } catch (e) {}
+      }
+    });
+    
+    process.exit(1);
+  } else if (signal) {
+    console.log(`\n⚠️  服务器被信号终止 (signal: ${signal})`);
+  }
+});
+
+server.on('error', (error) => {
+  console.error('\n❌ 无法启动服务器:', error.message);
+  process.exit(1);
+});
 
 // 启动监听器
 function startWatcher() {
