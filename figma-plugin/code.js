@@ -325,6 +325,19 @@ function adjustFrameSize() {
 figma.ui.onmessage = async (msg) => {
   console.log('📬 收到UI消息:', msg.type);
   
+  // 处理服务器修复请求
+  if (msg.type === 'repair-server') {
+    console.log('🔧 收到服务器修复请求');
+    // Figma 插件无法直接执行系统命令，但可以通过 UI 显示提示
+    // 实际修复由后端的 WebSocket 消息处理
+    figma.ui.postMessage({
+      type: 'repair-server-response',
+      success: true,
+      message: '正在尝试修复服务器连接...'
+    });
+    return;
+  }
+  
   // 处理插件版本信息请求
   if (msg.type === 'get-plugin-version') {
     figma.ui.postMessage({

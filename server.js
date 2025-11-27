@@ -1595,6 +1595,50 @@ wss.on('connection', (ws, req) => {
       }
       return;
     }
+    
+    // 修复服务器连接
+    if (data.type === 'repair-server') {
+      console.log('🔧 收到修复服务器请求');
+      
+      // 尝试重新加载 launchd 服务
+      const { exec } = require('child_process');
+      const os = require('os');
+      const homeDir = os.homedir();
+      const plistPath = `${homeDir}/Library/LaunchAgents/com.screensync.server.plist`;
+      
+      // 先卸载
+      exec(`launchctl unload "${plistPath}"`, (unloadError) => {
+        console.log('   🗑️  卸载旧服务...');
+        
+        // 重新加载
+        exec(`launchctl load "${plistPath}"`, (loadError) => {
+          if (loadError) {
+            console.error('   ❌ 加载服务失败:', loadError.message);
+          } else {
+            console.log('   ✅ 服务已重新加载');
+          }
+          
+          // 启动服务
+          exec(`launchctl start com.screensync.server`, (startError) => {
+            if (startError) {
+              console.error('   ❌ 启动服务失败:', startError.message);
+            } else {
+              console.log('   ✅ 服务已启动');
+            }
+            
+            // 发送响应
+            if (targetGroup && targetGroup.figma) {
+              targetGroup.figma.send(JSON.stringify({
+                type: 'repair-server-response',
+                success: !startError,
+                message: startError ? '修复失败：' + startError.message : '服务已修复并重启'
+              }));
+            }
+          });
+        });
+      });
+      return;
+    }
     if (!targetGroup) {
       console.log('   ❌ 连接组不存在');
       return;

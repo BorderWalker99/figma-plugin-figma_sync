@@ -210,6 +210,34 @@
         box-shadow: 0 0 6px rgba(255, 149, 0, 0.5);
     }
     
+    .connection-pill.reconnect {
+        background: rgba(255, 59, 48, 0.15);
+        color: var(--danger);
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+    
+    .connection-pill.reconnect:hover {
+        background: rgba(255, 59, 48, 0.25);
+        transform: translateY(-1px);
+        box-shadow: 0 2px 8px rgba(255, 59, 48, 0.2);
+    }
+    
+    .connection-pill.reconnect:active {
+        transform: translateY(0);
+    }
+    
+    .connection-pill.reconnect::before {
+        opacity: 1;
+        box-shadow: 0 0 6px rgba(255, 59, 48, 0.5);
+        animation: pulse 2s ease-in-out infinite;
+    }
+    
+    @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.3; }
+    }
+    
     /* 减少右箭头和文字之间的间距 */
     .connection-pill svg {
         margin-left: -4px;
@@ -226,6 +254,12 @@
         }
         .connection-pill.waiting {
             background: rgba(255, 149, 0, 0.2);
+        }
+        .connection-pill.reconnect {
+            background: rgba(255, 59, 48, 0.2);
+        }
+        .connection-pill.reconnect:hover {
+            background: rgba(255, 59, 48, 0.3);
         }
     }
 
@@ -1631,8 +1665,8 @@
                     <div style="font-size:13px; font-weight: 600; margin-bottom: 4px;">服务器未连接？</div>
                     <div style="font-size:12px; color: var(--text-secondary); line-height: 1.5;">
                       服务器通常会开机自动启动。<br>
-                      如果连接断开，请尝试双击安装包中的：<br>
-                      <code style="background: rgba(0,0,0,0.05); padding: 2px 4px; border-radius: 3px; font-family: monospace;">Manual_Start_Server.command</code>
+                      如果连接断开，点击上方的"重新连接"按钮即可自动修复。<br>
+                      插件会自动尝试重新连接并修复服务。
                     </div>
                   </div>
                 </div>
@@ -1693,6 +1727,78 @@
     // ========== WebSocket连接 ==========
     function setToolbarPill(text) {
       // No longer using toolbar pill
+    }
+
+    // 重新连接功能（包含自动修复）
+    let reconnectAttempts = 0;
+    const MAX_RECONNECT_ATTEMPTS = 3;
+    
+    function attemptReconnect() {
+      reconnectAttempts++;
+      log(`🔄 尝试重新连接 (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`);
+      updateStatus('waiting', '正在重新连接');
+      
+      // 首先尝试普通重连
+      setTimeout(() => {
+        connect();
+        
+        // 检查连接是否成功
+        setTimeout(() => {
+          if (!ws || ws.readyState !== WebSocket.OPEN) {
+            // 连接失败，尝试修复服务
+            if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+              log('⚠️ 连接失败，尝试修复服务...');
+              repairServerConnection();
+            } else {
+              log('❌ 多次重连失败');
+              updateStatus('disconnected', '连接失败');
+              showToast('连接失败，请检查服务器状态', 'error');
+              reconnectAttempts = 0; // 重置计数
+            }
+          } else {
+            // 连接成功，重置计数
+            reconnectAttempts = 0;
+            log('✅ 重新连接成功');
+            showToast('已重新连接', 'success');
+          }
+        }, 2000);
+      }, 500);
+    }
+    
+    // 修复服务器连接（后端自动修复）
+    function repairServerConnection() {
+      log('🔧 正在尝试修复服务器...');
+      
+      // 使用 iframe 触发后端修复脚本（通过 Figma plugin API）
+      parent.postMessage({
+        pluginMessage: {
+          type: 'repair-server',
+          installPath: serverInstallPath
+        }
+      }, '*');
+      
+      // 等待5秒后再次尝试连接
+      setTimeout(() => {
+        log('🔄 修复完成，重新尝试连接...');
+        connect();
+        
+        setTimeout(() => {
+          if (!ws || ws.readyState !== WebSocket.OPEN) {
+            if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+              attemptReconnect();
+            } else {
+              log('❌ 修复失败，请手动检查');
+              updateStatus('disconnected', '修复失败');
+              showToast('自动修复失败，请查看文档', 'error');
+              reconnectAttempts = 0;
+            }
+          } else {
+            reconnectAttempts = 0;
+            log('✅ 修复成功，服务已连接');
+            showToast('服务已修复并重新连接', 'success');
+          }
+        }, 2000);
+      }, 5000);
     }
 
     function connect() {
@@ -1985,6 +2091,17 @@
       }
 
       statusEl.className = 'connection-pill'; // Reset to base class
+
+      // 特殊处理：disconnected 状态显示为可点击的"重新连接"按钮
+      if (type === 'disconnected') {
+        statusEl.innerHTML = `点击重新连接 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity: 0.8; margin-left: 4px;"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>`;
+        statusEl.className = 'connection-pill reconnect';
+        statusEl.style.cursor = 'pointer';
+        statusEl.onclick = function() {
+          attemptReconnect();
+        };
+        return;
+      }
 
       if (text && text !== '') {
         statusEl.textContent = text;
