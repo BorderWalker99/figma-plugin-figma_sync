@@ -1895,14 +1895,12 @@
 
       ws.onclose = function () {
         log('⚠️ 连接断开，正在重连...');
-        // 只有在当前显示连接状态时才更新为断开，避免重连时频繁切换
-        const statusEl = document.getElementById('status');
-        if (statusEl && (statusEl.classList.contains('connected') || statusEl.textContent.includes('已连接'))) {
-        updateStatus('disconnected', '连接断开');
-        }
+        // 使用 'waiting' 状态显示"正在连接..."，给用户自动连接的反馈
+        updateStatus('waiting', '正在连接...');
+        
         if (heartbeatTimer) clearInterval(heartbeatTimer);
         if (updateCheckTimer) clearInterval(updateCheckTimer); // 清除更新检查定时器
-        setTimeout(connect, 3000);
+        setTimeout(connect, 2000); // 缩短重连间隔到 2 秒，体验更流畅
       };
     }
 
