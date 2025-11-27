@@ -125,7 +125,7 @@ function showToast(message, type = 'info') {
   
   // 设置图标（统一的圆形背景 + 白色图标设计）
   if (type === 'success') {
-    iconEl.innerHTML = '<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="currentColor"/><path d="M16.5 8.5l-5.5 5.5-3-3" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    iconEl.innerHTML = '<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="currentColor"/><path d="M16.5 9.5l-5.5 5.5-3-3" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
     toast.className = 'toast success';
   } else if (type === 'error') {
     iconEl.innerHTML = '<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="currentColor"/><path d="M12 8v5M12 16.5v.5" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -172,7 +172,7 @@ async function checkSystemRequirements() {
   if (homebrewResult.installed) {
     homebrewCheck.className = 'status-item success';
     homebrewCheck.innerHTML = `
-      <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg></div>
+      <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
       <div class="status-content">
         <div class="status-label">Homebrew</div>
         <div class="status-detail">已安装</div>
@@ -210,7 +210,7 @@ async function checkSystemRequirements() {
             if (checkResult.installed) {
               homebrewCheck.className = 'status-item success';
               homebrewCheck.innerHTML = `
-                <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg></div>
+                <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
                 <div class="status-content">
                   <div class="status-label">Homebrew</div>
                   <div class="status-detail">已安装</div>
@@ -225,7 +225,7 @@ async function checkSystemRequirements() {
         } else {
           homebrewCheck.className = 'status-item success';
           homebrewCheck.innerHTML = `
-            <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg></div>
+            <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
             <div class="status-content">
               <div class="status-label">Homebrew</div>
               <div class="status-detail">已安装</div>
@@ -253,7 +253,7 @@ async function checkSystemRequirements() {
   if (nodeResult.installed) {
     nodeCheck.className = 'status-item success';
     nodeCheck.innerHTML = `
-      <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg></div>
+      <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
       <div class="status-content">
         <div class="status-label">Node.js</div>
         <div class="status-detail">${nodeResult.version}</div>
@@ -291,7 +291,7 @@ async function checkSystemRequirements() {
             if (checkResult.installed) {
               nodeCheck.className = 'status-item success';
               nodeCheck.innerHTML = `
-                <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg></div>
+                <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
                 <div class="status-content">
                   <div class="status-label">Node.js</div>
                   <div class="status-detail">已安装 ${checkResult.version || ''}</div>
@@ -306,7 +306,7 @@ async function checkSystemRequirements() {
         } else {
           nodeCheck.className = 'status-item success';
           nodeCheck.innerHTML = `
-            <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg></div>
+            <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
             <div class="status-content">
               <div class="status-label">Node.js</div>
               <div class="status-detail">已安装</div>
@@ -435,7 +435,7 @@ async function setupConfiguration() {
     
     configStatus.innerHTML = `
       <div class="status-item success">
-        <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg></div>
+        <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
         <div class="status-content">
           <div class="status-label">配置完成</div>
           ${userIdDisplay}
