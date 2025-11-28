@@ -368,8 +368,8 @@ ipcMain.handle('install-dependencies', async (event, installPath) => {
     
     console.log('📦 npm 路径:', npmPath);
     
-    // 使用 --legacy-peer-deps 避免依赖冲突
-    const child = spawn(npmPath, ['install', '--legacy-peer-deps', '--verbose'], {
+    // 使用 --legacy-peer-deps 避免依赖冲突，并使用淘宝镜像加速
+    const child = spawn(npmPath, ['install', '--legacy-peer-deps', '--no-audit', '--registry=https://registry.npmmirror.com', '--verbose'], {
       cwd: installPath,
       stdio: 'pipe',
       shell: true

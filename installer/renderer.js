@@ -349,9 +349,23 @@ async function installDependencies() {
   ipcRenderer.on('install-output', (event, data) => {
     logOutput += data.data;
     // 实时更新进度（基于输出行数估算）
-    const lines = logOutput.split('\n').length;
-    const progress = Math.min(10 + (lines / 5), 90);
+    const linesCount = logOutput.split('\n').length;
+    const progress = Math.min(10 + (linesCount / 2), 90); // 加快进度条移动速度
     progressBar.style.width = `${progress}%`;
+    
+    // 更新状态文本，让用户知道没有卡死
+    if (data.data && data.data.trim()) {
+        const lines = data.data.trim().split('\n');
+        const lastLine = lines[lines.length - 1];
+        // 过滤掉一些无意义的输出
+        if (lastLine && lastLine.length < 60 && !lastLine.startsWith('npm WARN')) {
+            if (statusLabel) {
+                statusLabel.textContent = `正在安装: ${lastLine}`;
+                statusLabel.style.fontSize = '12px';
+                statusLabel.style.opacity = '0.8';
+            }
+        }
+    }
   });
   
   const result = await ipcRenderer.invoke('install-dependencies', installPath);
