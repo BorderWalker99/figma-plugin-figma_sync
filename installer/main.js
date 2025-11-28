@@ -368,21 +368,31 @@ ipcMain.handle('install-dependencies', async (event, installPath) => {
     
     console.log('📦 npm 路径:', npmPath);
     
-    // 使用 --legacy-peer-deps 避免依赖冲突，并使用淘宝镜像加速
-    const child = spawn(npmPath, ['install', '--legacy-peer-deps', '--no-audit', '--registry=https://registry.npmmirror.com', '--verbose'], {
+    // 使用 --legacy-peer-deps 避免依赖冲突
+    // 使用 --progress 显示进度，但不使用 --verbose 避免输出过多
+    const child = spawn(npmPath, ['install', '--legacy-peer-deps', '--progress', '--loglevel=info'], {
       cwd: installPath,
       stdio: 'pipe',
-      shell: true
+      shell: true,
+      env: {
+        ...process.env,
+        // 强制显示进度条
+        npm_config_progress: 'true',
+        // 禁用颜色代码
+        npm_config_color: 'false'
+      }
     });
     
     let output = '';
     let errorOutput = '';
+    let lastOutput = Date.now();
     
     child.stdout.on('data', (data) => {
       const text = data.toString();
       output += text;
       console.log('[npm stdout]', text);
       event.sender.send('install-output', { type: 'stdout', data: text });
+      lastOutput = Date.now();
     });
     
     child.stderr.on('data', (data) => {
@@ -390,9 +400,22 @@ ipcMain.handle('install-dependencies', async (event, installPath) => {
       errorOutput += text;
       console.log('[npm stderr]', text);
       event.sender.send('install-output', { type: 'stderr', data: text });
+      lastOutput = Date.now();
     });
     
+    // 每5秒发送心跳，让用户知道进程还在运行
+    const heartbeatInterval = setInterval(() => {
+      const timeSinceLastOutput = Date.now() - lastOutput;
+      if (timeSinceLastOutput > 5000) {
+        event.sender.send('install-output', { 
+          type: 'heartbeat', 
+          data: `[${new Date().toLocaleTimeString()}] 安装进行中，请稍候...\n` 
+        });
+      }
+    }, 5000);
+    
     child.on('close', (code) => {
+      clearInterval(heartbeatInterval);
       console.log('📦 npm install 完成，退出码:', code);
       
       if (code === 0) {
