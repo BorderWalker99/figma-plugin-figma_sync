@@ -84,16 +84,26 @@ ipcMain.handle('get-project-root', async () => {
   
   console.log('UserPackage 根目录:', userPackageRoot);
   
-  // 3. 验证该目录下是否有 package.json
-  const packageJsonPath = path.join(userPackageRoot, 'package.json');
+  // 3. 验证该目录下的"项目文件"子目录是否有 package.json（新结构）
+  const projectFilesPath = path.join(userPackageRoot, '项目文件');
+  const packageJsonPath = path.join(projectFilesPath, 'package.json');
+  
   if (fs.existsSync(packageJsonPath)) {
     console.log('✅ 找到 package.json:', packageJsonPath);
+    // 返回"项目文件"目录作为项目根目录
+    return projectFilesPath;
+  }
+  
+  // 兼容旧结构：检查根目录是否直接有 package.json
+  const oldPackageJsonPath = path.join(userPackageRoot, 'package.json');
+  if (fs.existsSync(oldPackageJsonPath)) {
+    console.log('✅ 找到 package.json（旧结构）:', oldPackageJsonPath);
     return userPackageRoot;
   }
   
   console.warn('⚠️ 未在预期位置找到 package.json，尝试备用路径');
   
-  // 备用方案：检查当前目录及其父目录
+  // 备用方案：检查当前目录及其父目录（包括"项目文件"子目录）
   const fallbackPaths = [
     appPath,
     path.dirname(appPath),
@@ -102,9 +112,18 @@ ipcMain.handle('get-project-root', async () => {
   ];
   
   for (const testPath of fallbackPaths) {
+    // 先检查"项目文件"子目录（新结构）
+    const projectFilesTestPath = path.join(testPath, '项目文件');
+    const testPackageJsonNew = path.join(projectFilesTestPath, 'package.json');
+    if (fs.existsSync(testPackageJsonNew)) {
+      console.log('✅ 备用路径找到 package.json（新结构）:', testPackageJsonNew);
+      return projectFilesTestPath;
+    }
+    
+    // 再检查直接路径（旧结构兼容）
     const testPackageJson = path.join(testPath, 'package.json');
     if (fs.existsSync(testPackageJson)) {
-      console.log('✅ 备用路径找到 package.json:', testPackageJson);
+      console.log('✅ 备用路径找到 package.json（旧结构）:', testPackageJson);
       return testPath;
     }
   }

@@ -46,75 +46,76 @@ if [ -d "$TEMP_DIR" ]; then
     rm -rf "$TEMP_DIR"
 fi
 mkdir -p "$TEMP_DIR"
+# 创建二级目录存放其他文件
+mkdir -p "$TEMP_DIR/项目文件"
 
 echo -e "${GREEN}📦 开始打包...${NC}\n"
 
 # 0. 创建 README 和使用说明
 echo -e "${YELLOW}📝 创建说明文档...${NC}"
 
-# 1. 复制核心服务器文件
+# 1. 复制核心服务器文件（到二级目录）
 echo -e "${YELLOW}📄 复制核心服务器文件...${NC}"
-cp server.js "$TEMP_DIR/"
-cp googleDrive.js "$TEMP_DIR/"
-cp aliyunOSS.js "$TEMP_DIR/" 2>/dev/null || echo "   ⚠️  aliyunOSS.js 不存在（可选）"
-cp userConfig.js "$TEMP_DIR/"
-cp serviceAccountKey.js "$TEMP_DIR/" 2>/dev/null || echo "   ⚠️  serviceAccountKey.js 不存在（可选，仅部署者需要）"
-cp start.js "$TEMP_DIR/"
-cp update-manager.js "$TEMP_DIR/"
-cp icloud-watcher.js "$TEMP_DIR/"
-cp drive-watcher.js "$TEMP_DIR/"
-cp aliyun-watcher.js "$TEMP_DIR/" 2>/dev/null || echo "   ⚠️  aliyun-watcher.js 不存在（可选）"
-cp com.screensync.server.plist "$TEMP_DIR/" 2>/dev/null || echo "   ⚠️  自动启动配置文件已包含"
+cp server.js "$TEMP_DIR/项目文件/"
+cp googleDrive.js "$TEMP_DIR/项目文件/"
+cp aliyunOSS.js "$TEMP_DIR/项目文件/" 2>/dev/null || echo "   ⚠️  aliyunOSS.js 不存在（可选）"
+cp userConfig.js "$TEMP_DIR/项目文件/"
+cp serviceAccountKey.js "$TEMP_DIR/项目文件/" 2>/dev/null || echo "   ⚠️  serviceAccountKey.js 不存在（可选，仅部署者需要）"
+cp start.js "$TEMP_DIR/项目文件/"
+cp update-manager.js "$TEMP_DIR/项目文件/"
+cp icloud-watcher.js "$TEMP_DIR/项目文件/"
+cp drive-watcher.js "$TEMP_DIR/项目文件/"
+cp aliyun-watcher.js "$TEMP_DIR/项目文件/" 2>/dev/null || echo "   ⚠️  aliyun-watcher.js 不存在（可选）"
+cp com.screensync.server.plist "$TEMP_DIR/项目文件/" 2>/dev/null || echo "   ⚠️  自动启动配置文件已包含"
 
-# 2. 复制配置文件
+# 2. 复制配置文件（到二级目录）
 echo -e "${YELLOW}⚙️  复制配置文件...${NC}"
-cp package.json "$TEMP_DIR/"
-cp package-lock.json "$TEMP_DIR/"
-cp README.md "$TEMP_DIR/"
+cp package.json "$TEMP_DIR/项目文件/"
+cp package-lock.json "$TEMP_DIR/项目文件/"
+cp README.md "$TEMP_DIR/项目文件/"
 
-# 3. 复制 GUI 安装器（必需）
+# 3. 复制 GUI 安装器（必需，放在首层）
 echo -e "${YELLOW}🖥️  复制 GUI 安装器...${NC}"
-mkdir -p "$TEMP_DIR"
 cp -r "$INSTALLER_APP" "$TEMP_DIR/" 2>/dev/null || {
     echo -e "${RED}❌ 复制 GUI 安装器失败${NC}"
     exit 1
 }
-echo "   ✅ GUI 安装器已包含"
+echo "   ✅ GUI 安装器已包含（首层目录）"
 
-# 复制 Gatekeeper 修复脚本
+# 复制 Gatekeeper 修复脚本（放在首层）
 if [ -f "将此文件拖入终端运行.command" ]; then
     cp "将此文件拖入终端运行.command" "$TEMP_DIR/"
     chmod +x "$TEMP_DIR/将此文件拖入终端运行.command"
-    echo "   ✅ Gatekeeper 修复脚本已包含"
+    echo "   ✅ Gatekeeper 修复脚本已包含（首层目录）"
 fi
 
-# 复制手动启动脚本
+# 复制手动连接脚本（重命名后放在首层）
 if [ -f "Manual_Start_Server.command" ]; then
-    cp "Manual_Start_Server.command" "$TEMP_DIR/"
-    chmod +x "$TEMP_DIR/Manual_Start_Server.command"
-    echo "   ✅ 手动启动脚本已包含"
+    cp "Manual_Start_Server.command" "$TEMP_DIR/若连接断开将此文件拖入终端手动连接.command"
+    chmod +x "$TEMP_DIR/若连接断开将此文件拖入终端手动连接.command"
+    echo "   ✅ 手动连接脚本已包含（首层目录，已重命名）"
 fi
 
-# 4. 复制 Figma 插件文件（排除 node_modules）
+# 4. 复制 Figma 插件文件（排除 node_modules，到二级目录）
 echo -e "${YELLOW}🎨 复制 Figma 插件文件...${NC}"
-mkdir -p "$TEMP_DIR/figma-plugin"
-cp figma-plugin/manifest.json "$TEMP_DIR/figma-plugin/"
-cp figma-plugin/code.js "$TEMP_DIR/figma-plugin/"
-cp figma-plugin/ui.html "$TEMP_DIR/figma-plugin/"
+mkdir -p "$TEMP_DIR/项目文件/figma-plugin"
+cp figma-plugin/manifest.json "$TEMP_DIR/项目文件/figma-plugin/"
+cp figma-plugin/code.js "$TEMP_DIR/项目文件/figma-plugin/"
+cp figma-plugin/ui.html "$TEMP_DIR/项目文件/figma-plugin/"
 
 # 复制插件图片资源
 if [ -d "figma-plugin/images" ]; then
-    cp -r figma-plugin/images "$TEMP_DIR/figma-plugin/"
+    cp -r figma-plugin/images "$TEMP_DIR/项目文件/figma-plugin/"
 fi
 
 # 复制 qr-codes.js（如果存在）
 if [ -f "figma-plugin/qr-codes.js" ]; then
-    cp figma-plugin/qr-codes.js "$TEMP_DIR/figma-plugin/"
+    cp figma-plugin/qr-codes.js "$TEMP_DIR/项目文件/figma-plugin/"
 fi
 
-# 5. 创建 .gitignore（用于用户自己的版本控制）
+# 5. 创建 .gitignore（用于用户自己的版本控制，到二级目录）
 echo -e "${YELLOW}📝 创建 .gitignore...${NC}"
-cat > "$TEMP_DIR/.gitignore" << 'EOF'
+cat > "$TEMP_DIR/项目文件/.gitignore" << 'EOF'
 # 依赖
 node_modules/
 package-lock.json
@@ -149,9 +150,9 @@ Thumbs.db
 ScreenSyncImg/
 EOF
 
-# 6. 创建使用说明文件
+# 6. 创建使用说明文件（到二级目录）
 echo -e "${YELLOW}📖 创建使用说明...${NC}"
-cat > "$TEMP_DIR/使用说明.txt" << 'EOF'
+cat > "$TEMP_DIR/项目文件/使用说明.txt" << 'EOF'
 ScreenSync - iPhone截图自动同步到Figma
 
 ═══════════════════════════════════════════════════════
@@ -284,7 +285,7 @@ A: 在 Figma 插件的设置中可以直接切换
 ═══════════════════════════════════════════════════════
 EOF
 
-# 7. 创建快速开始指南
+# 7. 创建快速开始指南（放在首层）
 echo -e "${YELLOW}📋 创建快速开始指南...${NC}"
 cat > "$TEMP_DIR/README_请先阅读.txt" << 'EOF'
 ╔════════════════════════════════════════════════════════╗
@@ -328,16 +329,16 @@ cat > "$TEMP_DIR/README_请先阅读.txt" << 'EOF'
    ⚠️ 注意：服务器已配置为开机自动启动，打开插件时服务器已在后台运行
 
 
-第二步：导入 Figma 插件
+第三步：导入 Figma 插件
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 1. 打开 Figma Desktop 应用
 2. 点击菜单：Plugins → Development → Import plugin from manifest
-3. 选择文件：{安装目录}/figma-plugin/manifest.json
+3. 选择文件：{安装目录}/项目文件/figma-plugin/manifest.json
 4. 完成导入
 
 
-第三步：开始使用
+第四步：开始使用
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 1. 在 Figma 中运行 "ScreenSync" 插件
@@ -350,17 +351,17 @@ cat > "$TEMP_DIR/README_请先阅读.txt" << 'EOF'
 
 💡 提示
 
-• 详细使用说明请查看"使用说明.txt"
-• 如需重启服务，在终端运行：npm start
+• 详细使用说明请查看"项目文件/使用说明.txt"
 • 支持一键自动更新（插件设置中）
 • Google Cloud 模式的 User ID 在安装完成时会显示
+• 若连接断开（极少见），优先点击插件内"点击重连"按钮
 
 ═══════════════════════════════════════════════════════
 EOF
 
-# 8. 创建版本信息文件
+# 8. 创建版本信息文件（到二级目录）
 echo -e "${YELLOW}📋 创建版本信息...${NC}"
-cat > "$TEMP_DIR/VERSION.txt" << EOF
+cat > "$TEMP_DIR/项目文件/VERSION.txt" << EOF
 ScreenSync 用户分发包
 版本: ${VERSION}
 打包日期: $(date +"%Y-%m-%d %H:%M:%S")
@@ -387,15 +388,20 @@ echo -e "${GREEN}╚════════════════════
 echo -e "${GREEN}✅ 文件包: ${PACKAGE_NAME}.tar.gz${NC}"
 echo -e "${GREEN}✅ 大小: ${PACKAGE_SIZE}${NC}\n"
 echo -e "${YELLOW}📦 包含内容：${NC}"
-echo "   ✅ GUI 安装器（ScreenSync Installer.app）"
-echo "   ✅ Gatekeeper 修复脚本（将此文件拖入终端运行.command）"
-echo "   ✅ 手动启动脚本（Manual_Start_Server.command）"
+echo ""
+echo -e "${GREEN}首层目录（用户直接看到）：${NC}"
+echo "   ✅ README_请先阅读.txt"
+echo "   ✅ 将此文件拖入终端运行.command（Gatekeeper 修复）"
+echo "   ✅ ScreenSync Installer.app（图形化安装器）"
+echo "   ✅ 若连接断开将此文件拖入终端手动连接.command（备用连接方案）"
+echo ""
+echo -e "${BLUE}项目文件/目录（安装所需的所有文件）：${NC}"
 echo "   ✅ 核心服务器文件（server.js, start.js, update-manager.js）"
 echo "   ✅ 监听器文件（drive-watcher.js, icloud-watcher.js, aliyun-watcher.js）"
 echo "   ✅ 云服务集成（googleDrive.js, aliyunOSS.js）"
 echo "   ✅ 配置文件（userConfig.js, package.json）"
-echo "   ✅ Figma 插件文件（完整插件代码和资源）"
-echo "   ✅ 使用说明和文档"
+echo "   ✅ Figma 插件文件（figma-plugin/完整插件代码和资源）"
+echo "   ✅ 使用说明和文档（使用说明.txt, VERSION.txt）"
 echo ""
 echo -e "${YELLOW}❌ 已排除：${NC}"
 echo "   - 安装脚本（已替换为 GUI 安装器）"
@@ -407,14 +413,19 @@ echo "   - .env（敏感信息）"
 echo "   - serviceAccountKey.js（可选，仅部署者需要）"
 echo ""
 echo -e "${BLUE}╔════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${BLUE}║  用户使用流程：                                            ║${NC}"
+echo -e "${BLUE}║  用户使用流程（认知负担最轻）：                            ║${NC}"
 echo -e "${BLUE}║  1. 解压文件包                                             ║${NC}"
-echo -e "${BLUE}║  2. 如提示安全问题：                                       ║${NC}"
+echo -e "${BLUE}║  2. 阅读 README_请先阅读.txt                               ║${NC}"
+echo -e "${BLUE}║  3. 如提示安全问题：                                       ║${NC}"
 echo -e "${BLUE}║     将"将此文件拖入终端运行.command"拖入终端并按回车      ║${NC}"
-echo -e "${BLUE}║  3. 双击 ScreenSync Installer.app 运行安装器              ║${NC}"
-echo -e "${BLUE}║  4. 按照图形界面完成安装                                   ║${NC}"
-echo -e "${BLUE}║  5. 在 Figma 中导入插件：                                  ║${NC}"
+echo -e "${BLUE}║  4. 双击 ScreenSync Installer.app 运行安装器              ║${NC}"
+echo -e "${BLUE}║  5. 按照图形界面完成安装                                   ║${NC}"
+echo -e "${BLUE}║  6. 在 Figma 中导入插件：                                  ║${NC}"
 echo -e "${BLUE}║     Plugins → Development → Import plugin from manifest   ║${NC}"
-echo -e "${BLUE}║  6. 选择：{安装目录}/figma-plugin/manifest.json            ║${NC}"
+echo -e "${BLUE}║  7. 选择：{安装目录}/项目文件/figma-plugin/manifest.json   ║${NC}"
+echo -e "${BLUE}║                                                            ║${NC}"
+echo -e "${BLUE}║  💡 若连接断开（极少见）：                                 ║${NC}"
+echo -e "${BLUE}║     优先使用插件内"点击重连"按钮                           ║${NC}"
+echo -e "${BLUE}║     或将"若连接断开..."文件拖入终端                        ║${NC}"
 echo -e "${BLUE}╚════════════════════════════════════════════════════════════╝${NC}\n"
 
