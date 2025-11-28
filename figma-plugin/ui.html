@@ -2030,14 +2030,14 @@
 
       // 特殊处理：disconnected 状态显示为可点击的"重新连接"按钮
       if (type === 'disconnected') {
-        // 纯线条重试图标，双箭头循环风格（更平衡居中），无背景
+        // 纯线条重试图标，双箭头循环风格（更平衡居中），无背景，视觉更轻盈
         statusEl.innerHTML = `
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;">
             <path d="M23 4v6h-6"></path>
             <path d="M1 20v-6h6"></path>
             <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
           </svg>
-          <span>点击重新连接</span>
+          <span>点击重连</span>
         `;
         statusEl.className = 'connection-pill reconnect';
         statusEl.style.cursor = 'pointer';
