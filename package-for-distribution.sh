@@ -162,7 +162,7 @@ ScreenSync - iPhone截图自动同步到Figma
 ⚠️ 步骤 1：第一次运行（解决安全提示）
 如果双击 ScreenSync Installer.app 提示"无法打开"或"已损坏"：
 1. 打开"终端"应用（可在启动台中搜索"终端"）
-2. 将"将此文件拖入终端运行.command"拖入终端窗口
+2. 将"安装前:将此文件拖进终端按回车运行.command"拖入终端窗口
 3. 按回车键运行脚本
 4. 看到"✅ 准备完成！"后关闭终端
 
@@ -236,7 +236,7 @@ ScreenSync - iPhone截图自动同步到Figma
 
 Q: 提示"ScreenSync Installer 已损坏"怎么办？
 A: 这是 macOS 安全机制。解决方法：
-   1. 将"将此文件拖入终端运行.command"拖入终端窗口
+   1. 将"安装前:将此文件拖进终端按回车运行.command"拖入终端窗口
    2. 按回车键运行
    3. 完成后再双击 ScreenSync Installer.app
    
@@ -266,8 +266,8 @@ A: 这种情况极少见，但如果发生：
    - 完全在 Figma 界面内完成，无需终端操作
    
    方法2（备选）：使用手动启动脚本
-   1. 将 "Manual_Start_Server.command" 拖入终端
-   2. 选择模式 [3] 重新配置自动启动
+   1. 将 "若连接断开:将此文件拖进终端按回车运行.command" 拖入终端
+   2. 按回车键运行，选择相应的修复选项
    
    方法3（高级）：终端运行：launchctl restart com.screensync.server
 
