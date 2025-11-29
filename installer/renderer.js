@@ -350,14 +350,47 @@ async function installDependencies() {
     logOutput += data.data;
     // 实时更新进度（基于输出行数估算）
     const lines = logOutput.split('\n').length;
-    const progress = Math.min(10 + (lines / 5), 90);
+    // 基础进度：10%
+    // 动态进度：每5行增加1%
+    let calculatedProgress = 10 + (lines / 5);
+    
+    // 获取当前的进度条宽度（如果是百分比字符串）
+    let currentWidth = parseFloat(progressBar.style.width) || 10;
+    
+    // 只有当计算出的进度大于当前进度时才更新，避免回退
+    // 但要限制最大为 90%，最后 10% 留给完成状态
+    const progress = Math.min(Math.max(calculatedProgress, currentWidth), 90);
+    
     progressBar.style.width = `${progress}%`;
+    
+    // 如果有最新输出，更新状态文字为"正在安装..."
+    if (statusLabel) {
+       statusLabel.textContent = '正在安装依赖...';
+    }
+  });
+  
+  // 监听心跳包（处理长时间无输出的情况）
+  ipcRenderer.on('install-heartbeat', (event, data) => {
+    if (statusLabel) {
+      statusLabel.textContent = data.message;
+    }
+    
+    // 缓慢增加进度条，让用户知道程序还在运行
+    // 获取当前进度
+    let currentProgress = parseFloat(progressBar.style.width) || 10;
+    
+    // 如果进度小于 85%，每次心跳增加 0.5%
+    if (currentProgress < 85) {
+      currentProgress += 0.5;
+      progressBar.style.width = `${currentProgress}%`;
+    }
   });
   
   const result = await ipcRenderer.invoke('install-dependencies', installPath);
   
   // 移除监听器
   ipcRenderer.removeAllListeners('install-output');
+  ipcRenderer.removeAllListeners('install-heartbeat');
   
   if (result.success) {
     progressBar.style.width = '100%';
