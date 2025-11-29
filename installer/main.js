@@ -351,12 +351,24 @@ ipcMain.handle('install-dependencies', async (event, installPath) => {
     
     // 清理可能的冲突文件
     const lockFilePath = path.join(installPath, 'package-lock.json');
+    const nodeModulesPath = path.join(installPath, 'node_modules');
+    
     if (fs.existsSync(lockFilePath)) {
       try {
         fs.unlinkSync(lockFilePath);
         console.log('🗑️  已删除旧的 package-lock.json');
       } catch (err) {
         console.warn('⚠️  无法删除 package-lock.json:', err.message);
+      }
+    }
+    
+    // 清理旧的 node_modules（避免缓存问题）
+    if (fs.existsSync(nodeModulesPath)) {
+      try {
+        fs.rmSync(nodeModulesPath, { recursive: true, force: true });
+        console.log('🗑️  已删除旧的 node_modules');
+      } catch (err) {
+        console.warn('⚠️  无法删除 node_modules:', err.message);
       }
     }
     
@@ -368,59 +380,70 @@ ipcMain.handle('install-dependencies', async (event, installPath) => {
     
     console.log('📦 npm 路径:', npmPath);
     
-    // 使用 --legacy-peer-deps 避免依赖冲突
-    // 使用 --progress 显示进度，但不使用 --verbose 避免输出过多
-    const child = spawn(npmPath, ['install', '--legacy-peer-deps', '--progress', '--loglevel=info'], {
+    // 设置超时定时器（5分钟）
+    let installTimeout = setTimeout(() => {
+      console.error('❌ npm install 超时（5分钟）');
+      try {
+        child.kill('SIGTERM');
+      } catch (e) {}
+      resolve({ 
+        success: false, 
+        error: 'npm 安装超时（5分钟）\n可能原因：\n1. 网络连接缓慢\n2. npm 镜像源响应慢\n\n建议：\n1. 检查网络连接\n2. 重新尝试安装' 
+      });
+    }, 5 * 60 * 1000);
+    
+    // 使用更简洁的参数，移除 --verbose 减少输出阻塞
+    const child = spawn(npmPath, ['install', '--legacy-peer-deps'], {
       cwd: installPath,
       stdio: 'pipe',
       shell: true,
       env: {
         ...process.env,
-        // 强制显示进度条
-        npm_config_progress: 'true',
-        // 禁用颜色代码
-        npm_config_color: 'false'
+        // 强制显示进度信息
+        npm_config_loglevel: 'info',
+        // 禁用严格的 SSL（某些企业网络需要）
+        npm_config_strict_ssl: 'false'
       }
     });
     
     let output = '';
     let errorOutput = '';
-    let lastOutput = Date.now();
+    let lastProgressUpdate = Date.now();
+    
+    // 定期发送心跳，模拟进度更新
+    const progressInterval = setInterval(() => {
+      const elapsed = Date.now() - lastProgressUpdate;
+      if (elapsed > 3000) { // 如果超过3秒没有输出
+        event.sender.send('install-heartbeat', { 
+          message: '正在下载依赖包，请耐心等待...' 
+        });
+      }
+    }, 3000);
     
     child.stdout.on('data', (data) => {
       const text = data.toString();
       output += text;
+      lastProgressUpdate = Date.now();
       console.log('[npm stdout]', text);
       event.sender.send('install-output', { type: 'stdout', data: text });
-      lastOutput = Date.now();
     });
     
     child.stderr.on('data', (data) => {
       const text = data.toString();
+      // npm 的很多信息输出到 stderr，不一定是错误
       errorOutput += text;
+      lastProgressUpdate = Date.now();
       console.log('[npm stderr]', text);
       event.sender.send('install-output', { type: 'stderr', data: text });
-      lastOutput = Date.now();
     });
     
-    // 每5秒发送心跳，让用户知道进程还在运行
-    const heartbeatInterval = setInterval(() => {
-      const timeSinceLastOutput = Date.now() - lastOutput;
-      if (timeSinceLastOutput > 5000) {
-        event.sender.send('install-output', { 
-          type: 'heartbeat', 
-          data: `[${new Date().toLocaleTimeString()}] 安装进行中，请稍候...\n` 
-        });
-      }
-    }, 5000);
-    
     child.on('close', (code) => {
-      clearInterval(heartbeatInterval);
+      clearTimeout(installTimeout);
+      clearInterval(progressInterval);
       console.log('📦 npm install 完成，退出码:', code);
       
       if (code === 0) {
         // 验证 node_modules 是否存在且包含关键依赖
-        const nodeModulesPath = path.join(installPath, 'node_modules');
         const dotenvPath = path.join(nodeModulesPath, 'dotenv');
         const wsPath = path.join(nodeModulesPath, 'ws');
         
@@ -454,6 +477,8 @@ ipcMain.handle('install-dependencies', async (event, installPath) => {
     });
     
     child.on('error', (error) => {
+      clearTimeout(installTimeout);
+      clearInterval(progressInterval);
       console.error('❌ 启动 npm 失败:', error);
       resolve({ 
         success: false, 

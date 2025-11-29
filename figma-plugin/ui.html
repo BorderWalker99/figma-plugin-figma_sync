@@ -1448,7 +1448,7 @@
                       <div id="userIdTitle" style="font-weight: 600; margin-bottom: 8px; font-size: 13px;">2. 您的 User ID</div>
                       <div id="userIdSubtitle" style="font-size: 12px; color: var(--text-secondary); margin-top: 6px;">
                         请在快捷指令的文本框中填入此 ID:
-                      </div>
+          </div>
                       <div style="background: var(--bg-app); padding: 8px 12px 8px 12px; border-radius: var(--radius-s); margin: 6px 0; display: flex; align-items: center; justify-content: space-between;">
                         <div style="font-family: 'SF Mono', monospace; font-size: 12px; overflow-x: auto; white-space: nowrap; margin-right: 8px; -webkit-overflow-scrolling: touch; scrollbar-width: none; color: var(--text-secondary); user-select: text;">
                           <span id="displayUserId">正在获取...</span>
@@ -2641,7 +2641,7 @@
         showToast(data.message || '正在安装...', 'loading');
         if (updateBtnText) {
           updateBtnText.textContent = '安装中...';
-        }
+      }
       } else if (data.status === 'completed') {
         showToast(data.message || '更新完成！请重启插件', 'success');
         if (updateBtn) {

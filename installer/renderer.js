@@ -337,107 +337,35 @@ async function installDependencies() {
   errorAlert.style.display = 'none';
   errorAlert.innerHTML = '';
   progressBar.classList.remove('success');
-  progressBar.style.width = '5%';
+  progressBar.style.width = '10%';
   if (statusLabel) {
-    statusLabel.textContent = '正在安装依赖...';
+    statusLabel.textContent = '正在安装依赖（可能需要几分钟）';
   }
   
-  // 创建实时日志显示区域
-  let logContainer = document.getElementById('installLogContainer');
-  if (!logContainer) {
-    logContainer = document.createElement('div');
-    logContainer.id = 'installLogContainer';
-    logContainer.style.cssText = `
-      margin-top: 16px;
-      padding: 12px;
-      background: #f5f5f5;
-      border-radius: 8px;
-      max-height: 200px;
-      overflow-y: auto;
-      font-family: 'SF Mono', Monaco, monospace;
-      font-size: 11px;
-      line-height: 1.4;
-      color: #666;
-      white-space: pre-wrap;
-      word-break: break-all;
-    `;
-    document.getElementById('step3').querySelector('.step-content').appendChild(logContainer);
-  }
-  logContainer.textContent = '开始安装依赖...\n';
-  
+  // 创建日志显示区域（默认隐藏，出错时显示）
   let logOutput = '';
-  let lastUpdateTime = Date.now();
-  let progressValue = 5;
-  
-  // 模拟进度条持续前进（避免卡住感）
-  const progressInterval = setInterval(() => {
-    if (progressValue < 85) {
-      progressValue += 0.5; // 每100ms增加0.5%
-      progressBar.style.width = `${progressValue}%`;
-    }
-  }, 100);
   
   // 监听安装输出
-  const outputHandler = (event, data) => {
-    const text = data.data;
-    logOutput += text;
-    
-    // 实时显示日志（只保留最后30行）
-    const lines = logOutput.split('\n');
-    const recentLines = lines.slice(-30).join('\n');
-    logContainer.textContent = recentLines;
-    
-    // 自动滚动到底部
-    logContainer.scrollTop = logContainer.scrollHeight;
-    
-    // 更新状态标签（提取关键信息）
-    if (text.includes('npm WARN')) {
-      // 忽略警告，不更新状态
-    } else if (text.match(/(\d+) packages?/)) {
-      if (statusLabel) {
-        statusLabel.textContent = '正在下载依赖包...';
-      }
-      progressValue = Math.max(progressValue, 30);
-    } else if (text.includes('idealTree')) {
-      if (statusLabel) {
-        statusLabel.textContent = '正在解析依赖树...';
-      }
-      progressValue = Math.max(progressValue, 20);
-    } else if (text.includes('reify')) {
-      if (statusLabel) {
-        statusLabel.textContent = '正在安装依赖...';
-      }
-      progressValue = Math.max(progressValue, 50);
-    } else if (text.includes('added') || text.includes('updated')) {
-      if (statusLabel) {
-        statusLabel.textContent = '正在完成安装...';
-      }
-      progressValue = Math.max(progressValue, 80);
-    }
-    
-    progressBar.style.width = `${progressValue}%`;
-    lastUpdateTime = Date.now();
-  };
-  
-  ipcRenderer.on('install-output', outputHandler);
+  ipcRenderer.on('install-output', (event, data) => {
+    logOutput += data.data;
+    // 实时更新进度（基于输出行数估算）
+    const lines = logOutput.split('\n').length;
+    const progress = Math.min(10 + (lines / 5), 90);
+    progressBar.style.width = `${progress}%`;
+  });
   
   const result = await ipcRenderer.invoke('install-dependencies', installPath);
   
-  // 停止进度条动画
-  clearInterval(progressInterval);
-  
   // 移除监听器
-  ipcRenderer.removeListener('install-output', outputHandler);
+  ipcRenderer.removeAllListeners('install-output');
   
   if (result.success) {
     progressBar.style.width = '100%';
     progressBar.classList.add('success');
+    const statusLabel = document.getElementById('installStatusLabel');
     if (statusLabel) {
-      statusLabel.textContent = '依赖安装完成！';
+      statusLabel.textContent = '依赖安装完成';
     }
-    // 显示成功日志
-    logContainer.textContent += '\n✅ 所有依赖安装成功！';
-    logContainer.scrollTop = logContainer.scrollHeight;
     document.getElementById('step3Next').disabled = false;
   } else {
     // 显示红色错误通知栏
@@ -461,11 +389,6 @@ async function installDependencies() {
     if (statusLabel) {
       statusLabel.textContent = '安装失败';
     }
-    
-    // 在日志中显示错误
-    logContainer.style.color = '#d32f2f';
-    logContainer.textContent += '\n\n❌ 安装失败！\n' + result.error;
-    logContainer.scrollTop = logContainer.scrollHeight;
   }
   
   document.getElementById('step3Buttons').style.display = 'flex';
