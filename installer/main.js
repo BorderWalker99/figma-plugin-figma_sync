@@ -393,7 +393,8 @@ ipcMain.handle('install-dependencies', async (event, installPath) => {
     }, 5 * 60 * 1000);
     
     // 使用更简洁的参数，移除 --verbose 减少输出阻塞
-    const child = spawn(npmPath, ['install', '--legacy-peer-deps'], {
+    // 使用淘宝镜像源加速下载
+    const child = spawn(npmPath, ['install', '--legacy-peer-deps', '--registry=https://registry.npmmirror.com'], {
       cwd: installPath,
       stdio: 'pipe',
       shell: true,

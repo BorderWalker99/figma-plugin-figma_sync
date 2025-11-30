@@ -345,44 +345,35 @@ async function installDependencies() {
   // 创建日志显示区域（默认隐藏，出错时显示）
   let logOutput = '';
   
+  let currentProgress = 10;
+  
+  const updateUi = (progress, message) => {
+    if (progress > currentProgress) {
+      currentProgress = Math.min(progress, 95);
+      progressBar.style.width = `${currentProgress}%`;
+    }
+    if (message && statusLabel) {
+      statusLabel.textContent = message;
+    }
+  };
+
   // 监听安装输出
   ipcRenderer.on('install-output', (event, data) => {
     logOutput += data.data;
     // 实时更新进度（基于输出行数估算）
     const lines = logOutput.split('\n').length;
-    // 基础进度：10%
-    // 动态进度：每5行增加1%
-    let calculatedProgress = 10 + (lines / 5);
-    
-    // 获取当前的进度条宽度（如果是百分比字符串）
-    let currentWidth = parseFloat(progressBar.style.width) || 10;
-    
-    // 只有当计算出的进度大于当前进度时才更新，避免回退
-    // 但要限制最大为 90%，最后 10% 留给完成状态
-    const progress = Math.min(Math.max(calculatedProgress, currentWidth), 90);
-    
-    progressBar.style.width = `${progress}%`;
-    
-    // 如果有最新输出，更新状态文字为"正在安装..."
-    if (statusLabel) {
-       statusLabel.textContent = '正在安装依赖...';
-    }
+    // 提高灵敏度：每2行增加1%，上限90%
+    const progress = 10 + (lines / 2);
+    updateUi(progress);
   });
   
-  // 监听心跳包（处理长时间无输出的情况）
+  // 监听心跳 (处理长时间无输出的情况)
   ipcRenderer.on('install-heartbeat', (event, data) => {
-    if (statusLabel) {
-      statusLabel.textContent = data.message;
-    }
-    
-    // 缓慢增加进度条，让用户知道程序还在运行
-    // 获取当前进度
-    let currentProgress = parseFloat(progressBar.style.width) || 10;
-    
-    // 如果进度小于 85%，每次心跳增加 0.5%
-    if (currentProgress < 85) {
-      currentProgress += 0.5;
-      progressBar.style.width = `${currentProgress}%`;
+    // 如果卡在初期，假装动一下进度条，让用户知道没死机
+    if (currentProgress < 25) {
+      updateUi(currentProgress + 0.5, data.message);
+    } else {
+      updateUi(currentProgress, data.message);
     }
   });
   
