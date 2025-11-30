@@ -224,18 +224,19 @@ ${RELEASE_NOTES}
 发布时间: $(date +"%Y-%m-%d %H:%M:%S")
 "
 
-echo -e "   ${YELLOW}正在上传到 GitHub Releases...${NC}"
-
-if gh release create "v${NEW_VERSION}" \
-    "$PLUGIN_ZIP" \
-    "$SERVER_TAR" \
-    --title "$RELEASE_TITLE" \
-    --notes "$RELEASE_BODY" > /dev/null 2>&1; then
-    echo -e "   ${GREEN}✅ Release v${NEW_VERSION} 发布成功${NC}"
-else
-    echo -e "   ${RED}❌ Release 发布失败${NC}"
-    exit 1
-fi
+    echo -e "   ${YELLOW}正在上传到 GitHub Releases...${NC}"
+    
+    # 显示上传进度
+    if gh release create "v${NEW_VERSION}" \
+        "$PLUGIN_ZIP" \
+        "$SERVER_TAR" \
+        --title "$RELEASE_TITLE" \
+        --notes "$RELEASE_BODY"; then
+        echo -e "   ${GREEN}✅ Release v${NEW_VERSION} 发布成功${NC}"
+    else
+        echo -e "   ${RED}❌ Release 发布失败${NC}"
+        exit 1
+    fi
 
 # ==================== 完成 ====================
 echo -e "\n${GREEN}╔════════════════════════════════════════════════════════╗${NC}"
