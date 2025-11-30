@@ -12,14 +12,30 @@
   "build": {
     "appId": "com.screensync.installer",
     "productName": "ScreenSync Installer",
+    "compression": "maximum",
+    "asar": true,
     "mac": {
       "category": "public.app-category.utilities",
-      "target": "dmg",
-      "icon": "icon.icns"
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "icon": "icon.icns",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false
     },
     "files": [
       "**/*",
-      "!node_modules/**/*"
+      "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}",
+      "!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}",
+      "!**/node_modules/*.d.ts",
+      "!**/node_modules/.bin",
+      "!src/*"
     ],
     "protocols": [
       {
