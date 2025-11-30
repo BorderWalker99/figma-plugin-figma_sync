@@ -253,12 +253,20 @@ function runAppleScript(script) {
     const tempScriptPath = path.join(os.tmpdir(), `temp_script_${Date.now()}.scpt`);
     fs.writeFileSync(tempScriptPath, script, 'utf8');
 
-    exec(`osascript "${tempScriptPath}"`, (error, stdout, stderr) => {
+    // 隐藏 stderr 以避免 Electron 显示不必要的报错弹窗（除非真的是执行错误）
+    exec(`osascript "${tempScriptPath}" 2>/dev/null`, (error, stdout, stderr) => {
       // 清理临时文件
       try { fs.unlinkSync(tempScriptPath); } catch (e) {}
 
       if (error) {
-        reject(error);
+        // 只有当 error 存在且不是用户取消时才 reject
+        if (!error.message.includes('User canceled')) {
+          console.error('AppleScript error:', error);
+          reject(error);
+        } else {
+           // 用户取消当作成功但不执行
+           resolve('User canceled');
+        }
       } else {
         resolve(stdout);
       }
@@ -641,12 +649,12 @@ ipcMain.handle('setup-autostart', async (event, installPath) => {
             // 尝试继续启动，也许只是加载警告
           }
           
-          // 立即启动服务
-          exec(`launchctl start com.screensync.server`, (startError, startStdout, startStderr) => {
+          // 立即启动服务，忽略 stderr 以防弹窗
+          exec(`launchctl start com.screensync.server 2>/dev/null`, (startError, startStdout, startStderr) => {
             if (startError) {
               console.error('⚠️  启动服务失败:', startError.message);
-              console.error('   stdout:', startStdout);
-              console.error('   stderr:', startStderr);
+              // console.error('   stdout:', startStdout); // 减少噪音
+              // console.error('   stderr:', startStderr); // 减少噪音
             }
             
             // 等待2秒后检查服务是否真的在运行

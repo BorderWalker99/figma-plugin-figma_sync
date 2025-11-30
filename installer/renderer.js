@@ -339,7 +339,7 @@ async function installDependencies() {
   progressBar.classList.remove('success');
   progressBar.style.width = '10%';
   if (statusLabel) {
-    statusLabel.textContent = '正在安装依赖（可能需要几分钟）';
+    statusLabel.textContent = '正在安装依赖';
   }
   
   // 创建日志显示区域（默认隐藏，出错时显示）
