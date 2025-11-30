@@ -9,6 +9,17 @@ if (process.platform === 'darwin') {
   app.allowRendererProcessReuse = false;
 }
 
+// 全局错误处理，防止未捕获异常导致弹窗
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error);
+  // 不做任何事，阻止默认的弹窗行为
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  // 不做任何事，阻止默认的弹窗行为
+});
+
 let mainWindow;
 
 function createWindow() {

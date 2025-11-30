@@ -76,11 +76,27 @@ cp README.md "$TEMP_DIR/项目文件/"
 
 # 3. 复制 GUI 安装器（必需，放在首层）
 echo -e "${YELLOW}🖥️  复制 GUI 安装器...${NC}"
-cp -r "$INSTALLER_APP" "$TEMP_DIR/" 2>/dev/null || {
-    echo -e "${RED}❌ 复制 GUI 安装器失败${NC}"
-    exit 1
-}
-echo "   ✅ GUI 安装器已包含（首层目录）"
+
+# 优先复制 DMG 文件（压缩过的），如果不存在则复制 .app
+DMG_FILE=""
+if [ -f "installer/dist/ScreenSync Installer-1.0.0-arm64.dmg" ]; then
+    DMG_FILE="installer/dist/ScreenSync Installer-1.0.0-arm64.dmg"
+elif [ -f "installer/dist/ScreenSync Installer-1.0.0.dmg" ]; then
+    DMG_FILE="installer/dist/ScreenSync Installer-1.0.0.dmg"
+fi
+
+if [ -n "$DMG_FILE" ]; then
+    cp "$DMG_FILE" "$TEMP_DIR/"
+    DMG_NAME=$(basename "$DMG_FILE")
+    echo "   ✅ 已包含安装器磁盘映像: $DMG_NAME (压缩版)"
+else
+    # 回退到 .app 目录
+    cp -r "$INSTALLER_APP" "$TEMP_DIR/" 2>/dev/null || {
+        echo -e "${RED}❌ 复制 GUI 安装器失败${NC}"
+        exit 1
+    }
+    echo "   ✅ GUI 安装器已包含（首层目录）"
+fi
 
 # 复制 Gatekeeper 修复脚本（放在首层）
 if [ -f "安装前_将此文件拖进终端按回车运行.command" ]; then
@@ -160,15 +176,16 @@ ScreenSync - iPhone截图自动同步到Figma
 📦 安装步骤
 
 ⚠️ 步骤 1：第一次运行（解决安全提示）
-如果双击 ScreenSync Installer.app 提示"无法打开"或"已损坏"：
+如果双击 ScreenSync Installer.dmg 提示"无法打开"或"已损坏"：
 1. 打开"终端"应用（可在启动台中搜索"终端"）
 2. 将"安装前_将此文件拖进终端按回车运行.command"拖入终端窗口
 3. 按回车键运行脚本
 4. 看到"✅ 准备完成！"后关闭终端
 
 步骤 2：配置安装
-1. 双击 "ScreenSync Installer.app"
-2. 安装器启动后，按照图形界面提示完成以下配置：
+1. 双击 "ScreenSync Installer.dmg" 挂载安装盘
+2. 在弹出的窗口中双击 "ScreenSync Installer"
+3. 安装器启动后，按照图形界面提示完成以下配置：
    - 选择储存方式（Google Cloud 或 iCloud）
    - 自动检测并安装 Homebrew 和 Node.js
    - 自动安装项目依赖
@@ -243,7 +260,7 @@ A: 这是 macOS 安全机制。解决方法：
    或者右键点击应用 → 选择"打开" → 点击"打开"
 
 Q: 安装器在哪里？
-A: 解压后的文件夹中，名为 "ScreenSync Installer.app"
+A: 解压后的文件夹中，名为 "ScreenSync Installer.dmg"，双击后即可看到安装器
 
 Q: 如何找到 manifest.json？
 A: 安装完成后，在安装目录下的 figma-plugin 文件夹中
@@ -392,7 +409,7 @@ echo ""
 echo -e "${GREEN}首层目录（用户直接看到）：${NC}"
 echo "   ✅ README_请先阅读.txt"
 echo "   ✅ 安装前_将此文件拖进终端按回车运行.command（Gatekeeper 修复）"
-echo "   ✅ ScreenSync Installer.app（图形化安装器）"
+echo "   ✅ ScreenSync Installer.dmg（图形化安装器，双击运行）"
 echo "   ✅ 若连接断开_将此文件拖进终端按回车运行.command（备用连接方案）"
 echo ""
 echo -e "${BLUE}项目文件/目录（安装所需的所有文件）：${NC}"
@@ -418,7 +435,7 @@ echo -e "${BLUE}║  1. 解压文件包                                         
 echo -e "${BLUE}║  2. 阅读 README_请先阅读.txt                               ║${NC}"
 echo -e "${BLUE}║  3. 如提示安全问题：                                       ║${NC}"
 echo -e "${BLUE}║     将"安装前:将此文件拖进终端按回车运行"拖入终端并回车   ║${NC}"
-echo -e "${BLUE}║  4. 双击 ScreenSync Installer.app 运行安装器              ║${NC}"
+echo -e "${BLUE}║  4. 双击 ScreenSync Installer.dmg 运行安装器              ║${NC}"
 echo -e "${BLUE}║  5. 按照图形界面完成安装                                   ║${NC}"
 echo -e "${BLUE}║  6. 在 Figma 中导入插件：                                  ║${NC}"
 echo -e "${BLUE}║     Plugins → Development → Import plugin from manifest   ║${NC}"

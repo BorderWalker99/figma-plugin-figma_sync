@@ -194,7 +194,7 @@ async function checkSystemRequirements() {
     installBtn.style.marginLeft = '12px';
     installBtn.onclick = async () => {
       installBtn.disabled = true;
-      installBtn.textContent = '正在打开终端...';
+      installBtn.textContent = '正在打开终端';
       const result = await ipcRenderer.invoke('install-homebrew');
       if (result.success) {
         if (result.needsRestart) {
@@ -216,7 +216,7 @@ async function checkSystemRequirements() {
                   <div class="status-detail">已安装</div>
                 </div>
               `;
-              showToast('Homebrew 安装成功！', 'success');
+              showToast('Homebrew 安装成功', 'success');
               checkSystemRequirements(); // 重新检查所有依赖
             } else {
               showToast('Homebrew 尚未安装完成，请在终端中完成安装后再检测', 'error');
@@ -275,7 +275,7 @@ async function checkSystemRequirements() {
     installBtn.style.marginLeft = '12px';
     installBtn.onclick = async () => {
       installBtn.disabled = true;
-      installBtn.textContent = '正在打开终端...';
+      installBtn.textContent = '正在打开终端';
       const result = await ipcRenderer.invoke('install-node');
       if (result.success) {
         if (result.needsRestart) {
@@ -297,7 +297,7 @@ async function checkSystemRequirements() {
                   <div class="status-detail">已安装 ${checkResult.version || ''}</div>
                 </div>
               `;
-              showToast('Node.js 安装成功！', 'success');
+              showToast('Node.js 安装成功', 'success');
               checkSystemRequirements(); // 重新检查所有依赖
             } else {
               showToast('Node.js 尚未安装完成，请在终端中完成安装后再检测', 'error');
@@ -508,14 +508,14 @@ window.finishInstallation = async function() {
   try {
     // 显示配置中状态
     button.disabled = true;
-    button.textContent = '正在配置自动启动...';
+    button.textContent = '正在配置自动启动';
     
     // 配置服务器自动启动
     const result = await ipcRenderer.invoke('setup-autostart', installPath);
     
     if (result.success) {
       // 配置成功
-      button.textContent = '配置完成！';
+      button.textContent = '配置完成';
       showToast(result.message || '服务器已配置为自动启动', 'success');
       
       // 延迟1.5秒后关闭，让用户看到成功消息
@@ -530,7 +530,7 @@ window.finishInstallation = async function() {
       const startResult = await ipcRenderer.invoke('start-server', installPath);
       
       if (startResult.success) {
-        button.textContent = '启动成功！';
+        button.textContent = '启动成功';
         showToast('服务器已启动（本次会话）', 'success');
         setTimeout(() => {
           window.close();
