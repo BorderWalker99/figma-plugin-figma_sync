@@ -453,6 +453,34 @@ ipcMain.handle('install-dependencies', async (event, installPath) => {
     console.log('📦 开始安装依赖...');
     console.log('📂 安装路径:', installPath);
     
+    // 严格检查 installPath
+    if (!installPath || typeof installPath !== 'string') {
+      console.error('❌ 无效的安装路径:', installPath);
+      resolve({ 
+        success: false, 
+        error: `无效的安装路径: ${installPath}\n请尝试重新选择项目文件夹。` 
+      });
+      return;
+    }
+    
+    try {
+      if (!fs.statSync(installPath).isDirectory()) {
+        console.error('❌ 安装路径不是目录:', installPath);
+        resolve({ 
+          success: false, 
+          error: `安装路径不是一个有效的目录:\n${installPath}\n请选择包含 package.json 的文件夹。` 
+        });
+        return;
+      }
+    } catch (e) {
+      console.error('❌ 无法访问安装路径:', e);
+       resolve({ 
+        success: false, 
+        error: `无法访问安装路径:\n${installPath}\n${e.message}` 
+      });
+      return;
+    }
+    
     // 验证 package.json 是否存在
     const packageJsonPath = path.join(installPath, 'package.json');
     if (!fs.existsSync(packageJsonPath)) {
