@@ -303,6 +303,14 @@ function startWatching() {
       
       // 文件可以正常处理，调用 syncScreenshot
       console.log(`\n📸 [实时模式] 检测到新截图: ${filename}`);
+      
+      // 立即对新文件触发下载
+      try {
+        exec(`brctl download "${filePath}"`);
+      } catch (e) {
+        // 忽略
+      }
+      
       syncScreenshot(filePath, true);
     }
   });

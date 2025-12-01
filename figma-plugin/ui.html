@@ -1631,6 +1631,7 @@
     let ws = null;
     let screenshotCount = 0;
     let manualDragCount = 0;
+    let skippedFilesSet = new Set(); // 用于去重
     let heartbeatTimer = null;
     let updateCheckTimer = null; // 定期检查更新的定时器
     let currentMode = null;
@@ -1804,20 +1805,26 @@
           }
           handleScreenshot(data);
         } else if (data.type === 'file-skipped') {
-          manualDragCount++;
-          let reasonText = 'GIF过大';
-          if (data.reason === 'mp4' || data.reason === 'video') {
-            const ext = (data.filename || '').toLowerCase();
-            if (ext.endsWith('.mov')) {
-              reasonText = 'MOV视频';
-            } else {
-              reasonText = 'MP4视频';
+          // 去重检查：如果文件名已存在，则不增加计数，也不显示重复的日志
+          if (!skippedFilesSet.has(data.filename)) {
+            skippedFilesSet.add(data.filename);
+            manualDragCount++;
+            
+            let reasonText = 'GIF过大';
+            if (data.reason === 'mp4' || data.reason === 'video') {
+              const ext = (data.filename || '').toLowerCase();
+              if (ext.endsWith('.mov')) {
+                reasonText = 'MOV视频';
+              } else {
+                reasonText = 'MP4视频';
+              }
+            } else if (data.reason === 'gif-too-large') {
+              reasonText = 'GIF过大';
             }
-          } else if (data.reason === 'gif-too-large') {
-            reasonText = 'GIF过大';
+            log(`⚠️  ${data.filename} 需手动导入（${reasonText}）`);
           }
-          log(`⚠️  ${data.filename} 需手动导入（${reasonText}）`);
           
+          // 即使重复，也尝试发送确认消息以确保后台状态同步（可选，但为了保险起见）
           if (ws && ws.readyState === WebSocket.OPEN) {
             try {
               ws.send(JSON.stringify({
@@ -2086,8 +2093,8 @@
         // disconnected uses base class (gray)
         
       } else if (manualDragCount > 0 && type === 'connected') {
-        const warningText = `需手动导入 ${manualDragCount} 段 视频`;
-        statusEl.innerHTML = `${warningText} <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity: 0.8;"><polyline points="9 18 15 12 9 6"></polyline></svg>`;
+        const warningText = `需手动导入 ${manualDragCount} 段视频`;
+        statusEl.innerHTML = `${warningText} <svg width="7" height="14" viewBox="7 0 14 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity: 0.8;"><polyline points="9 18 15 12 9 6"></polyline></svg>`;
         statusEl.className = 'connection-pill waiting';
         statusEl.style.cursor = 'pointer';
         statusEl.onclick = function() {
@@ -2099,7 +2106,7 @@
         // 根据当前模式显示不同的文案
         const actionText = (currentSyncMode === 'icloud') ? '已保留' : '已保存';
         const backupText = `${actionText} ${gifBackupCount} 段 GIF`;
-        statusEl.innerHTML = `${backupText} <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity: 0.8;"><polyline points="9 18 15 12 9 6"></polyline></svg>`;
+        statusEl.innerHTML = `${backupText} <svg width="7" height="14" viewBox="7 0 14 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity: 0.8;"><polyline points="9 18 15 12 9 6"></polyline></svg>`;
         statusEl.className = 'connection-pill connected';
         statusEl.style.cursor = 'pointer';
         statusEl.onclick = function() {
@@ -2171,6 +2178,7 @@
 
       screenshotCount = 0;
       manualDragCount = 0;
+      skippedFilesSet.clear();
       gifBackupCount = 0;
       document.getElementById('count').textContent = '0';
       
@@ -2194,6 +2202,7 @@
       log('🫳🏻 开始同步...');
       updateStatus('connected', '正在同步');
       manualDragCount = 0;
+      skippedFilesSet.clear();
       gifBackupCount = 0;
         ws.send(JSON.stringify({ type: 'manual-sync' }));
     };

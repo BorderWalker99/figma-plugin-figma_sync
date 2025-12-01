@@ -732,6 +732,16 @@ ipcMain.handle('setup-config', async (event, installPath, syncMode, localFolder)
         fs.mkdirSync(localFolder, { recursive: true });
       }
       
+      // 如果是 iCloud 模式，配置该文件夹为"始终保留下载"
+      if (syncMode === 'icloud' && localFolder) {
+        try {
+          console.log('正在配置 iCloud 文件夹为"始终保留下载"...');
+          exec(`brctl download -R "${localFolder}"`);
+        } catch (e) {
+          console.warn('配置始终保留下载失败:', e.message);
+        }
+      }
+      
       resolve({ success: true, userId: userId });
     } catch (error) {
       resolve({ success: false, error: error.message });
