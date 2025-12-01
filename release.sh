@@ -163,7 +163,13 @@ echo -e "\n${BLUE}🏷️  步骤 4/5: 创建 Git Tag...${NC}"
 
 # 检查 Tag 是否已存在
 if git rev-parse "v${NEW_VERSION}" >/dev/null 2>&1; then
-    echo -e "   ${YELLOW}⚠️  Tag v${NEW_VERSION} 已存在，跳过创建${NC}"
+    echo -e "   ${YELLOW}⚠️  Tag v${NEW_VERSION} 已存在，尝试推送...${NC}"
+    if git push origin "v${NEW_VERSION}" 2>&1; then
+        echo -e "   ${GREEN}✅ Git Tag v${NEW_VERSION} 已推送${NC}"
+    else
+        # 如果推送失败（可能是已经存在于远程），我们尝试继续，让 gh 命令处理
+        echo -e "   ${YELLOW}⚠️  Tag 推送警告（可能已存在于远程），继续尝试发布...${NC}"
+    fi
 else
     if git tag -a "v${NEW_VERSION}" -m "Release v${NEW_VERSION}" 2>&1; then
         if git push origin "v${NEW_VERSION}" 2>&1; then
