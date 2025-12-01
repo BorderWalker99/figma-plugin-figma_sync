@@ -785,10 +785,15 @@ ipcMain.handle('copy-to-clipboard', async (event, text) => {
 ipcMain.handle('setup-autostart', async (event, installPath) => {
   return new Promise((resolve) => {
     try {
-      const nodePath = process.platform === 'darwin'
-        ? (process.arch === 'arm64' ? '/opt/homebrew/bin/node' : '/usr/local/bin/node')
-        : 'node';
+      // 使用 findExecutable 找到正确的 node 路径，确保与 install-dependencies 阶段使用的环境一致
+      // 避免出现"依赖是用 Node A 安装的，但 LaunchAgent 用 Node B 启动"导致的原生模块(sharp)崩溃
+      const nodePath = findExecutable('node') || 
+        (process.platform === 'darwin' 
+          ? (process.arch === 'arm64' ? '/opt/homebrew/bin/node' : '/usr/local/bin/node')
+          : 'node');
       
+      console.log('🚀 配置自启动，使用 Node 路径:', nodePath);
+
       const homeDir = require('os').homedir();
       const launchAgentsDir = path.join(homeDir, 'Library', 'LaunchAgents');
       const plistName = 'com.screensync.server.plist';
