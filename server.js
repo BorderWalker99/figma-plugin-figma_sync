@@ -2492,7 +2492,8 @@ async function handlePluginUpdate(targetGroup, connectionId) {
     // 解压 zip 文件（使用 unzip 命令，如果没有则提示用户安装）
     try {
       // 尝试使用 unzip 命令
-      await execPromise(`unzip -o "${tempFile}" -d "${pluginDir}"`);
+      // 注意：zip 包包含 'figma-plugin' 顶层目录，所以解压到 __dirname
+      await execPromise(`unzip -o "${tempFile}" -d "${__dirname}"`);
       console.log(`   ✅ 插件文件已更新到: ${pluginDir}`);
     } catch (unzipError) {
       // 如果 unzip 不可用，尝试使用 Node.js 方法
@@ -2500,7 +2501,7 @@ async function handlePluginUpdate(targetGroup, connectionId) {
         // 简单的 zip 解压（仅支持基本格式）
         const AdmZip = require('adm-zip');
         const zip = new AdmZip(tempFile);
-        zip.extractAllTo(pluginDir, true);
+        zip.extractAllTo(__dirname, true);
         console.log(`   ✅ 插件文件已更新到: ${pluginDir}`);
       } catch (zipError) {
         throw new Error('无法解压插件文件，请确保系统已安装 unzip 或 adm-zip 模块');

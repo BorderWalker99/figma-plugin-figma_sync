@@ -91,11 +91,19 @@ echo ""
 # ==================== 步骤 1: 更新版本号 ====================
 echo -e "${BLUE}📝 步骤 1/5: 更新版本号...${NC}"
 
-# 更新插件版本号
+# 更新插件版本号 (code.js)
 sed -i '' "s/PLUGIN_VERSION = '[^']*'/PLUGIN_VERSION = '${NEW_VERSION}'/g" figma-plugin/code.js
-echo -e "   ${GREEN}✅ 插件版本号已更新: v${NEW_VERSION}${NC}"
+echo -e "   ${GREEN}✅ figma-plugin/code.js 版本号已更新: v${NEW_VERSION}${NC}"
 
-# 更新服务器版本号
+# 更新 package.json 版本号
+sed -i '' "1,10s/\"version\": \"[^\"]*\"/\"version\": \"${NEW_VERSION}\"/" package.json
+echo -e "   ${GREEN}✅ package.json 版本号已更新: v${NEW_VERSION}${NC}"
+
+# 更新 installer/package.json 版本号
+sed -i '' "1,10s/\"version\": \"[^\"]*\"/\"version\": \"${NEW_VERSION}\"/" installer/package.json
+echo -e "   ${GREEN}✅ installer/package.json 版本号已更新: v${NEW_VERSION}${NC}"
+
+# 更新服务器版本号 (VERSION.txt)
 sed -i '' "s/版本: .*/版本: ${NEW_VERSION}/g" VERSION.txt
 sed -i '' "s/更新日期: .*/更新日期: $(date +"%Y-%m-%d")/g" VERSION.txt
 echo -e "   ${GREEN}✅ 服务器版本号已更新: v${NEW_VERSION}${NC}"

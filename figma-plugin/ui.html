@@ -164,7 +164,7 @@
 
     .connection-pill {
       font-size: 12px;
-      padding: 4px 8px;
+      padding: 4px 10px;
       border-radius: 100px;
       background: rgba(0, 0, 0, 0.08);
       color: var(--text-secondary);
@@ -2631,6 +2631,13 @@
         title.textContent = `${componentName}有新版本`;
         version.textContent = `v${currentVer} → v${latestVer}`;
         banner.classList.add('show');
+        
+        // 如果当前未最小化，调整窗口高度以适应 Banner
+        if (typeof isMinimized !== 'undefined' && !isMinimized) {
+          parent.postMessage({
+            pluginMessage: { type: 'resize', width: 360, height: 460 }
+          }, '*');
+        }
       }
     }
     
@@ -2639,6 +2646,15 @@
       const banner = document.getElementById('updateBanner');
       if (banner) {
         banner.classList.remove('show');
+        // 确保样式被重置（配合最小化逻辑）
+        banner.style.display = '';
+        
+        // 如果当前未最小化，恢复窗口高度
+        if (typeof isMinimized !== 'undefined' && !isMinimized) {
+          parent.postMessage({
+            pluginMessage: { type: 'resize', width: 360, height: 400 }
+          }, '*');
+        }
       }
     }
     
@@ -3001,8 +3017,9 @@
         settingsOverlay.classList.remove('show');
         useCaseOverlay.classList.remove('show');
         
-        // 最小化时隐藏更新横幅，防止遮挡
-        if (updateBanner && updateBanner.style.display === 'flex') {
+        // 最小化时隐藏更新横幅
+        // 检查 classList.contains('show') 因为这是主要的显示状态
+        if (updateBanner && (updateBanner.classList.contains('show') || updateBanner.style.display === 'flex' || updateBanner.style.display === 'block')) {
           updateBanner.dataset.wasVisible = 'true';
           updateBanner.style.display = 'none';
         }
@@ -3017,18 +3034,25 @@
       } else {
         appRoot.classList.remove('minimized');
         
-        // 恢复时显示更新横幅（如果之前是显示的）
+        let isBannerVisible = false;
+        // 恢复时显示更新横幅
         if (updateBanner && updateBanner.dataset.wasVisible === 'true') {
-          updateBanner.style.display = 'flex';
+          updateBanner.style.display = ''; // 清除内联样式，让 CSS .show 生效
           delete updateBanner.dataset.wasVisible;
+          isBannerVisible = true;
+        } else if (updateBanner && updateBanner.classList.contains('show')) {
+          // 如果没有 wasVisible 标记但有 .show 类（可能是逻辑边缘情况），也认为是显示的
+          isBannerVisible = true;
         }
         
         // Toggle icon path to Minimize
         toggleMinimizeBtn.setAttribute('title', '最小化');
         currentIcon.innerHTML = '<polyline points="4 14 10 14 10 20"></polyline><polyline points="20 10 14 10 14 4"></polyline>';
         
+        // 根据是否有 Banner 调整窗口高度
+        const height = isBannerVisible ? 460 : 400;
         parent.postMessage({
-          pluginMessage: { type: 'resize', width: 360, height: 400 }
+          pluginMessage: { type: 'resize', width: 360, height: height }
         }, '*');
       }
     }
