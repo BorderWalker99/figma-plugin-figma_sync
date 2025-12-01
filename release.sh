@@ -218,12 +218,6 @@ ${RELEASE_NOTES}
 
 ---
 
-## 📋 文件列表
-*   \`ScreenSync-UserPackage.tar.gz\` - 完整安装包 (✅ 推荐下载)
-*   \`figma-plugin-v${NEW_VERSION}.zip\` - 自动更新源文件 (🚫 请勿下载)
-
----
-
 发布时间: $(date +"%Y-%m-%d %H:%M:%S")
 "
 
