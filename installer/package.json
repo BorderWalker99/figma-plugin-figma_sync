@@ -14,6 +14,19 @@
     "productName": "ScreenSync Installer",
     "compression": "maximum",
     "asar": true,
+    "dmg": {
+      "contents": [
+        {
+          "x": 410,
+          "y": 190,
+          "type": "file"
+        }
+      ],
+      "window": {
+        "width": 540,
+        "height": 380
+      }
+    },
     "mac": {
       "category": "public.app-category.utilities",
       "target": [
