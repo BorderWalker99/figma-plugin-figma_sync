@@ -309,6 +309,21 @@ function startWatching() {
   
   watcher.on('ready', () => {
     console.log('✅ 实时监听已启动\n');
+    
+    // 尝试设置文件夹为"始终保留下载" (Keep Downloaded)
+    try {
+      console.log('☁️  正在配置 iCloud 文件夹为"始终保留下载"...');
+      exec(`brctl download -R "${CONFIG.icloudPath}"`, (error) => {
+        if (error) {
+          // brctl 可能会因为权限或路径问题报错，但不应阻止主流程
+          console.log('   ⚠️  配置"始终保留下载"失败 (这不影响基本功能):', error.message);
+        } else {
+          console.log('   ✅ 已配置 iCloud 文件夹为"始终保留下载"');
+        }
+      });
+    } catch (e) {
+      // 忽略同步执行错误
+    }
   });
   
   watcher.on('error', (error) => {

@@ -1727,6 +1727,18 @@ wss.on('connection', (ws, req) => {
               throw new Error('文件夹创建失败');
             }
             
+            // 尝试设置文件夹为"始终保留下载" (Keep Downloaded)
+            try {
+              const { exec } = require('child_process');
+              exec(`brctl download -R "${icloudPath}"`, (error) => {
+                if (!error) {
+                  console.log('   ✅ [Server] 已配置 iCloud 文件夹为"始终保留下载"');
+                }
+              });
+            } catch (e) {
+              // 忽略错误
+            }
+            
             // 测试写入权限和空间
             const testFile = path.join(icloudPath, '.test-write-space-check');
             try {
