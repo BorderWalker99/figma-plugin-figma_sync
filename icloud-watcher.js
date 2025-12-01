@@ -4,6 +4,12 @@ const path = require('path');
 const WebSocket = require('ws');
 const chokidar = require('chokidar');
 const sharp = require('sharp');
+
+// 优化 sharp 配置，减少内存占用并提高稳定性（特别是在 LaunchAgent 环境下）
+sharp.cache(false); // 禁用缓存
+sharp.simd(false); // 禁用 SIMD
+sharp.concurrency(1); // 限制并发
+
 const { exec } = require('child_process');
 const os = require('os');
 
