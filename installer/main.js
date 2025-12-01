@@ -115,8 +115,9 @@ ipcMain.handle('get-project-root', async () => {
   console.warn('⚠️ 未在预期位置找到 package.json，尝试备用路径');
   
   // 备用方案：检查当前目录及其父目录（包括"项目文件"子目录）
+  // 注意：必须排除 appPath 本身（如果它是 asar），因为 Electron fs 可能会错误地认为 asar 里的 package.json 是我们我们要找的
   const fallbackPaths = [
-    appPath,
+    // appPath, // 移除这个，防止定位到 installer 自己的 asar
     path.dirname(appPath),
     path.dirname(path.dirname(appPath)),
     path.dirname(path.dirname(path.dirname(appPath)))
@@ -205,8 +206,9 @@ ipcMain.handle('get-project-root', async () => {
   }
   
   console.error('❌ 无法找到 package.json');
-  // 最后的退路：返回 UserPackage 根目录（即使没有验证）
-  return userPackageRoot;
+  // 最后的退路：不要返回 userPackageRoot，因为这可能是只读的 Volume 根目录
+  // 直接返回 null，让前端提示用户手动选择
+  return null;
 });
 
 // 手动选择项目根目录
