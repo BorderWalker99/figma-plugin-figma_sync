@@ -524,6 +524,27 @@ ipcMain.handle('install-dependencies', async (event, installPath) => {
         : 'npm');
     
     console.log('📦 npm 路径:', npmPath);
+
+    // 调试：打印详细的路径信息
+    try {
+        const installStat = fs.statSync(installPath);
+        console.log(`[DEBUG] installPath: ${installPath}, isDirectory: ${installStat.isDirectory()}`);
+        
+        // 尝试解析 npmPath 的真实路径（处理软链接）
+        let realNpmPath = npmPath;
+        if (fs.existsSync(npmPath)) {
+            realNpmPath = fs.realpathSync(npmPath);
+            console.log(`[DEBUG] npmPath resolved: ${realNpmPath}`);
+        } else {
+            console.warn(`[DEBUG] npmPath does not exist: ${npmPath}`);
+        }
+    } catch(e) {
+        console.error('[DEBUG] stat error:', e);
+    }
+
+    // 终极调试：如果 spawn 失败，尝试使用 exec (更宽松)
+    // 很多时候 spawn 对 PATH 的处理比 exec 严格
+    // 且 spawn 需要可执行文件路径，exec 可以直接运行命令字符串
     
     // 设置超时定时器（5分钟）
     let installTimeout = setTimeout(() => {
@@ -533,24 +554,34 @@ ipcMain.handle('install-dependencies', async (event, installPath) => {
       } catch (e) {}
       resolve({ 
         success: false, 
-        error: 'npm 安装超时（5分钟）\n可能原因：\n1. 网络连接缓慢\n2. npm 镜像源响应慢\n\n建议：\n1. 检查网络连接\n2. 重新尝试安装' 
+        error: 'npm 安装超时（5分钟）\n可能原因：\n1. 网络连接缓慢\n2. npm 镜像源响应慢' 
       });
     }, 5 * 60 * 1000);
     
-    // 使用更简洁的参数，移除 --verbose 减少输出阻塞
-    // 使用淘宝镜像源加速下载
-    const child = spawn(npmPath, ['install', '--legacy-peer-deps', '--registry=https://registry.npmmirror.com'], {
+    // 改用 exec 尝试规避 spawn ENOTDIR 问题
+    // spawn 需要一个文件作为第一个参数，如果 npmPath 是个复杂的脚本或者环境有问题容易挂
+    // exec 直接在 shell 中执行字符串，兼容性更好
+    const commandStr = `"${npmPath}" install --legacy-peer-deps --registry=https://registry.npmmirror.com`;
+    console.log(`[DEBUG] Executing command: ${commandStr}`);
+
+    const child = exec(commandStr, {
       cwd: installPath,
-      stdio: 'pipe',
-      shell: true,
       env: {
         ...process.env,
-        // 强制显示进度信息
         npm_config_loglevel: 'info',
-        // 禁用严格的 SSL（某些企业网络需要）
-        npm_config_strict_ssl: 'false'
+        npm_config_strict_ssl: 'false',
+        // 确保 PATH 包含 npm 所在的目录
+        PATH: `${path.dirname(npmPath)}:${process.env.PATH}`
       }
     });
+    
+    /* 
+    // 原 spawn 代码保留作为参考
+    const child = spawn(npmPath, ['install', '--legacy-peer-deps', '--registry=https://registry.npmmirror.com'], {
+      cwd: installPath,
+      // ...
+    });
+    */
     
     let output = '';
     let errorOutput = '';
