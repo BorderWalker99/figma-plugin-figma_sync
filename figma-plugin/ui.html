@@ -311,9 +311,10 @@
       padding: 10px 12px;
       font-size: 12px;
       line-height: 1.4;
-      border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+      border-radius: var(--radius-s);
       animation: slideDown 0.3s ease;
       flex-shrink: 0;
+      margin: 8px 0;
     }
 
     .update-banner.show {
@@ -357,7 +358,6 @@
 
     .update-banner-title {
       font-weight: 600;
-      margin-bottom: 2px;
     }
 
     .update-banner-version {
@@ -605,8 +605,8 @@
     
     /* New compact mode icon */
     .hero-icon-sm {
-        width: 24px;
-        height: 24px;
+        width: 22px;
+        height: 22px;
         border-radius: 50%;
       display: flex;
       align-items: center;
@@ -620,7 +620,7 @@
     }
 
     .hero-mode-title {
-        font-size: 14px;
+        font-size: 15px;
         font-weight: 600;
         color: var(--text-primary);
     }
@@ -2992,12 +2992,20 @@
     function toggleMinimize() {
       isMinimized = !isMinimized;
       const currentIcon = document.getElementById('minimizeIcon');
+      const updateBanner = document.getElementById('updateBanner');
+      
       if (!currentIcon) return;
       
       if (isMinimized) {
         appRoot.classList.add('minimized');
         settingsOverlay.classList.remove('show');
         useCaseOverlay.classList.remove('show');
+        
+        // 最小化时隐藏更新横幅，防止遮挡
+        if (updateBanner && updateBanner.style.display === 'flex') {
+          updateBanner.dataset.wasVisible = 'true';
+          updateBanner.style.display = 'none';
+        }
         
         // Toggle icon path to Maximize (No slash)
         toggleMinimizeBtn.setAttribute('title', '恢复');
@@ -3008,6 +3016,13 @@
         }, '*');
       } else {
         appRoot.classList.remove('minimized');
+        
+        // 恢复时显示更新横幅（如果之前是显示的）
+        if (updateBanner && updateBanner.dataset.wasVisible === 'true') {
+          updateBanner.style.display = 'flex';
+          delete updateBanner.dataset.wasVisible;
+        }
+        
         // Toggle icon path to Minimize
         toggleMinimizeBtn.setAttribute('title', '最小化');
         currentIcon.innerHTML = '<polyline points="4 14 10 14 10 20"></polyline><polyline points="20 10 14 10 14 4"></polyline>';
@@ -3204,6 +3219,8 @@
 
     connect();
     loadServerPath(); // 加载保存的服务器路径
+    // 请求当前插件版本
+    parent.postMessage({ pluginMessage: { type: 'get-plugin-version' } }, '*');
 
     window.addEventListener('beforeunload', function () {
       stopRealtimeSync();

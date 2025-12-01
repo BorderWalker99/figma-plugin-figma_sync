@@ -2306,6 +2306,60 @@ function compareVersions(v1, v2) {
   return 0;
 }
 
+// 支持重定向的下载函数
+function downloadFileWithRedirect(url, destPath) {
+  return new Promise((resolve, reject) => {
+    const https = require('https');
+    const file = fs.createWriteStream(destPath);
+    
+    const request = https.get(url, (response) => {
+      // 处理重定向 (HTTP 3xx)
+      if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+        const redirectUrl = response.headers.location;
+        // console.log(`   ➡️  重定向到: ${redirectUrl}`);
+        file.close();
+        // 可能会创建空文件，需要清理吗？createWriteStream 已经打开了文件。
+        // 如果不写入任何内容，它是空的。
+        // 下一次递归会再次 overwrite 它，所以不需要 unlinkSync，除非出错。
+        
+        // 递归调用
+        downloadFileWithRedirect(redirectUrl, destPath)
+          .then(resolve)
+          .catch(reject);
+        return;
+      }
+      
+      if (response.statusCode !== 200) {
+        file.close();
+        fs.unlinkSync(destPath); // 删除失败的文件
+        reject(new Error(`下载失败: HTTP ${response.statusCode}`));
+        return;
+      }
+      
+      response.pipe(file);
+      
+      file.on('finish', () => {
+        file.close();
+        // console.log(`   ✅ 下载完成: ${destPath}`);
+        resolve();
+      });
+    });
+    
+    request.on('error', (err) => {
+      file.close();
+      if (fs.existsSync(destPath)) fs.unlinkSync(destPath);
+      reject(err);
+    });
+    
+    request.setTimeout(30000, () => {
+      request.destroy();
+      file.close();
+      if (fs.existsSync(destPath)) fs.unlinkSync(destPath);
+      reject(new Error('下载超时'));
+    });
+  });
+}
+
 // 插件自动更新功能
 async function handlePluginUpdate(targetGroup, connectionId) {
   if (!targetGroup || !targetGroup.figma || targetGroup.figma.readyState !== WebSocket.OPEN) {
@@ -2393,26 +2447,8 @@ async function handlePluginUpdate(targetGroup, connectionId) {
     console.log(`   📥 下载地址: ${downloadUrl}`);
     
     // 下载文件
-    await new Promise((resolve, reject) => {
-      const file = fs.createWriteStream(tempFile);
-      https.get(downloadUrl, (res) => {
-        if (res.statusCode !== 200) {
-          reject(new Error(`下载失败: HTTP ${res.statusCode}`));
-          return;
-        }
-        res.pipe(file);
-        file.on('finish', () => {
-          file.close();
-          console.log(`   ✅ 下载完成: ${tempFile}`);
-          resolve();
-        });
-      }).on('error', (err) => {
-        if (fs.existsSync(tempFile)) {
-          fs.unlinkSync(tempFile);
-        }
-        reject(err);
-      });
-    });
+    await downloadFileWithRedirect(downloadUrl, tempFile);
+    console.log(`   ✅ 下载完成: ${tempFile}`);
     
     // 通知用户正在安装
     targetGroup.figma.send(JSON.stringify({
@@ -2578,26 +2614,8 @@ async function handleServerUpdate(targetGroup, connectionId) {
     console.log(`   📥 下载地址: ${downloadUrl}`);
     
     // 下载文件
-    await new Promise((resolve, reject) => {
-      const file = fs.createWriteStream(tempFile);
-      https.get(downloadUrl, (res) => {
-        if (res.statusCode !== 200) {
-          reject(new Error(`下载失败: HTTP ${res.statusCode}`));
-          return;
-        }
-        res.pipe(file);
-        file.on('finish', () => {
-          file.close();
-          console.log(`   ✅ 下载完成: ${tempFile}`);
-          resolve();
-        });
-      }).on('error', (err) => {
-        if (fs.existsSync(tempFile)) {
-          fs.unlinkSync(tempFile);
-        }
-        reject(err);
-      });
-    });
+    await downloadFileWithRedirect(downloadUrl, tempFile);
+    console.log(`   ✅ 下载完成: ${tempFile}`);
     
     // 通知用户正在安装
     targetGroup.figma.send(JSON.stringify({
