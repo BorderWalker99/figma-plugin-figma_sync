@@ -18,7 +18,12 @@ echo -e "${BLUE}║  (GUI 安装器版本)                     ║${NC}"
 echo -e "${BLUE}╚════════════════════════════════════════╝${NC}\n"
 
 # 检查 GUI 安装器是否已构建
-echo -e "${YELLOW}🔍 检查 GUI 安装器...${NC}"
+echo -e "${YELLOW}🔨 正在构建最新版 GUI 安装器...${NC}"
+cd installer
+npm install
+npm run build:mac
+cd ..
+
 INSTALLER_APP=""
 if [ -d "installer/dist/mac-arm64/ScreenSync Installer.app" ]; then
     INSTALLER_APP="installer/dist/mac-arm64/ScreenSync Installer.app"
