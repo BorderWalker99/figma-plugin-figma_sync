@@ -561,11 +561,13 @@ ipcMain.handle('install-dependencies', async (event, installPath) => {
     // 改用 exec 尝试规避 spawn ENOTDIR 问题
     // spawn 需要一个文件作为第一个参数，如果 npmPath 是个复杂的脚本或者环境有问题容易挂
     // exec 直接在 shell 中执行字符串，兼容性更好
-    const commandStr = `"${npmPath}" install --legacy-peer-deps --registry=https://registry.npmmirror.com`;
+    // 使用 --prefix 来规避 cwd 在只读卷下的问题
+    const commandStr = `"${npmPath}" install --legacy-peer-deps --registry=https://registry.npmmirror.com --prefix "${installPath}"`;
     console.log(`[DEBUG] Executing command: ${commandStr}`);
 
+    // 重要：将 cwd 设置为 /tmp，避免 ENOTDIR
     const child = exec(commandStr, {
-      cwd: installPath,
+      cwd: os.tmpdir(),
       env: {
         ...process.env,
         npm_config_loglevel: 'info',
