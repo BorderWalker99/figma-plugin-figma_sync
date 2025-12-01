@@ -20,6 +20,41 @@ process.on('unhandledRejection', (reason, promise) => {
   // 不做任何事，阻止默认的弹窗行为
 });
 
+// 尝试加载用户的 Shell 环境变量，确保能找到 NVM 管理的 Node
+// 这对于 DMG 环境下运行至关重要，否则可能只能找到系统 Node，导致依赖不匹配
+try {
+  if (process.platform === 'darwin') {
+    const shell = process.env.SHELL || '/bin/zsh';
+    console.log('正在从 Shell 加载环境变量:', shell);
+    
+    // 使用 execSync 执行 Shell 命令获取环境变量
+    // source ~/.zshrc (或 ~/.bash_profile) 可能会有输出，我们需要过滤掉
+    const envOutput = require('child_process').execSync(`${shell} -l -c "env"`, { 
+      encoding: 'utf8',
+      timeout: 3000 // 3秒超时，防止 Shell 脚本卡住
+    });
+    
+    const envLines = envOutput.split('\n');
+    for (const line of envLines) {
+      const parts = line.split('=');
+      if (parts.length >= 2) {
+        const key = parts[0].trim();
+        const value = parts.slice(1).join('=').trim();
+        if (key && value && key !== '_' && key !== 'PWD' && key !== 'SHLVL') {
+          // 仅更新不存在或 PATH 变量
+          if (!process.env[key] || key === 'PATH') {
+            process.env[key] = value;
+          }
+        }
+      }
+    }
+    console.log('✅ 环境变量加载完成，当前 PATH:', process.env.PATH);
+  }
+} catch (error) {
+  console.warn('⚠️  加载 Shell 环境变量失败:', error.message);
+  // 失败不影响主流程，继续使用默认环境
+}
+
 let mainWindow;
 
 function createWindow() {
