@@ -311,7 +311,9 @@ function startWatching() {
         // 忽略
       }
       
-      syncScreenshot(filePath, true);
+      syncScreenshot(filePath, true).catch(err => {
+        console.error(`❌ 处理文件失败: ${filename}`, err.message);
+      });
     }
   };
   
@@ -781,6 +783,16 @@ function deleteFile(filePath) {
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
+
+// ============= 全局错误处理 =============
+process.on('uncaughtException', (err) => {
+  console.error('🔥 [严重] 未捕获的异常:', err);
+  // 不退出进程，保持 Watcher 运行
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('🔥 [警告] 未处理的 Promise 拒绝:', reason);
+});
 
 // ============= 启动 =============
 function start() {
