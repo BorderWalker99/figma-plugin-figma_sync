@@ -581,7 +581,7 @@ window.finishInstallation = async function() {
     } else {
       // 配置失败，尝试手动启动服务器作为备选
       console.warn('自动启动配置失败:', result.error);
-      button.textContent = '正在启动服务器...';
+      button.textContent = '正在启动服务器';
       
       const startResult = await ipcRenderer.invoke('start-server', installPath);
       
