@@ -117,8 +117,9 @@ else
     echo "📋 下一步："
     echo "   1. 关闭此终端窗口"
     if [[ "$INSTALLER_NAME" == *.dmg ]]; then
-        echo "   2. 双击 '$INSTALLER_NAME' 挂载安装盘"
-        echo "   3. 在弹出的窗口中双击 'ScreenSync Installer' 图标"
+        echo "   2. 【如果你已经打开了安装器窗口，请先将其关闭并弹出】"
+        echo "   3. 重新双击 '$INSTALLER_NAME' 挂载安装盘"
+        echo "   4. 在弹出的窗口中双击 'ScreenSync Installer' 图标"
     else
         echo "   2. 双击 '$INSTALLER_NAME' 开始安装"
     fi

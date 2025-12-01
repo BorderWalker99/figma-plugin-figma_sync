@@ -15,9 +15,11 @@
     "compression": "maximum",
     "asar": true,
     "dmg": {
+      "background": null,
+      "backgroundColor": "#ffffff",
       "contents": [
         {
-          "x": 410,
+          "x": 270,
           "y": 190,
           "type": "file"
         }
