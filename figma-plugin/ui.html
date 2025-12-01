@@ -1844,19 +1844,46 @@
              return;
           }
           
-          if (data.count > 0) {
-            log(`✅ 同步完成：${data.count} 张截图`);
-            if (gifBackupCount > 0) {
-              updateStatus('connected', '');
-            } else {
-            updateStatus('connected', '同步完成');
-            }
-           } else if (data.total === 0) {
+          // 优化后的逻辑：支持显示部分失败和具体错误详情
+          if (data.total === 0) {
             log('ℹ️  文件夹中没有截图');
             alert('文件夹中没有截图需要同步');
             updateStatus('connected', '同步完成');
+          } else if (data.count === data.total) {
+            // 全部成功
+            log(`✅ 同步完成：全部 ${data.count} 张截图`);
+            if (gifBackupCount > 0) {
+              updateStatus('connected', '');
+            } else {
+              updateStatus('connected', '同步完成');
+            }
           } else {
-            log(`⚠️  同步完成，但 ${data.total} 张截图处理失败`);
+            // 部分或全部失败
+            const failed = data.total - data.count;
+            if (data.count > 0) {
+               log(`⚠️  同步完成，但有 ${failed} 张失败 (成功 ${data.count}/${data.total})`);
+            } else {
+               log(`⚠️  同步失败，${data.total} 张全部处理失败`);
+            }
+            
+            // 显示详细错误信息
+            if (data.errors && data.errors.length > 0) {
+              log(`🔍 错误详情:`);
+              data.errors.slice(0, 5).forEach(err => {
+                log(`   ❌ ${err.filename}: ${err.error}`);
+              });
+              if (data.errors.length > 5) {
+                log(`   ... 以及其他 ${data.errors.length - 5} 个错误`);
+              }
+              
+              // 延迟弹窗显示第一个错误，帮助调试
+              setTimeout(() => {
+                const firstErr = data.errors[0];
+                alert(`❌ 截图处理失败\n\n文件名: ${firstErr.filename}\n错误信息: ${firstErr.error}\n\n请将此错误信息截图发给开发者。`);
+              }, 200);
+            } else {
+              log(`   ❌ 未知错误 (无详细信息)`);
+            }
             updateStatus('connected', '同步完成');
           }
         } else if (data.type === 'sync-mode-changed') {

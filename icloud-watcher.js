@@ -370,6 +370,8 @@ async function performManualSync() {
   console.log(`📦 [手动模式] 找到 ${imageFiles.length} 张截图，开始同步...\n`);
   
   let successCount = 0;
+  // 收集处理过程中的错误
+  const processingErrors = [];
   
   for (const file of imageFiles) {
     let filePath = path.join(CONFIG.icloudPath, file);
@@ -471,16 +473,25 @@ async function performManualSync() {
       await sleep(300);
     } catch (error) {
       console.error(`❌ 同步失败: ${file}`, error.message);
+      processingErrors.push({
+        filename: file,
+        error: error.message,
+        stack: error.stack
+      });
     }
   }
   
   console.log(`\n✅ [手动模式] 同步完成！成功: ${successCount}/${imageFiles.length}\n`);
+  if (processingErrors.length > 0) {
+    console.log(`   ❌ 失败: ${processingErrors.length} 个`);
+  }
   
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({
       type: 'manual-sync-complete',
       count: successCount,
-      total: imageFiles.length
+      total: imageFiles.length,
+      errors: processingErrors
     }));
   }
 }

@@ -826,6 +826,8 @@ async function performManualSync() {
     }
 
     let success = 0;
+    // 收集所有处理过程中的错误
+    const processingErrors = [];
     
     for (const file of imageFiles) {
       // 添加到已知文件列表（如果还没有）
@@ -850,6 +852,12 @@ async function performManualSync() {
         await sleep(300); // 避免请求过快
       } catch (error) {
         console.error(`   ❌ 处理文件失败: ${file.name}`, error.message);
+        // 收集详细错误信息
+        processingErrors.push({
+          filename: file.name,
+          error: error.message,
+          stack: error.stack
+        });
         if (!wasKnown) {
           knownFileIds.delete(file.id);
         }
@@ -859,12 +867,16 @@ async function performManualSync() {
     console.log(`\n✅ [OSS] 手动同步完成`);
     console.log(`   ✅ 成功同步: ${success} 张截图`);
     console.log(`   📊 总计: ${imageFiles.length} 个图片文件`);
+    if (processingErrors.length > 0) {
+      console.log(`   ❌ 失败: ${processingErrors.length} 个`);
+    }
 
     if (ws && ws.readyState === WebSocket.OPEN) {
       const message = {
         type: 'manual-sync-complete',
         count: success,
-        total: imageFiles.length
+        total: imageFiles.length,
+        errors: processingErrors // 发送错误列表
       };
       ws.send(JSON.stringify(message));
     }
@@ -876,7 +888,8 @@ async function performManualSync() {
         type: 'manual-sync-complete',
         count: 0,
         total: 0,
-        message: error.message
+        message: error.message,
+        errors: [{ filename: '系统错误', error: error.message }]
       }));
     }
   }

@@ -909,13 +909,16 @@ async function performManualSync() {
           type: 'manual-sync-complete',
           count: 0,
           total: 0,
-          message: '文件夹中没有图片文件'
+          message: '文件夹中没有图片文件',
+          errors: []
         }));
       }
       return;
     }
 
     let success = 0;
+    // 收集所有处理过程中的错误
+    const processingErrors = [];
     
     // 手动同步时，强制同步所有图片文件（不检查 knownFileIds）
     // 因为手动同步的目的就是同步残留的图片
@@ -970,6 +973,12 @@ async function performManualSync() {
         await sleep(300); // 避免请求过快
       } catch (error) {
         console.error(`   ❌ 处理文件失败: ${file.name}`, error.message);
+        // 收集详细错误信息
+        processingErrors.push({
+          filename: file.name,
+          error: error.message,
+          stack: error.stack
+        });
         // 如果处理失败，从 knownFileIds 中移除，以便下次可以重试
         if (!wasKnown) {
           knownFileIds.delete(file.id);
@@ -980,14 +989,18 @@ async function performManualSync() {
     console.log(`\n✅ [Drive] 手动同步完成`);
     console.log(`   ✅ 成功同步: ${success} 张截图`);
     console.log(`   📊 总计: ${imageFiles.length} 个图片文件`);
+    if (processingErrors.length > 0) {
+      console.log(`   ❌ 失败: ${processingErrors.length} 个`);
+    }
 
     if (ws && ws.readyState === WebSocket.OPEN) {
       const message = {
         type: 'manual-sync-complete',
         count: success,
-        total: imageFiles.length
+        total: imageFiles.length,
+        errors: processingErrors // 发送错误列表
       };
-      console.log(`   📤 发送完成消息: count=${success}, total=${imageFiles.length}`);
+      console.log(`   📤 发送完成消息: count=${success}, total=${imageFiles.length}, errors=${processingErrors.length}`);
       ws.send(JSON.stringify(message));
     }
   } catch (error) {
@@ -998,7 +1011,8 @@ async function performManualSync() {
         type: 'manual-sync-complete',
         count: 0,
         total: 0,
-        message: error.message
+        message: error.message,
+        errors: [{ filename: '系统错误', error: error.message }]
       }));
     }
   }
