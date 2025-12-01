@@ -201,7 +201,7 @@ function startWatching() {
     }
   });
   
-  watcher.on('add', (filePath) => {
+  const handleFileEvent = (filePath) => {
     if (!isRealTimeMode) {
       console.log(`⏸️  实时模式已关闭，忽略文件: ${path.basename(filePath)}`);
       return;
@@ -313,7 +313,10 @@ function startWatching() {
       
       syncScreenshot(filePath, true);
     }
-  });
+  };
+  
+  watcher.on('add', handleFileEvent);
+  watcher.on('change', handleFileEvent);
   
   watcher.on('ready', () => {
     console.log('✅ 实时监听已启动\n');
