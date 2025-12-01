@@ -630,7 +630,7 @@ ipcMain.handle('install-dependencies', async (event, installPath) => {
       const elapsed = Date.now() - lastProgressUpdate;
       if (elapsed > 3000) { // 如果超过3秒没有输出
         event.sender.send('install-heartbeat', { 
-          message: '正在下载依赖包，请耐心等待' 
+          message: '正在下载依赖包' 
         });
       }
     }, 3000);
@@ -908,7 +908,7 @@ ipcMain.handle('setup-autostart', async (event, installPath) => {
                   console.log('   端口 8888 正在监听');
                   resolve({ 
                     success: true, 
-                    message: '服务器已配置为开机自动启动并已成功运行' 
+                    message: '服务器已配置为自动启动' 
                   });
                 }
               });
