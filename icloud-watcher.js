@@ -584,6 +584,22 @@ async function syncScreenshot(filePath, deleteAfterSync = false) {
       let tempOutputPath = path.join(os.tmpdir(), `jpeg-output-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.jpg`);
       
       try {
+        // 确保文件已完全从 iCloud 下载
+        // 读取文件的前几个字节来触发 iCloud 下载并验证文件可读
+        try {
+          const fd = fs.openSync(filePath, 'r');
+          const buffer = Buffer.alloc(8);
+          fs.readSync(fd, buffer, 0, 8, 0);
+          fs.closeSync(fd);
+        } catch (readError) {
+          console.log(`   ⚠️  文件预读取失败 (可能是 iCloud 尚未下载完成): ${readError.message}`);
+          console.log(`   ⏳ 等待 2 秒后重试...`);
+          await sleep(2000);
+          // 再次尝试读取，如果失败则抛出异常
+          const fd = fs.openSync(filePath, 'r');
+          fs.closeSync(fd);
+        }
+
         // 使用 sips 转换为 JPEG
         const sipsCommand = `sips -s format jpeg "${tempInputPath}" --out "${tempOutputPath}"`;
         

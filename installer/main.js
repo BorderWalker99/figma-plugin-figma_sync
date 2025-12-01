@@ -631,7 +631,7 @@ ipcMain.handle('install-dependencies', async (event, installPath) => {
       const elapsed = Date.now() - lastProgressUpdate;
       if (elapsed > 3000) { // 如果超过3秒没有输出
         event.sender.send('install-heartbeat', { 
-          message: '正在下载依赖包，请耐心等待...' 
+          message: '正在下载依赖包，请耐心等待' 
         });
       }
     }, 3000);
