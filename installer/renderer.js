@@ -614,7 +614,7 @@ window.finishInstallation = async function() {
       
       if (startResult.success) {
         button.textContent = '启动成功';
-        showToast('服务器已启动（本次会话）', 'success');
+        showToast('服务器已启动', 'success');
         setTimeout(() => {
           ipcRenderer.invoke('quit-app');
         }, 1500);
@@ -630,7 +630,7 @@ window.finishInstallation = async function() {
     // 出错，恢复按钮状态
     button.disabled = false;
     button.textContent = originalText;
-    showToast('配置失败，请重试或重启电脑', 'error');
+    showToast('配置失败，请重试或联系作者', 'error');
     console.error('配置自动启动失败:', err);
   }
 }
