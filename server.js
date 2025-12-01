@@ -23,6 +23,13 @@ const express = require('express');
 const WebSocket = require('ws');
 const http = require('http');
 const sharp = require('sharp');
+
+// 优化 sharp 配置，减少内存占用并提高稳定性（特别是在 LaunchAgent 环境下）
+sharp.cache(false); // 禁用缓存，防止内存泄漏
+sharp.simd(false); // 禁用 SIMD 指令集，提高在不同 CPU 架构下的兼容性
+// 限制并发数，避免在后台运行时占用过多 CPU 导致被系统限制
+sharp.concurrency(1); 
+
 const { exec } = require('child_process');
 const path = require('path');
 
@@ -1076,8 +1083,10 @@ class UploadQueue {
 
 // 创建上传队列实例
 const uploadQueue = new UploadQueue({
-  maxConcurrent: 10, // 增加并发数到10（Google Drive API 限制：每秒100个请求）
-  rateLimit: 50 // 提高速率限制到每秒50个（Google Drive API 限制：每秒100个请求）
+  // 降低并发数以提高稳定性（特别是在 LaunchAgent 后台模式下）
+  // 之前的 10 并发可能导致资源竞争或被系统限制
+  maxConcurrent: 2, 
+  rateLimit: 10 // 降低速率限制
 });
 
 // 添加请求日志中间件（在body parser之前，用于追踪大文件请求）
