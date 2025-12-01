@@ -94,9 +94,8 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
+  // 安装器在窗口关闭后应立即退出，即使在 macOS 上也是如此
+  app.quit();
 });
 
 // IPC 处理函数
@@ -922,5 +921,11 @@ ipcMain.handle('setup-autostart', async (event, installPath) => {
       resolve({ success: false, error: error.message });
     }
   });
+});
+
+// 退出应用
+ipcMain.handle('quit-app', () => {
+  console.log('收到退出请求，正在退出应用...');
+  app.quit();
 });
 

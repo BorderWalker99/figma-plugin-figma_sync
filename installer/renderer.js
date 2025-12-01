@@ -2,6 +2,26 @@ const { ipcRenderer } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
+// Alert 弹窗控制
+window.showAlert = function(message, title = '提示') {
+  const overlay = document.getElementById('overlay');
+  const titleEl = document.getElementById('modalTitle');
+  const messageEl = document.getElementById('modalMessage');
+  
+  if (overlay && titleEl && messageEl) {
+    titleEl.textContent = title;
+    messageEl.textContent = message;
+    overlay.classList.add('show');
+  }
+};
+
+window.closeAlert = function() {
+  const overlay = document.getElementById('overlay');
+  if (overlay) {
+    overlay.classList.remove('show');
+  }
+};
+
 let currentStep = 1;
 let installPath = '';
 let selectedMode = '';
@@ -253,7 +273,7 @@ async function checkSystemRequirements() {
       if (result.success) {
         if (result.needsRestart) {
           // 终端已打开，用户需要完成安装
-          showToast(result.message || '终端已打开，请按照提示完成安装', 'loading');
+          showAlert(result.message || '终端已打开，请按照提示完成安装', '正在安装 Homebrew');
           
           // 更新按钮文本
           installBtn.textContent = '重新检测';
@@ -334,7 +354,7 @@ async function checkSystemRequirements() {
       if (result.success) {
         if (result.needsRestart) {
           // 终端已打开，用户需要等待安装完成
-          showToast(result.message || '终端已打开，请等待 Node.js 安装完成', 'loading');
+          showAlert(result.message || '终端已打开，请等待 Node.js 安装完成', '正在安装 Node.js');
           
           // 更新按钮文本
           installBtn.textContent = '重新检测';
@@ -583,7 +603,7 @@ window.finishInstallation = async function() {
       
       // 延迟1.5秒后关闭，让用户看到成功消息
       setTimeout(() => {
-        window.close();
+        ipcRenderer.invoke('quit-app');
       }, 1500);
     } else {
       // 配置失败，尝试手动启动服务器作为备选
@@ -596,7 +616,7 @@ window.finishInstallation = async function() {
         button.textContent = '启动成功';
         showToast('服务器已启动（本次会话）', 'success');
         setTimeout(() => {
-          window.close();
+          ipcRenderer.invoke('quit-app');
         }, 1500);
       } else {
         // 两种方式都失败
