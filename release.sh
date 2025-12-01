@@ -206,18 +206,21 @@ ${RELEASE_NOTES}
 
 ## 📦 下载说明
 
-### 新用户安装
-下载 \`ScreenSync-UserPackage.tar.gz\`，解压后运行安装器。
+### 📥 下载指南 (必读)
+**请仅下载 \`ScreenSync-UserPackage.tar.gz\` (macOS)**
 
-### 已有用户更新
-在 Figma 插件的设置中点击「更新」按钮，即可一键自动更新。
+*   ✅ **ScreenSync-UserPackage.tar.gz**: 包含安装器和所有文件的完整包。新用户请下载此文件。
+*   🚫 **figma-plugin-v${NEW_VERSION}.zip**: ⚠️ **无需下载**。这是供软件自动更新功能使用的内部文件。
+
+### 🔄 如何更新
+*   **已有用户**: 直接在 Figma 插件设置中点击「检查更新」即可自动升级，无需手动下载任何文件。
+*   **新用户**: 下载上方的完整包，解压后运行安装器。
 
 ---
 
 ## 📋 文件列表
-
-- \`figma-plugin-v${NEW_VERSION}.zip\` - Figma 插件（用于自动更新）
-- \`ScreenSync-UserPackage.tar.gz\` - 完整安装包（包含安装器）
+*   \`ScreenSync-UserPackage.tar.gz\` - 完整安装包 (✅ 推荐下载)
+*   \`figma-plugin-v${NEW_VERSION}.zip\` - 自动更新源文件 (🚫 请勿下载)
 
 ---
 
