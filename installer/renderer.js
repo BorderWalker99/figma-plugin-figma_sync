@@ -63,18 +63,72 @@ window.prevStep = function() {
 async function detectProjectRoot() {
   try {
     const detectedPath = await ipcRenderer.invoke('get-project-root');
+    // 必须存在 package.json 才算有效
     if (detectedPath && fs.existsSync(path.join(detectedPath, 'package.json'))) {
       installPath = detectedPath;
       console.log('✅ 自动检测到项目目录:', installPath);
       return true;
     } else {
       console.warn('⚠️ 未找到 package.json，使用检测到的路径:', detectedPath);
-      installPath = detectedPath;
+      installPath = ''; // 清空，防止使用无效路径
+      showManualSelectionUI();
       return false;
     }
   } catch (error) {
     console.error('❌ 检测项目目录失败:', error);
+    installPath = '';
+    showManualSelectionUI();
     return false;
+  }
+}
+
+// 显示手动选择 UI
+function showManualSelectionUI() {
+  // 在 Step 1 顶部插入提示
+  const step1 = document.getElementById('step1');
+  const existingAlert = document.getElementById('pathAlert');
+  if (existingAlert) existingAlert.remove();
+
+  const alertDiv = document.createElement('div');
+  alertDiv.id = 'pathAlert';
+  alertDiv.className = 'alert alert-error';
+  alertDiv.style.marginBottom = '20px';
+  alertDiv.innerHTML = `
+    <div class="alert-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="currentColor"/><path d="M12 8v5M12 16.5v.5" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div style="flex:1">
+      <div style="font-weight:600;margin-bottom:4px;">未找到项目文件</div>
+      <div style="font-size:12px;opacity:0.9;margin-bottom:8px;">无法自动定位安装包位置，请手动选择解压后的 "ScreenSync-UserPackage" 文件夹。</div>
+      <button id="selectPathBtn" class="btn btn-secondary" style="background:rgba(255,255,255,0.9);color:#333;font-size:12px;padding:4px 12px;">选择文件夹</button>
+    </div>
+  `;
+  
+  step1.insertBefore(alertDiv, step1.firstChild);
+  
+  document.getElementById('selectPathBtn').onclick = async () => {
+    const result = await ipcRenderer.invoke('select-project-root');
+    if (result.success && result.path) {
+      installPath = result.path;
+      showToast('已选择项目目录', 'success');
+      // 移除警告
+      alertDiv.remove();
+      // 重新检查环境（可选，但通常 Step 1 只是选择模式）
+    } else if (result.error) {
+      showToast(result.error, 'error');
+    }
+  };
+  
+  // 禁用下一步按钮，直到选择有效路径
+  const nextBtn = document.getElementById('step1Next');
+  if (nextBtn) {
+    // 保存原有的 onclick，包裹一层检查
+    const originalOnClick = nextBtn.onclick;
+    nextBtn.onclick = (e) => {
+      if (!installPath) {
+        showToast('请先选择项目文件夹', 'error');
+        return;
+      }
+      if (originalOnClick) originalOnClick.call(nextBtn, e);
+    };
   }
 }
 
@@ -369,9 +423,11 @@ async function installDependencies() {
   
   // 监听心跳 (处理长时间无输出的情况)
   ipcRenderer.on('install-heartbeat', (event, data) => {
-    // 如果卡在初期，假装动一下进度条，让用户知道没死机
-    if (currentProgress < 25) {
-      updateUi(currentProgress + 0.5, data.message);
+    // 只要未完成（< 95%），就让进度条缓慢蠕动，让用户知道没死机
+    if (currentProgress < 95) {
+      // 进度越接近95，移动越慢
+      const increment = currentProgress < 50 ? 0.5 : 0.1;
+      updateUi(currentProgress + increment, data.message);
     } else {
       updateUi(currentProgress, data.message);
     }

@@ -139,9 +139,107 @@ ipcMain.handle('get-project-root', async () => {
     }
   }
   
+  // 4. 特殊处理：如果是在 DMG 中运行，尝试反向查找 DMG 文件路径
+  // 例如 appPath 是 /Volumes/ScreenSync Installer/ScreenSync Installer.app
+  // 则 userPackageRoot 是 /Volumes/ScreenSync Installer
+  // 我们需要找到这个 Volume 对应的 DMG 镜像文件路径
+  if (appPath.startsWith('/Volumes/')) {
+    console.log('⚠️ 检测到在 Volume 中运行，尝试查找 DMG 源文件路径...');
+    
+    try {
+      // 获取挂载点名称 (例如 /Volumes/ScreenSync Installer)
+      const volumePath = appPath.split('.app')[0].substring(0, appPath.split('.app')[0].lastIndexOf('/'));
+      console.log('挂载点:', volumePath);
+      
+      // 使用 hdiutil info -plist 获取挂载信息
+      const infoXml = require('child_process').execSync('hdiutil info -plist', { encoding: 'utf8' });
+      
+      // 简单的解析逻辑 (不引入 xml2js 依赖)
+      // 寻找 volumePath 附近出现的 image-path
+      // 注意：这里是一个简化的解析，可能不够健壮，但在这个受控场景下通常有效
+      
+      // 1. 找到包含 volumePath 的 dict 块
+      const volumeIndex = infoXml.indexOf(volumePath);
+      if (volumeIndex !== -1) {
+        // 截取相关片段，向前寻找 image-path
+        // 这比较 hacky，但 hdiutil 的输出结构相对固定
+        // 更好的方式是解析 plist，但为了减少依赖，我们尝试直接匹配
+        
+        // 尝试直接从系统挂载信息中找
+        // 另一种方法：既然我们知道用户通常是从 tar 包解压的
+        // 那么 DMG 文件旁边应该有 "项目文件" 文件夹
+        
+        // 让我们换个思路：直接解析 hdiutil info 的输出
+        // hdiutil info 输出包含 image-path 和 mount-point
+        
+        const lines = require('child_process').execSync('hdiutil info', { encoding: 'utf8' }).split('\n');
+        let currentImagePath = '';
+        let foundMountPoint = false;
+        
+        for (const line of lines) {
+          if (line.startsWith('image-path')) {
+            currentImagePath = line.split(': ')[1].trim();
+          }
+          if (line.includes(volumePath)) {
+            foundMountPoint = true;
+            break;
+          }
+        }
+        
+        if (foundMountPoint && currentImagePath) {
+          console.log('✅ 找到 DMG 源文件路径:', currentImagePath);
+          // DMG 文件所在的目录
+          const dmgDir = path.dirname(currentImagePath);
+          const projectFilesFromDmg = path.join(dmgDir, '项目文件');
+          const packageJsonFromDmg = path.join(projectFilesFromDmg, 'package.json');
+          
+          if (fs.existsSync(packageJsonFromDmg)) {
+            console.log('✅ 通过 DMG 源路径找到 package.json:', packageJsonFromDmg);
+            return projectFilesFromDmg;
+          }
+        }
+      }
+    } catch (e) {
+      console.error('反向查找 DMG 路径失败:', e);
+    }
+  }
+  
   console.error('❌ 无法找到 package.json');
   // 最后的退路：返回 UserPackage 根目录（即使没有验证）
   return userPackageRoot;
+});
+
+// 手动选择项目根目录
+ipcMain.handle('select-project-root', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: '选择 ScreenSync-UserPackage 文件夹',
+    properties: ['openDirectory'],
+    message: '请选择解压后的 ScreenSync-UserPackage 文件夹，或者其中的"项目文件"文件夹'
+  });
+
+  if (result.canceled || result.filePaths.length === 0) {
+    return { success: false, error: '用户取消选择' };
+  }
+
+  const selectedPath = result.filePaths[0];
+  
+  // 检查 1: 直接是项目根目录（包含 package.json）
+  if (fs.existsSync(path.join(selectedPath, 'package.json'))) {
+    console.log('✅ 手动选择的路径有效:', selectedPath);
+    return { success: true, path: selectedPath };
+  }
+  
+  // 检查 2: 是 UserPackage 根目录（包含 "项目文件/package.json"）
+  const projectFilesPath = path.join(selectedPath, '项目文件');
+  if (fs.existsSync(path.join(projectFilesPath, 'package.json'))) {
+    console.log('✅ 手动选择的是 UserPackage，自动定位到项目文件:', projectFilesPath);
+    return { success: true, path: projectFilesPath };
+  }
+
+  return { 
+    success: false, 
+    error: '选择的文件夹不正确。\n\n请选择包含 "package.json" 的文件夹，或者解压后的 "ScreenSync-UserPackage" 文件夹。' 
+  };
 });
 
 // 辅助函数：查找可执行文件并更新 PATH
