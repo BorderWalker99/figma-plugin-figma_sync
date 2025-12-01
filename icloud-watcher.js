@@ -593,11 +593,25 @@ async function syncScreenshot(filePath, deleteAfterSync = false) {
           fs.closeSync(fd);
         } catch (readError) {
           console.log(`   ⚠️  文件预读取失败 (可能是 iCloud 尚未下载完成): ${readError.message}`);
-          console.log(`   ⏳ 等待 2 秒后重试...`);
-          await sleep(2000);
-          // 再次尝试读取，如果失败则抛出异常
-          const fd = fs.openSync(filePath, 'r');
-          fs.closeSync(fd);
+          
+          // 尝试使用 brctl download 强制下载 (macOS 私有命令，可能不可用，但值得一试)
+          try {
+            console.log(`   ☁️  尝试使用 brctl 强制下载...`);
+            exec(`brctl download "${filePath}"`);
+          } catch (e) {
+            // 忽略 brctl 错误
+          }
+
+          console.log(`   ⏳ 等待 3 秒后重试...`);
+          await sleep(3000);
+          
+          // 再次尝试读取，如果失败则抛出更明确的错误
+          try {
+            const fd = fs.openSync(filePath, 'r');
+            fs.closeSync(fd);
+          } catch (retryError) {
+            throw new Error(`文件尚未从 iCloud 下载完成，请在 iCloud 云盘中找到名为 ScreenSyncImg 的文件夹并点击云朵图标下载。\n(系统错误: ${retryError.message})`);
+          }
         }
 
         // 使用 sips 转换为 JPEG
