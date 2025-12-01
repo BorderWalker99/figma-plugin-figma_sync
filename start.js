@@ -124,7 +124,8 @@ function startServer() {
   
   // 增加 Node.js 内存限制到 4GB，以支持大文件（GIF/视频）处理
   const NODE_MEMORY_LIMIT = process.env.NODE_MEMORY_LIMIT || '4096';
-  server = spawn('node', [`--max-old-space-size=${NODE_MEMORY_LIMIT}`, 'server.js'], {
+  // 使用 process.execPath 确保使用与当前脚本相同的 node 解释器，避免 PATH 问题
+  server = spawn(process.execPath, [`--max-old-space-size=${NODE_MEMORY_LIMIT}`, 'server.js'], {
     stdio: 'inherit',
     cwd: __dirname,
     env: { ...process.env, SYNC_MODE }
@@ -223,7 +224,7 @@ function startWatcher() {
   // 启动新的 watcher
   if (SYNC_MODE === 'drive' || SYNC_MODE === 'google') {
     console.log('\n🚀 启动Google Drive监听器...');
-    watcher = spawn('node', ['drive-watcher.js'], {
+    watcher = spawn(process.execPath, ['drive-watcher.js'], {
       stdio: 'inherit',
       cwd: __dirname,
       env: { ...process.env, SYNC_MODE }
@@ -250,7 +251,7 @@ function startWatcher() {
     });
   } else if (SYNC_MODE === 'aliyun' || SYNC_MODE === 'oss') {
     console.log('\n🚀 启动阿里云监听器...');
-    watcher = spawn('node', ['aliyun-watcher.js'], {
+    watcher = spawn(process.execPath, ['aliyun-watcher.js'], {
       stdio: 'inherit',
       cwd: __dirname,
       env: { ...process.env, SYNC_MODE }
@@ -277,7 +278,7 @@ function startWatcher() {
     });
   } else {
     console.log('\n🚀 启动iCloud监听器...');
-    watcher = spawn('node', ['icloud-watcher.js'], {
+    watcher = spawn(process.execPath, ['icloud-watcher.js'], {
       stdio: 'inherit',
       cwd: __dirname,
       env: { ...process.env, SYNC_MODE }
