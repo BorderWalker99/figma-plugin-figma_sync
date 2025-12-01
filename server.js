@@ -177,6 +177,92 @@ const syncModeFile = path.join(__dirname, '.sync-mode');
 const userConfigFile = path.join(__dirname, '.user-config.json');
 const os = require('os');
 
+// ------------------------------------------------------------------
+// iCloud 强制下载辅助函数
+// ------------------------------------------------------------------
+function ensureFileDownloaded(filePath) {
+  try {
+    // 尝试读取文件的第一个字节
+    // 这会强制 macOS内核触发 iCloud 下载，否则无法返回数据
+    // 这是一个阻塞操作，会直到数据可用或超时
+    const fd = fs.openSync(filePath, 'r');
+    const buffer = Buffer.alloc(1);
+    fs.readSync(fd, buffer, 0, 1, 0);
+    fs.closeSync(fd);
+    return true;
+  } catch (error) {
+    // 如果文件是目录，readSync 会失败，这是预期的
+    if (error.code === 'EISDIR') return true;
+    
+    // 忽略其他错误（如文件已被删除、权限等）
+    return false;
+  }
+}
+
+function recursiveDownload(folderPath) {
+  try {
+    if (!fs.existsSync(folderPath)) return;
+    
+    const files = fs.readdirSync(folderPath);
+    for (const file of files) {
+      if (file.startsWith('.')) continue; // 跳过隐藏文件
+      
+      const fullPath = path.join(folderPath, file);
+      try {
+        const stats = fs.statSync(fullPath);
+        if (stats.isDirectory()) {
+          recursiveDownload(fullPath);
+        } else if (stats.isFile()) {
+          // 对文件进行预读
+          ensureFileDownloaded(fullPath);
+        }
+      } catch (e) {
+        // 忽略 stat 错误
+      }
+    }
+  } catch (e) {
+    // console.error(`[iCloud维护] 遍历失败: ${folderPath}`, e.message);
+  }
+}
+
+let icloudMaintenanceTimer = null;
+
+function startICloudMaintenance() {
+  // 只有在 macOS 上才运行
+  if (process.platform !== 'darwin') return;
+  
+  const icloudPath = path.join(os.homedir(), 'Library', 'Mobile Documents', 'com~apple~CloudDocs', 'ScreenSyncImg');
+
+  if (icloudMaintenanceTimer) clearInterval(icloudMaintenanceTimer);
+  
+  const runMaintenance = () => {
+    if (process.env.SYNC_MODE !== 'icloud') {
+        if (icloudMaintenanceTimer) {
+            clearInterval(icloudMaintenanceTimer);
+            icloudMaintenanceTimer = null;
+        }
+        return;
+    }
+    
+    // 1. 使用系统命令 brctl (如果可用)
+    exec(`brctl download -R "${icloudPath}"`, (error) => {
+      // 忽略错误
+    });
+    
+    // 2. 使用更强力的递归预读
+    setTimeout(() => {
+      recursiveDownload(icloudPath);
+    }, 2000);
+  };
+  
+  // 立即运行一次
+  runMaintenance();
+  
+  // 每 5 分钟运行一次
+  icloudMaintenanceTimer = setInterval(runMaintenance, 5 * 60 * 1000);
+  console.log('☁️  [iCloud] 自动维护任务已启动');
+}
+
 // 安全地加载 userConfig（Cloud Run 环境中可能不需要）
 let userConfig;
 try {
@@ -342,6 +428,11 @@ if (!process.env.SYNC_MODE) {
     process.env.SYNC_MODE = 'drive';
     console.log('📋 使用默认同步模式: drive');
   }
+}
+
+// 如果是 iCloud 模式，启动自动维护任务
+if (process.env.SYNC_MODE === 'icloud') {
+  startICloudMaintenance();
 }
 
 const app = express();
@@ -1838,6 +1929,11 @@ wss.on('connection', (ws, req) => {
         }
         
         process.env.SYNC_MODE = newMode;
+        
+        // 如果切换到 iCloud 模式，启动自动维护
+        if (newMode === 'icloud') {
+          startICloudMaintenance();
+        }
         
         // 写入配置文件
         const syncModeFile = path.join(__dirname, '.sync-mode');

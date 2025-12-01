@@ -1805,22 +1805,23 @@
           }
           handleScreenshot(data);
         } else if (data.type === 'file-skipped') {
+          // 确定原因文本
+          let reasonText = '未知原因';
+          if (data.reason === 'mp4' || data.reason === 'video') {
+            const ext = (data.filename || '').toLowerCase();
+            if (ext.endsWith('.mov')) {
+              reasonText = 'MOV视频';
+            } else {
+              reasonText = 'MP4视频';
+            }
+          } else if (data.reason === 'gif-too-large') {
+            reasonText = 'GIF过大';
+          }
+
           // 去重检查：如果文件名已存在，则不增加计数，也不显示重复的日志
           if (!skippedFilesSet.has(data.filename)) {
             skippedFilesSet.add(data.filename);
             manualDragCount++;
-            
-            let reasonText = 'GIF过大';
-            if (data.reason === 'mp4' || data.reason === 'video') {
-              const ext = (data.filename || '').toLowerCase();
-              if (ext.endsWith('.mov')) {
-                reasonText = 'MOV视频';
-              } else {
-                reasonText = 'MP4视频';
-              }
-            } else if (data.reason === 'gif-too-large') {
-              reasonText = 'GIF过大';
-            }
             log(`⚠️  ${data.filename} 需手动导入（${reasonText}）`);
           }
           

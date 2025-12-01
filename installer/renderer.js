@@ -379,6 +379,13 @@ async function checkSystemRequirements() {
   
   // 显示下一步按钮
   document.getElementById('step2Buttons').style.display = 'flex';
+
+  // 如果有任何一个环境检查未通过，禁用下一步按钮
+  const allInstalled = homebrewResult.installed && nodeResult.installed;
+  const step2NextBtn = document.getElementById('step2Next');
+  if (step2NextBtn) {
+    step2NextBtn.disabled = !allInstalled;
+  }
 }
 
 // Step 2: 安装依赖
