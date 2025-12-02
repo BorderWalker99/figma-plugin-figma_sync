@@ -2062,7 +2062,11 @@
       }
 
       statusEl.className = 'connection-pill'; // Reset to base class
-
+      statusEl.style.cursor = 'default';
+      statusEl.onclick = null;
+      statusEl.style.display = ''; // Reset display style (flex/block etc handled by class usually, but disconnected sets explicit flex)
+      
+      // 1. Highest Priority: Disconnected
       // 特殊处理：disconnected 状态显示为可点击的"重新连接"按钮
       if (type === 'disconnected') {
         // 纯线条重试图标，双箭头循环风格（更平衡居中），无背景，视觉更轻盈
@@ -2084,26 +2088,29 @@
         return;
       }
 
-      if (text && text !== '') {
-        statusEl.textContent = text;
-        statusEl.onclick = null;
-        statusEl.style.cursor = 'default';
-        
-        if(type === 'connected') statusEl.classList.add('connected');
-        else if(type === 'waiting') statusEl.classList.add('waiting');
-        // disconnected uses base class (gray)
-        
-      } else if (manualDragCount > 0 && type === 'connected') {
+      // 2. Priority 1: Manual Import (Blocking)
+      // 只要 manualDragCount > 0，就强制显示此状态，直到用户点击
+      if (manualDragCount > 0) {
         const warningText = `需手动导入 ${manualDragCount} 段视频`;
         statusEl.innerHTML = `${warningText} <svg width="7" height="14" viewBox="7 0 14 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity: 0.8;"><polyline points="9 18 15 12 9 6"></polyline></svg>`;
-        statusEl.className = 'connection-pill waiting';
+        // 使用蓝色 connected 样式，而不是黄色的 waiting
+        statusEl.className = 'connection-pill connected';
         statusEl.style.cursor = 'pointer';
         statusEl.onclick = function() {
           if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: 'open-local-folder' }));
           }
+          // 点击后清除计数，解除阻塞，允许后续状态显示
+          manualDragCount = 0;
+          // 立即刷新状态为正常连接
+          updateStatus('connected', '已连接');
         };
-      } else if (gifBackupCount > 0 && type === 'connected') {
+        return; // 阻止后续状态更新
+      }
+
+      // 3. Priority 2: Saved GIFs (Blocking)
+      // 只要 gifBackupCount > 0，就强制显示此状态，直到用户点击
+      if (gifBackupCount > 0) {
         // 根据当前模式显示不同的文案
         const actionText = (currentSyncMode === 'icloud') ? '已保留' : '已保存';
         const backupText = `${actionText} ${gifBackupCount} 段 GIF`;
@@ -2114,9 +2121,22 @@
           if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: 'open-local-folder' }));
           }
+          // 点击后清除计数，解除阻塞
+          gifBackupCount = 0;
+          // 立即刷新状态
+          updateStatus('connected', '已连接');
         };
+        return; // 阻止后续状态更新
+      }
+
+      // 4. Priority 3: Normal Status Updates
+      if (text && text !== '') {
+        statusEl.textContent = text;
+        if(type === 'connected') statusEl.classList.add('connected');
+        else if(type === 'waiting') statusEl.classList.add('waiting');
       } else {
-        statusEl.textContent = text || '';
+        statusEl.textContent = '已连接'; // 默认文案
+        statusEl.classList.add('connected');
       }
     }
 
@@ -3120,18 +3140,26 @@
           document.getElementById('count').textContent = screenshotCount;
           
           if (ws && ws.readyState === WebSocket.OPEN) {
-            if (currentFileId) {
+            // 优先使用 plugin 返回的 ID
+            const driveFileId = msg.driveFileId || (currentFileIdType === 'drive' ? currentFileId : null);
+            const ossFileId = msg.ossFileId || (currentFileIdType === 'oss' ? currentFileId : null);
+            
+            if (driveFileId || ossFileId) {
               try {
                 const confirmMessage = {
                   type: 'screenshot-received',
                   filename: msg.filename || '未命名文件',
                   timestamp: Date.now()
                 };
-                if (currentFileIdType === 'oss') confirmMessage.ossFileId = currentFileId;
-                else if (currentFileIdType === 'drive') confirmMessage.driveFileId = currentFileId;
+                if (ossFileId) confirmMessage.ossFileId = ossFileId;
+                if (driveFileId) confirmMessage.driveFileId = driveFileId;
+                
                 ws.send(JSON.stringify(confirmMessage));
-                currentFileId = null;
-                currentFileIdType = null;
+                
+                if (!msg.driveFileId && !msg.ossFileId) {
+                    currentFileId = null;
+                    currentFileIdType = null;
+                }
               } catch (error) {
                 console.error('❌ 发送确认失败:', error);
               }
@@ -3146,20 +3174,27 @@
             showToast('Figma 导入失败，已保存到本地', 'warning');
             
             if (ws && ws.readyState === WebSocket.OPEN) {
-              if (currentFileId) {
+              // 优先使用 plugin 返回的 ID
+              const driveFileId = msg.driveFileId || (currentFileIdType === 'drive' ? currentFileId : null);
+              const ossFileId = msg.ossFileId || (currentFileIdType === 'oss' ? currentFileId : null);
+              
+              if (driveFileId || ossFileId) {
                 try {
                   const confirmMessage = {
                     type: 'screenshot-received',
                     filename: msg.filename || '未命名文件',
                     timestamp: Date.now()
                   };
-                  if (currentFileIdType === 'oss') confirmMessage.ossFileId = currentFileId;
-                  else if (currentFileIdType === 'drive') confirmMessage.driveFileId = currentFileId;
+                  if (ossFileId) confirmMessage.ossFileId = ossFileId;
+                  if (driveFileId) confirmMessage.driveFileId = driveFileId;
+                  
                   ws.send(JSON.stringify(confirmMessage));
                   
                   // Reset
-                  currentFileId = null;
-                  currentFileIdType = null;
+                  if (!msg.driveFileId && !msg.ossFileId) {
+                      currentFileId = null;
+                      currentFileIdType = null;
+                  }
                   currentFileBackedUp = false;
                 } catch (error) {
                   console.error('❌ 发送确认失败:', error);
@@ -3181,11 +3216,19 @@
               error: msg.error || 'undefined错误',
                keepFile: true
             };
-             if (currentFileIdType === 'oss') failMessage.ossFileId = currentFileId;
-            else if (currentFileIdType === 'drive') failMessage.driveFileId = currentFileId;
+            
+            const driveFileId = msg.driveFileId || (currentFileIdType === 'drive' ? currentFileId : null);
+            const ossFileId = msg.ossFileId || (currentFileIdType === 'oss' ? currentFileId : null);
+            
+            if (ossFileId) failMessage.ossFileId = ossFileId;
+            if (driveFileId) failMessage.driveFileId = driveFileId;
+            
             ws.send(JSON.stringify(failMessage));
-            currentFileId = null;
-            currentFileIdType = null;
+            
+            if (!msg.driveFileId && !msg.ossFileId) {
+                currentFileId = null;
+                currentFileIdType = null;
+            }
           } catch (error) {
             console.error('发送失败消息失败:', error);
           }

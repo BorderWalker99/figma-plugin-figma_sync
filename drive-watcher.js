@@ -368,6 +368,9 @@ async function initializeUserFolder() {
 let ws = null;
 let pollTimer = null;
 let isRealTimeMode = false;
+let isPolling = false;
+let lastPollTime = null;
+let realTimeStart = null;
 
 const knownFileIds = new Set();
 const pendingDeletes = new Map(); // fileId -> { filename, timestamp }
@@ -379,57 +382,47 @@ async function initializeKnownFiles() {
     throw new Error('用户文件夹未初始化');
   }
   
-  if (CONFIG.processExisting) {
-    console.log('ℹ️  DRIVE_PROCESS_EXISTING=1，将处理文件夹中现有文件');
-    return;
-  }
-
-  try {
-    // 确保使用用户专属文件夹，而不是共享文件夹
-    console.log(`📂 [Drive] 初始化已知文件列表，监听文件夹: ${CONFIG.userFolderId}`);
-    const { files } = await listFolderFiles({ folderId: CONFIG.userFolderId, pageSize: 200 });
-    files.forEach((file) => knownFileIds.add(file.id));
-    console.log(`ℹ️  已记录 ${files.length} 个现有文件（不会重新同步）`);
-  } catch (error) {
-    console.error('⚠️  初始化 Drive 文件列表失败:', error.message);
-  }
+  // 初始化时间基准
+  realTimeStart = new Date();
+  // 查询时间回退1分钟，作为缓冲
+  const queryStart = new Date(realTimeStart.getTime() - 60000);
+  lastPollTime = queryStart.toISOString();
+  
+  console.log(`🕒 [Drive] 实时模式启动时间: ${realTimeStart.toISOString()}`);
+  console.log(`   (查询起始时间: ${lastPollTime})`);
+  console.log('ℹ️  使用增量查询模式，不再全量扫描旧文件');
+  
+  // 清空已知文件列表（因为我们依赖时间戳过滤，不需要保留旧ID）
+  knownFileIds.clear();
 }
 
 async function pollDrive() {
-  if (!isRealTimeMode) {
+  if (!isRealTimeMode) return;
+  if (isPolling) {
+    console.log('⏳ [Drive] 上次轮询尚未结束，跳过本次轮询');
     return;
   }
-  
   if (!CONFIG.userFolderId) {
     console.error('❌ 用户文件夹未初始化');
     return;
   }
 
+  isPolling = true;
+  const pollStart = new Date();
+
   try {
-    // 获取所有文件（处理分页）
-    let allFiles = [];
-    let nextPageToken = null;
-    let pageCount = 0;
+    // 构造增量查询条件
+    const customQuery = lastPollTime ? `createdTime > '${lastPollTime}'` : null;
     
-    do {
-      const result = await listFolderFiles({ 
-        folderId: CONFIG.userFolderId, 
-        pageSize: 100, // 增加每页大小，减少请求次数
-        orderBy: 'modifiedTime desc', // 使用修改时间排序，新文件会排在前面
-        pageToken: nextPageToken
-      });
-      
-      if (result.files && result.files.length > 0) {
-        allFiles = allFiles.concat(result.files);
-        pageCount++;
-      }
-      
-      nextPageToken = result.nextPageToken;
-    } while (nextPageToken);
+    // 只获取一页（增量模式下通常文件很少）
+    const result = await listFolderFiles({ 
+      folderId: CONFIG.userFolderId, 
+      pageSize: 100, 
+      orderBy: 'createdTime asc', // 按创建时间正序，先处理旧的
+      customQuery
+    });
     
-    if (pageCount > 1) {
-      console.log(`📄 [Drive] 获取了 ${pageCount} 页文件，共 ${allFiles.length} 个文件`);
-    }
+    const allFiles = result.files || [];
     
     // 过滤图片和视频文件
     const imageFiles = allFiles.filter(file => {
@@ -440,37 +433,49 @@ async function pollDrive() {
     });
     
     const newFiles = [];
-
-    imageFiles.forEach((file) => {
-      if (!knownFileIds.has(file.id)) {
-        knownFileIds.add(file.id);
-        newFiles.push(file);
+    for (const file of imageFiles) {
+      // 1. 去重
+      if (knownFileIds.has(file.id)) continue;
+      
+      // 2. 严格时间过滤（只处理启动后创建的文件）
+      const fileTime = new Date(file.createdTime);
+      if (realTimeStart && fileTime < realTimeStart) {
+        knownFileIds.add(file.id); // 标记为已知，下次不再处理
+        continue;
       }
-    });
+      
+      knownFileIds.add(file.id);
+      newFiles.push(file);
+    }
 
-    // 按创建时间排序，确保按顺序处理
-    newFiles.sort((a, b) => new Date(a.createdTime || a.modifiedTime) - new Date(b.createdTime || b.modifiedTime));
-
-    // 立即处理新文件，不等待下一个轮询周期
     if (newFiles.length > 0) {
-      console.log(`🔄 [Drive] 检测到 ${newFiles.length} 个新文件（总文件: ${imageFiles.length}，已知: ${knownFileIds.size - newFiles.length}），立即处理...`);
-      for (const file of newFiles) {
+      console.log(`🔄 [Drive] 检测到 ${newFiles.length} 个新文件，并发处理...`);
+      
+      // 并发处理新文件（提高多图同步速度）
+      const promises = newFiles.map(async (file) => {
         try {
           await handleDriveFile(file, true);
-          // 文件之间短暂延迟，避免请求过快
-          await sleep(100);
         } catch (fileError) {
-          // 单个文件处理失败不影响其他文件
           console.error(`   ❌ 处理文件失败: ${file.name}`, fileError.message);
-          // 从 knownFileIds 中移除，以便下次重试
+          // 失败时移除，以便重试
           knownFileIds.delete(file.id);
         }
-      }
+      });
+      
+      await Promise.all(promises);
     }
+    
+    // 更新 lastPollTime
+    // 推进查询游标：使用本次轮询开始时间 - 1分钟（安全缓冲）
+    const nextQueryTime = new Date(pollStart.getTime() - 60000);
+    lastPollTime = nextQueryTime.toISOString();
+    
   } catch (error) {
-    console.error('⚠️  拉取 Drive 文件失败:', error.message);
-    if (error.stack) {
-      console.error('   错误堆栈:', error.stack);
+    console.error('⚠️  轮询失败:', error.message);
+  } finally {
+    isPolling = false;
+    if (isRealTimeMode && pollTimer) {
+      pollTimer = setTimeout(pollDrive, CONFIG.pollIntervalMs);
     }
   }
 }
@@ -836,13 +841,15 @@ async function handleDriveFile(file, deleteAfterSync = false) {
       });
       console.log(`   ⏳ 等待 Figma 确认后删除 Drive 文件 (ID: ${file.id})`);
 
-      // 设置超时，如果 30 秒内没有收到确认，保留文件
+      // 设置超时，如果 120 秒内没有收到确认，保留文件
+      // 增加超时时间以适应批量上传场景（Figma 处理队列可能较慢）
+      const confirmTimeout = 120000;
       setTimeout(() => {
         if (pendingDeletes.has(file.id)) {
-          console.log(`   ⚠️  等待确认超时（30秒），保留文件: ${file.name}`);
+          console.log(`   ⚠️  等待确认超时（${confirmTimeout / 1000}秒），保留文件: ${file.name}`);
           pendingDeletes.delete(file.id);
         }
-      }, 30000);
+      }, confirmTimeout);
     }
   } catch (error) {
     console.error(`   ❌ 处理 Drive 文件失败 (${file.name}):`, error.message);

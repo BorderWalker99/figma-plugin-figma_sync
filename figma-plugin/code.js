@@ -592,7 +592,7 @@ figma.ui.onmessage = async (msg) => {
     console.log('   时间戳:', msg.timestamp || '未提供');
     
     try {
-      const { bytes, timestamp, filename } = msg;
+      const { bytes, timestamp, filename, driveFileId, ossFileId } = msg;
       
       if (!bytes) {
         throw new Error('缺少 bytes 数据');
@@ -840,7 +840,9 @@ figma.ui.onmessage = async (msg) => {
         type: 'screenshot-added',
         success: true,
         count: screenshotCount,
-        filename: filename || '未命名文件'
+        filename: filename || '未命名文件',
+        driveFileId: driveFileId,
+        ossFileId: ossFileId
       });
       
     } catch (error) {
@@ -883,14 +885,18 @@ figma.ui.onmessage = async (msg) => {
           type: 'file-needs-manual-drag',
           filename: msg.filename || '未命名文件',
           reason: 'undefined-error',
-          error: errorText
+          error: errorText,
+          driveFileId: msg.driveFileId,
+          ossFileId: msg.ossFileId
         });
       } else {
         // 其他错误：正常显示错误信息
         figma.ui.postMessage({ 
           type: 'screenshot-added',
           success: false,
-          error: errorMessage
+          error: errorMessage,
+          driveFileId: msg.driveFileId,
+          ossFileId: msg.ossFileId
         });
       }
     }

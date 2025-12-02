@@ -291,7 +291,7 @@ async function uploadBuffer({ buffer, filename, mimeType = 'image/jpeg', folderI
   }
 }
 
-async function listFolderFiles({ folderId, pageSize = 50, orderBy = 'createdTime desc', fields = 'files(id,name,mimeType,createdTime,modifiedTime,size,parents),nextPageToken', supportsAllDrives = true, pageToken = null }) {
+async function listFolderFiles({ folderId, pageSize = 50, orderBy = 'createdTime desc', fields = 'files(id,name,mimeType,createdTime,modifiedTime,size,parents),nextPageToken', supportsAllDrives = true, pageToken = null, customQuery = null }) {
   if (!folderId || folderId.trim() === '' || folderId === '.') {
     throw new Error(`listFolderFiles 缺少或无效的 folderId: "${folderId}"`);
   }
@@ -301,8 +301,13 @@ async function listFolderFiles({ folderId, pageSize = 50, orderBy = 'createdTime
   // 检查是否是共享驱动器
   const isSharedDrive = folderId.startsWith('0A') || folderId.length === 33;
 
+  let q = `'${folderId}' in parents and trashed = false`;
+  if (customQuery) {
+    q += ` and (${customQuery})`;
+  }
+
   const params = {
-    q: `'${folderId}' in parents and trashed = false`,
+    q,
     orderBy,
     pageSize,
     fields
