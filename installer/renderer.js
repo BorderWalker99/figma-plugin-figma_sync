@@ -10,9 +10,7 @@ window.showAlert = function(message, title = '提示') {
   
   if (overlay && titleEl && messageEl) {
     titleEl.textContent = title;
-    // 将 \n 换行符转换为 <br> 标签以正确显示换行
-    messageEl.innerHTML = message.replace(/\n/g, '<br>');
-    overlay.classList.add('show');
+    messageEl.textContent = message;
   }
 };
 
