@@ -1574,37 +1574,7 @@
                   </div>
               </div>
 
-                <!-- Plugin Update Notification Section -->
-                <div id="pluginUpdateSection" style="display:none; padding-top:30px; border-top: 1px solid var(--border); margin-top: 20px;">
-                  <div style="display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--bg-card); border-radius: var(--radius-s);">
-                    <div style="flex: 1;">
-                      <div style="font-size:13px; font-weight: 600; margin-bottom: 4px;">插件有新版本</div>
-                      <div style="font-size:12px; color: var(--text-secondary);">
-                        <span id="pluginUpdateCurrentVersion">当前版本: v1.0.0</span> → 
-                        <span id="pluginUpdateLatestVersion" style="color: var(--accent);">最新版本: v1.0.0</span>
-                      </div>
-                    </div>
-                    <button id="pluginUpdateBtn" class="btn btn-primary" style="flex-shrink: 0; padding: 8px 16px; font-size: 12px;">
-                      <span id="pluginUpdateBtnText">更新插件</span>
-                    </button>
-                  </div>
-                </div>
-
-                <!-- Server Update Notification Section -->
-                <div id="serverUpdateSection" style="display:none; padding-top:30px; border-top: 1px solid var(--border); margin-top: 20px;">
-                  <div style="display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--bg-card); border-radius: var(--radius-s);">
-                    <div style="flex: 1;">
-                      <div style="font-size:13px; font-weight: 600; margin-bottom: 4px;">服务器有新版本</div>
-                      <div style="font-size:12px; color: var(--text-secondary);">
-                        <span id="serverUpdateCurrentVersion">当前版本: v1.0.0</span> → 
-                        <span id="serverUpdateLatestVersion" style="color: var(--accent);">最新版本: v1.0.0</span>
-                      </div>
-                    </div>
-                    <button id="serverUpdateBtn" class="btn btn-primary" style="flex-shrink: 0; padding: 8px 16px; font-size: 12px;">
-                      <span id="serverUpdateBtnText">更新服务器</span>
-                    </button>
-                  </div>
-                </div>
+                <!-- 更新提示已移至顶部 Banner，设置页面不再显示 -->
 
 
       </div>
@@ -1639,11 +1609,12 @@
     let serverInstallPath = null;
     let isMinimized = false;
     let gifBackupCount = 0;
-    let currentPluginVersion = '1.0.0'; // 当前插件版本
+    let currentPluginVersion = null; // 当前插件版本（初始为 null，等待 code.js 返回真实版本）
     let latestPluginVersion = null; // 最新版本
     let pluginUpdateUrl = null; // 更新下载地址
     let dismissedPluginVersion = null; // 用户点击"稍后"后记录的版本
     let dismissedServerVersion = null; // 用户点击"稍后"后记录的服务器版本
+    let pendingPluginUpdateInfo = null; // 暂存的插件更新信息（等待版本信息到达后处理）
     
     // 配置：定期检查更新的间隔（毫秒）
     const UPDATE_CHECK_INTERVAL = 60 * 60 * 1000; // 1小时检查一次
@@ -2567,6 +2538,13 @@
       latestPluginVersion = data.latestVersion;
       pluginUpdateUrl = data.updateUrl;
       
+      // 如果还没有收到真实的插件版本信息，暂存更新信息，等待版本信息到达后再处理
+      if (currentPluginVersion === null) {
+        console.log('⏳ 插件版本信息尚未到达，暂存更新信息');
+        pendingPluginUpdateInfo = data;
+        return;
+      }
+      
       // 比较版本号
       if (data.hasUpdate && compareVersions(latestPluginVersion, currentPluginVersion) > 0) {
         // 检查是否是用户已经点击"稍后"忽略的版本
@@ -2576,28 +2554,13 @@
           // 有新版本，且不是用户已忽略的版本，显示顶部通知条
           pendingUpdateType = 'plugin';
           pendingUpdateData = data;
-          showUpdateBanner('插件', currentPluginVersion, latestPluginVersion);
-          console.log(`📢 发现插件新版本: v${currentPluginVersion} → v${latestPluginVersion}`);
+          showUpdateBanner('plugin', currentPluginVersion, latestPluginVersion);
+          console.log(`📢 发现新版本: v${currentPluginVersion} → v${latestPluginVersion}`);
         } else {
-          console.log(`🔕 用户已忽略插件版本 v${dismissedPluginVersion}，不再显示`);
-        }
-        
-        // 同时更新设置页面的显示（如果用户之后打开设置）
-        const updateSection = document.getElementById('pluginUpdateSection');
-        const updateCurrentVersion = document.getElementById('pluginUpdateCurrentVersion');
-        const updateLatestVersion = document.getElementById('pluginUpdateLatestVersion');
-        
-        if (updateSection && updateCurrentVersion && updateLatestVersion) {
-          updateCurrentVersion.textContent = `当前版本: v${currentPluginVersion}`;
-          updateLatestVersion.textContent = `最新版本: v${latestPluginVersion}`;
-          updateSection.style.display = 'block';
+          console.log(`🔕 用户已忽略版本 v${dismissedPluginVersion}，不再显示`);
         }
       } else {
-        // 已是最新版本，隐藏更新提示
-        const updateSection = document.getElementById('pluginUpdateSection');
-        if (updateSection) {
-          updateSection.style.display = 'none';
-        }
+        console.log(`✅ 已是最新版本: v${currentPluginVersion}`);
       }
     }
     
@@ -2608,48 +2571,27 @@
         const shouldShow = !dismissedServerVersion || compareVersions(data.latestVersion, dismissedServerVersion) > 0;
         
         if (shouldShow) {
-          // 优先显示服务器更新（如果同时有插件和服务器更新）
-          if (pendingUpdateType === 'plugin') {
-            // 如果已经有插件更新待处理，优先显示服务器更新
-            pendingUpdateType = 'server';
-          } else {
-            pendingUpdateType = 'server';
-          }
+          // 如果已经有插件更新待处理，服务器更新优先
+          pendingUpdateType = 'server';
           pendingUpdateData = data;
-          showUpdateBanner('服务器', data.currentVersion, data.latestVersion);
-          console.log(`📢 发现服务器新版本: v${data.currentVersion} → v${data.latestVersion}`);
+          showUpdateBanner('server', data.currentVersion, data.latestVersion);
+          console.log(`📢 发现新版本: v${data.currentVersion} → v${data.latestVersion}`);
         } else {
-          console.log(`🔕 用户已忽略服务器版本 v${dismissedServerVersion}，不再显示`);
-        }
-        
-        // 同时更新设置页面的显示
-        const updateSection = document.getElementById('serverUpdateSection');
-        const updateCurrentVersion = document.getElementById('serverUpdateCurrentVersion');
-        const updateLatestVersion = document.getElementById('serverUpdateLatestVersion');
-        
-        if (updateSection && updateCurrentVersion && updateLatestVersion) {
-          updateCurrentVersion.textContent = `当前版本: v${data.currentVersion}`;
-          updateLatestVersion.textContent = `最新版本: v${data.latestVersion}`;
-          updateSection.style.display = 'block';
-        }
-      } else {
-        // 已是最新版本，隐藏更新提示
-        const updateSection = document.getElementById('serverUpdateSection');
-        if (updateSection) {
-          updateSection.style.display = 'none';
+          console.log(`🔕 用户已忽略版本 v${dismissedServerVersion}，不再显示`);
         }
       }
     }
     
-    // 显示顶部更新通知条
+    // 显示顶部更新通知条（统一显示，不区分插件/服务器）
     function showUpdateBanner(componentName, currentVer, latestVer) {
       const banner = document.getElementById('updateBanner');
       const title = document.getElementById('updateBannerTitle');
       const version = document.getElementById('updateBannerVersion');
       
       if (banner && title && version) {
-        title.textContent = `${componentName}有新版本`;
-        version.textContent = `v${currentVer} → v${latestVer}`;
+        // 统一显示为"发现新版本"，用户无需感知是插件还是服务器
+        title.textContent = '发现新版本';
+        version.textContent = `v${latestVer}`;
         banner.classList.add('show');
         
         // 如果当前未最小化，调整窗口高度以适应 Banner
@@ -2682,6 +2624,14 @@
     function handlePluginVersionInfo(data) {
       currentPluginVersion = data.version || '1.0.0';
       console.log('📦 当前插件版本:', currentPluginVersion);
+      
+      // 如果有暂存的更新信息，现在可以处理了
+      if (pendingPluginUpdateInfo) {
+        console.log('📦 处理暂存的插件更新信息');
+        const tempData = pendingPluginUpdateInfo;
+        pendingPluginUpdateInfo = null;
+        handlePluginUpdateInfo(tempData);
+      }
     }
     
     // 比较版本号（简单版本，支持 x.y.z 格式）
@@ -2701,58 +2651,33 @@
     
     // 处理插件更新进度
     function handlePluginUpdateProgress(data) {
-      const updateBtn = document.getElementById('pluginUpdateBtn');
-      const updateBtnText = document.getElementById('pluginUpdateBtnText');
       const bannerBtn = document.getElementById('updateBannerNow');
       
       if (data.status === 'downloading') {
         showToast(data.message || '正在下载...', 'loading');
-        if (updateBtnText) {
-          updateBtnText.textContent = '下载中...';
+        if (bannerBtn) {
+          bannerBtn.disabled = true;
+          bannerBtn.textContent = '下载中...';
         }
       } else if (data.status === 'installing') {
         showToast(data.message || '正在安装...', 'loading');
-        if (updateBtnText) {
-          updateBtnText.textContent = '安装中...';
-      }
+        if (bannerBtn) {
+          bannerBtn.textContent = '安装中...';
+        }
       } else if (data.status === 'completed') {
         showToast(data.message || '更新完成！请重启插件', 'success');
-        if (updateBtn) {
-          updateBtn.disabled = false;
-        }
-        if (updateBtnText) {
-          updateBtnText.textContent = '更新完成';
-        }
-        // 重置通知条按钮
-        if (bannerBtn) {
-          bannerBtn.disabled = false;
-          bannerBtn.textContent = '立即更新';
-        }
-        // 更新版本显示
+        // 隐藏更新通知条
+        hideUpdateBanner();
+        // 更新版本
         if (data.version) {
           currentPluginVersion = data.version.replace(/^v/, '');
-          const updateCurrentVersion = document.getElementById('pluginUpdateCurrentVersion');
-          if (updateCurrentVersion) {
-            updateCurrentVersion.textContent = `当前版本: v${currentPluginVersion}`;
-          }
-          // 隐藏更新提示
-          const updateSection = document.getElementById('pluginUpdateSection');
-          if (updateSection) {
-            updateSection.style.display = 'none';
-          }
         }
         // 清除待更新标记和忽略记录
         pendingUpdateType = null;
         pendingUpdateData = {};
-        dismissedPluginVersion = null; // 清除忽略记录，更新完成后可以提示新版本
+        dismissedPluginVersion = null;
       } else if (data.status === 'error') {
         showToast(data.message || '更新失败', 'error');
-        if (updateBtn) {
-          updateBtn.disabled = false;
-        }
-        if (updateBtnText) {
-          updateBtnText.textContent = '更新插件';
-        }
         // 重置通知条按钮
         if (bannerBtn) {
           bannerBtn.disabled = false;
@@ -2763,57 +2688,29 @@
     
     // 处理服务器更新进度
     function handleServerUpdateProgress(data) {
-      const updateBtn = document.getElementById('serverUpdateBtn');
-      const updateBtnText = document.getElementById('serverUpdateBtnText');
       const bannerBtn = document.getElementById('updateBannerNow');
       
       if (data.status === 'downloading') {
         showToast(data.message || '正在下载...', 'loading');
-        if (updateBtnText) {
-          updateBtnText.textContent = '下载中...';
+        if (bannerBtn) {
+          bannerBtn.disabled = true;
+          bannerBtn.textContent = '下载中...';
         }
       } else if (data.status === 'installing') {
         showToast(data.message || '正在安装...', 'loading');
-        if (updateBtnText) {
-          updateBtnText.textContent = '安装中...';
+        if (bannerBtn) {
+          bannerBtn.textContent = '安装中...';
         }
       } else if (data.status === 'completed') {
         showToast(data.message || '更新完成！请重启服务器', 'success');
-        if (updateBtn) {
-          updateBtn.disabled = false;
-        }
-        if (updateBtnText) {
-          updateBtnText.textContent = '更新完成';
-        }
-        // 重置通知条按钮
-        if (bannerBtn) {
-          bannerBtn.disabled = false;
-          bannerBtn.textContent = '立即更新';
-        }
-        // 更新版本显示
-        if (data.version) {
-          const updateCurrentVersion = document.getElementById('serverUpdateCurrentVersion');
-          if (updateCurrentVersion) {
-            updateCurrentVersion.textContent = `当前版本: v${data.version.replace(/^v/, '')}`;
-          }
-          // 隐藏更新提示
-          const updateSection = document.getElementById('serverUpdateSection');
-          if (updateSection) {
-            updateSection.style.display = 'none';
-          }
-        }
+        // 隐藏更新通知条
+        hideUpdateBanner();
         // 清除待更新标记和忽略记录
         pendingUpdateType = null;
         pendingUpdateData = {};
-        dismissedServerVersion = null; // 清除忽略记录，更新完成后可以提示新版本
+        dismissedServerVersion = null;
       } else if (data.status === 'error') {
         showToast(data.message || '更新失败', 'error');
-        if (updateBtn) {
-          updateBtn.disabled = false;
-        }
-        if (updateBtnText) {
-          updateBtnText.textContent = '更新服务器';
-        }
         // 重置通知条按钮
         if (bannerBtn) {
           bannerBtn.disabled = false;
@@ -2822,29 +2719,6 @@
       }
     }
     
-    // 更新按钮点击处理
-    const updateBtn = document.getElementById('updateBtn');
-    const updateBtnText = document.getElementById('updateBtnText');
-    if (updateBtn) {
-      updateBtn.onclick = function() {
-        // 检查连接状态
-        if (!ws || ws.readyState !== WebSocket.OPEN) {
-          showToast('未连接到服务器', 'error');
-          return;
-        }
-        
-        // 禁用按钮并显示加载状态
-        updateBtn.disabled = true;
-        if (updateBtnText) {
-          updateBtnText.textContent = '更新中...';
-        }
-        
-        // 发送自动更新请求
-        ws.send(JSON.stringify({ type: 'update-plugin' }));
-        showToast('开始自动更新...', 'loading');
-      };
-    }
-
     // SVG Icons for Toast
     function getToastIcon(type) {
       if (type === 'success') {
@@ -3109,16 +2983,29 @@
           // 更新插件
           if (ws && ws.readyState === 1) {
             ws.send(JSON.stringify({ type: 'update-plugin' }));
-            hideUpdateBanner();
-            showToast('开始更新插件...', 'loading');
+            // 不立即隐藏 Banner，等待更新完成后由 handlePluginUpdateProgress 隐藏
+            console.log('📤 发送插件更新请求');
+          } else {
+            showToast('未连接到服务器', 'error');
+            updateBannerNowBtn.disabled = false;
+            updateBannerNowBtn.textContent = '立即更新';
           }
         } else if (pendingUpdateType === 'server') {
           // 更新服务器
           if (ws && ws.readyState === 1) {
             ws.send(JSON.stringify({ type: 'update-server' }));
-            hideUpdateBanner();
-            showToast('开始更新服务器...', 'loading');
+            // 不立即隐藏 Banner，等待更新完成后由 handleServerUpdateProgress 隐藏
+            console.log('📤 发送服务器更新请求');
+          } else {
+            showToast('未连接到服务器', 'error');
+            updateBannerNowBtn.disabled = false;
+            updateBannerNowBtn.textContent = '立即更新';
           }
+        } else {
+          // 没有待处理的更新
+          showToast('没有可用的更新', 'error');
+          updateBannerNowBtn.disabled = false;
+          updateBannerNowBtn.textContent = '立即更新';
         }
       };
     }
@@ -3259,8 +3146,7 @@
         }
       } else if (msg.type === 'plugin-version-info') {
         // 获取插件版本信息
-        currentPluginVersion = msg.version || '1.0.0';
-        console.log('📦 当前插件版本:', currentPluginVersion);
+        handlePluginVersionInfo(msg);
       }
     };
 

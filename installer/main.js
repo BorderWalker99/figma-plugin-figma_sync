@@ -439,7 +439,7 @@ ipcMain.handle('install-homebrew', async () => {
       console.log('Terminal opened successfully');
       resolve({ 
         success: true, 
-        message: '终端已打开，请按照提示安装 Homebrew：1. 按回车继续；2. 输入密码；3. 等待安装完成；完成后请点击"重新检测"按钮。',
+        message: '终端已打开，请按照提示安装 Homebrew：1. 输入密码；2. 按回车继续；3. 等待安装完成；完成后请点击"重新检测"按钮。',
         needsRestart: true
       });
     } catch (error) {
@@ -471,7 +471,7 @@ ipcMain.handle('install-node', async () => {
       console.log('Terminal opened successfully');
       resolve({ 
         success: true, 
-        message: '终端已打开，正在安装 Node.js。通常需要 1-2 分钟。完成后请点击"重新检测"按钮。',
+        message: '终端已打开，正在安装 Node.js。通常需要 2-3 分钟。完成后请点击"重新检测"按钮。',
         needsRestart: true
       });
     } catch (error) {

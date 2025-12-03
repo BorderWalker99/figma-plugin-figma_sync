@@ -1,6 +1,6 @@
 // code.js - 智能布局版本
 
-const PLUGIN_VERSION = '1.0.3'; // 插件版本号
+const PLUGIN_VERSION = '1.0.4'; // 插件版本号
 
 console.log('🚀 Figma插件启动');
 console.log('📦 插件版本:', PLUGIN_VERSION);
