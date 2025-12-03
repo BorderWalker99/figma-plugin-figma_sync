@@ -10,7 +10,8 @@ window.showAlert = function(message, title = '提示') {
   
   if (overlay && titleEl && messageEl) {
     titleEl.textContent = title;
-    messageEl.textContent = message;
+    // 将 \n 换行符转换为 <br> 标签以正确显示换行
+    messageEl.innerHTML = message.replace(/\n/g, '<br>');
     overlay.classList.add('show');
   }
 };
@@ -293,7 +294,7 @@ async function checkSystemRequirements() {
               showToast('Homebrew 安装成功', 'success');
               checkSystemRequirements(); // 重新检查所有依赖
             } else {
-              showToast('Homebrew 尚未安装完成，请在终端中完成安装后再检测', 'error');
+              showToast('Homebrew 尚未安装，请在终端中完成安装后再检测', 'error');
             }
           };
         } else {
@@ -374,7 +375,7 @@ async function checkSystemRequirements() {
               showToast('Node.js 安装成功', 'success');
               checkSystemRequirements(); // 重新检查所有依赖
             } else {
-              showToast('Node.js 尚未安装完成，请在终端中完成安装后再检测', 'error');
+              showToast('Node.js 尚未安装，请在终端中完成安装后再检测', 'error');
             }
           };
         } else {
