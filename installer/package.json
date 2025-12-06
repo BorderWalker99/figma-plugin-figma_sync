@@ -1,6 +1,6 @@
 {
   "name": "screensync-installer",
-  "version": "1.0.1",
+  "version": "1.0.5",
   "description": "ScreenSync GUI Installer",
   "author": "ScreenSync",
   "main": "main.js",

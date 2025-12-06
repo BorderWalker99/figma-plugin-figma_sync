@@ -12,23 +12,7 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-# 检查是否为自动模式（-y 参数）
-AUTO_MODE=false
-NEW_VERSION=""
-for arg in "$@"; do
-    case $arg in
-        -y|--yes|--auto)
-            AUTO_MODE=true
-            ;;
-        *)
-            if [ -z "$NEW_VERSION" ]; then
-                NEW_VERSION="$arg"
-            fi
-            ;;
-    esac
-done
-
-# clear # 在非交互式终端中跳过清屏
+clear
 
 echo -e "${BLUE}"
 cat << "EOF"
@@ -56,13 +40,9 @@ echo -e "${BLUE}📦 当前版本信息：${NC}"
 echo -e "   插件版本: ${GREEN}v${CURRENT_PLUGIN_VERSION}${NC}"
 echo -e "   服务器版本: ${GREEN}v${CURRENT_SERVER_VERSION}${NC}\n"
 
-# 提示输入新版本号（支持命令行参数）
-if [ -n "$NEW_VERSION" ]; then
-    echo -e "${YELLOW}使用命令行参数版本号: ${NEW_VERSION}${NC}"
-else
-    echo -e "${YELLOW}请输入新版本号（格式: x.y.z，如 1.0.1）：${NC}"
-    read -p "新版本: " NEW_VERSION
-fi
+# 提示输入新版本号
+echo -e "${YELLOW}请输入新版本号（格式: x.y.z，如 1.0.1）：${NC}"
+read -p "新版本: " NEW_VERSION
 
 if [ -z "$NEW_VERSION" ]; then
     echo -e "${RED}❌ 版本号不能为空${NC}"
@@ -75,22 +55,17 @@ if ! [[ "$NEW_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     exit 1
 fi
 
-if [ "$AUTO_MODE" = true ]; then
-    echo -e "${YELLOW}自动模式：跳过更新说明输入${NC}"
-    RELEASE_NOTES="- 版本更新至 v${NEW_VERSION}"
-else
-    echo ""
-    echo -e "${YELLOW}请输入更新说明（按 Ctrl+D 结束输入）：${NC}"
-    echo -e "${YELLOW}示例：${NC}"
-    echo -e "  - 新增功能 A"
-    echo -e "  - 修复 Bug B"
-    echo -e "  - 优化性能 C"
-    echo ""
-    RELEASE_NOTES=$(cat)
+echo ""
+echo -e "${YELLOW}请输入更新说明（按 Ctrl+D 结束输入）：${NC}"
+echo -e "${YELLOW}示例：${NC}"
+echo -e "  - 新增功能 A"
+echo -e "  - 修复 Bug B"
+echo -e "  - 优化性能 C"
+echo ""
+RELEASE_NOTES=$(cat)
 
-    if [ -z "$RELEASE_NOTES" ]; then
-        RELEASE_NOTES="- 版本更新至 v${NEW_VERSION}"
-    fi
+if [ -z "$RELEASE_NOTES" ]; then
+    RELEASE_NOTES="- 版本更新至 v${NEW_VERSION}"
 fi
 
 echo ""
@@ -103,13 +78,8 @@ echo -e "  4. 创建 Git Tag: ${GREEN}v${NEW_VERSION}${NC}"
 echo -e "  5. 发布到 GitHub Releases"
 echo -e "${BLUE}═══════════════════════════════════════════════════════${NC}\n"
 
-if [ "$AUTO_MODE" = true ]; then
-    echo -e "${YELLOW}自动模式：自动确认继续${NC}"
-    CONFIRM="Y"
-else
-    read -p "确认继续？(Y/n): " CONFIRM
-    CONFIRM=${CONFIRM:-Y}
-fi
+read -p "确认继续？(Y/n): " CONFIRM
+CONFIRM=${CONFIRM:-Y}
 
 if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
     echo -e "${YELLOW}已取消发布${NC}"
