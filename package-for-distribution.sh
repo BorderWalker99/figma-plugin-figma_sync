@@ -161,8 +161,8 @@ Thumbs.db
 *.tmp
 *.temp
 
-# 本地下载文件夹（用户数据）
-ScreenSyncImg/
+# 本地下载文件夹（用户数据，位于上级目录）
+../ScreenSyncImg/
 EOF
 
 # 6. 创建使用说明文件（到二级目录）

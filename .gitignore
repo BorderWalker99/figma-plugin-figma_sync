@@ -46,3 +46,10 @@ installer/ScreenSyncImg/
 # 临时文件
 *.tmp
 *.bak
+*.backup.js
+
+# 运行时生成的文件夹
+ScreenSyncImg/
+
+# 开发者临时文件
+Developer_*.command

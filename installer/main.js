@@ -718,7 +718,7 @@ ipcMain.handle('setup-config', async (event, installPath, syncMode, localFolder)
         userId: userId,
         folderName: `ScreenSync-${userId}`,
         userFolderId: null,
-        localDownloadFolder: localFolder || path.join(installPath, 'ScreenSyncImg'),
+        localDownloadFolder: localFolder || path.join(installPath, '../ScreenSyncImg'),
         installPath: installPath,
         createdAt: new Date().toISOString()
       };

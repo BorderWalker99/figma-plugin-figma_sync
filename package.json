@@ -1,15 +1,13 @@
 {
   "name": "figma-iphone-sync",
-  "version": "1.0.5",
+  "version": "1.0.2",
   "description": "Automatically sync iPhone screenshots to Figma",
   "main": "server.js",
   "scripts": {
     "start": "node start.js",
     "server": "node server.js",
     "watch": "node icloud-watcher.js",
-    "drive-watch": "node drive-watcher.js",
-    "verify-folder": "node verify-user-folder.js",
-    "test-files": "node test-folder-files.js"
+    "drive-watch": "node drive-watcher.js"
   },
   "dependencies": {
     "adm-zip": "^0.5.16",
