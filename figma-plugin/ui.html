@@ -1938,11 +1938,14 @@
           // 处理插件版本信息
           handlePluginVersionInfo(data);
         } else if (data.type === 'plugin-update-progress') {
-          // 处理插件更新进度
-          handlePluginUpdateProgress(data);
+          // 处理插件更新进度（已废弃，兼容旧版）
+          handleUpdateProgress(data);
         } else if (data.type === 'server-update-progress') {
-          // 处理服务器更新进度
-          handleServerUpdateProgress(data);
+          // 处理服务器更新进度（已废弃，兼容旧版）
+          handleUpdateProgress(data);
+        } else if (data.type === 'update-progress') {
+          // 处理统一更新进度
+          handleUpdateProgress(data);
         }
       };
 
@@ -2651,9 +2654,10 @@
       return 0;
     }
     
-    // 处理插件更新进度
-    function handlePluginUpdateProgress(data) {
+    // 处理统一更新进度（插件 + 服务器）
+    function handleUpdateProgress(data) {
       const bannerBtn = document.getElementById('updateBannerNow');
+      const updateText = document.querySelector('.update-banner-text');
       
       if (data.status === 'downloading') {
         showToast(data.message || '正在下载...', 'loading');
@@ -2661,64 +2665,60 @@
           bannerBtn.disabled = true;
           bannerBtn.textContent = '下载中...';
         }
+        if (updateText) {
+          updateText.textContent = data.message || '正在下载最新版本...';
+        }
       } else if (data.status === 'installing') {
         showToast(data.message || '正在安装...', 'loading');
         if (bannerBtn) {
           bannerBtn.textContent = '安装中...';
         }
+        if (updateText) {
+          updateText.textContent = data.message || '正在安装更新...';
+        }
       } else if (data.status === 'completed') {
-        showToast(data.message || '更新完成！请重启插件', 'success');
+        const successMsg = data.message || `更新完成！已更新 ${data.updatedCount || 0} 个文件`;
+        showToast(successMsg, 'success');
+        
         // 隐藏更新通知条
         hideUpdateBanner();
-        // 更新版本
+        
+        // 更新版本（如果提供）
         if (data.version) {
           currentPluginVersion = data.version.replace(/^v/, '');
         }
+        
         // 清除待更新标记和忽略记录
         pendingUpdateType = null;
         pendingUpdateData = {};
         dismissedPluginVersion = null;
+        dismissedServerVersion = null;
+        
+        // 3秒后提示用户重启
+        setTimeout(() => {
+          showToast('请关闭并重新打开插件，然后重启服务器以应用更新', 'success');
+        }, 3000);
+        
       } else if (data.status === 'error') {
         showToast(data.message || '更新失败', 'error');
         // 重置通知条按钮
         if (bannerBtn) {
           bannerBtn.disabled = false;
           bannerBtn.textContent = '立即更新';
+        }
+        if (updateText) {
+          updateText.textContent = '发现新版本';
         }
       }
     }
     
-    // 处理服务器更新进度
+    // 保留旧函数名作为别名（兼容性）
+    function handlePluginUpdateProgress(data) {
+      handleUpdateProgress(data);
+    }
+    
     function handleServerUpdateProgress(data) {
-      const bannerBtn = document.getElementById('updateBannerNow');
-      
-      if (data.status === 'downloading') {
-        showToast(data.message || '正在下载...', 'loading');
-        if (bannerBtn) {
-          bannerBtn.disabled = true;
-          bannerBtn.textContent = '下载中...';
-        }
-      } else if (data.status === 'installing') {
-        showToast(data.message || '正在安装...', 'loading');
-        if (bannerBtn) {
-          bannerBtn.textContent = '安装中...';
-        }
-      } else if (data.status === 'completed') {
-        showToast(data.message || '更新完成！请重启服务器', 'success');
-        // 隐藏更新通知条
-        hideUpdateBanner();
-        // 清除待更新标记和忽略记录
-        pendingUpdateType = null;
-        pendingUpdateData = {};
-        dismissedServerVersion = null;
-      } else if (data.status === 'error') {
-        showToast(data.message || '更新失败', 'error');
-        // 重置通知条按钮
-        if (bannerBtn) {
-          bannerBtn.disabled = false;
-          bannerBtn.textContent = '立即更新';
-        }
-      }
+      handleUpdateProgress(data);
     }
     
     // SVG Icons for Toast
@@ -2981,34 +2981,25 @@
         updateBannerNowBtn.disabled = true;
         updateBannerNowBtn.textContent = '更新中...';
         
-        if (pendingUpdateType === 'plugin') {
-          // 更新插件
-          if (ws && ws.readyState === 1) {
-            ws.send(JSON.stringify({ type: 'update-plugin' }));
-            // 不立即隐藏 Banner，等待更新完成后由 handlePluginUpdateProgress 隐藏
-            console.log('📤 发送插件更新请求');
-          } else {
-            showToast('未连接到服务器', 'error');
-            updateBannerNowBtn.disabled = false;
-            updateBannerNowBtn.textContent = '立即更新';
-          }
-        } else if (pendingUpdateType === 'server') {
-          // 更新服务器
-          if (ws && ws.readyState === 1) {
-            ws.send(JSON.stringify({ type: 'update-server' }));
-            // 不立即隐藏 Banner，等待更新完成后由 handleServerUpdateProgress 隐藏
-            console.log('📤 发送服务器更新请求');
-          } else {
-            showToast('未连接到服务器', 'error');
-            updateBannerNowBtn.disabled = false;
-            updateBannerNowBtn.textContent = '立即更新';
+        // 统一全量更新（插件 + 服务器所有代码）
+        if (ws && ws.readyState === 1) {
+          // 发送统一更新请求
+          ws.send(JSON.stringify({ type: 'update-full' }));
+          console.log('📤 发送全量更新请求（插件 + 服务器）');
+          
+          // 显示更新进度提示
+          const updateText = document.querySelector('.update-banner-text');
+          if (updateText) {
+            updateText.textContent = '正在下载更新...';
           }
         } else {
-          // 没有待处理的更新
-          showToast('没有可用的更新', 'error');
+          showToast('未连接到服务器', 'error');
           updateBannerNowBtn.disabled = false;
           updateBannerNowBtn.textContent = '立即更新';
         }
+        
+        // 注：已移除旧的分类更新逻辑（插件和服务器分开更新）
+        // 现在统一使用 update-full 进行全量更新
       };
     }
 
