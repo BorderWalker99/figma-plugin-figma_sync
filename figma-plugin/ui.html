@@ -1821,6 +1821,13 @@
           }
           updateStatus('connected', '');
         } else if (data.type === 'manual-sync-complete') {
+          // 恢复同步按钮状态
+          const syncBtn = document.getElementById('syncBtn');
+          if (syncBtn) {
+            syncBtn.disabled = false;
+            syncBtn.textContent = '立即同步';
+          }
+          
           // 检查连接状态，只有在连接时才更新status
           if (!ws || ws.readyState !== 1) {
             updateStatus('disconnected', '连接断开');
@@ -1848,8 +1855,8 @@
           
           // 优化后的逻辑：支持显示部分失败和具体错误详情
           if (data.total === 0) {
-            log('ℹ️  文件夹中没有截图');
-            alert('文件夹中没有截图需要同步');
+            log('ℹ️  云端没有暂存文件');
+            alert('云端没有暂存文件');
             updateStatus('connected', '同步完成');
           } else if (data.count === data.total) {
             // 全部成功
@@ -2210,6 +2217,8 @@
     document.getElementById('manualBtn').onclick = function () { showWorkArea('manual'); };
 
     document.getElementById('syncBtn').onclick = function () {
+      const syncBtn = document.getElementById('syncBtn');
+      
       // 检查连接状态
       if (!ws || ws.readyState !== 1) {
         log('❌ 未连接');
@@ -2217,12 +2226,17 @@
         return;
       }
       
+      // 禁用按钮，防止重复点击
+      syncBtn.disabled = true;
+      const originalText = syncBtn.textContent;
+      syncBtn.textContent = '同步中...';
+      
       log('🫳🏻 开始同步...');
       updateStatus('connected', '正在同步');
       manualDragCount = 0;
       skippedFilesSet.clear();
       gifBackupCount = 0;
-        ws.send(JSON.stringify({ type: 'manual-sync' }));
+      ws.send(JSON.stringify({ type: 'manual-sync' }));
     };
 
     document.getElementById('stopBtn').onclick = function() {
