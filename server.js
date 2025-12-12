@@ -1899,8 +1899,8 @@ wss.on('connection', (ws, req) => {
                     }
                   }
                   
-                  // 2. 创建本地下载文件夹（在项目文件目录内部）
-                  const localDownloadFolder = path.join(__dirname, 'ScreenSyncImg');
+                  // 2. 创建本地下载文件夹（与项目文件目录同级）
+                  const localDownloadFolder = path.join(__dirname, '../ScreenSyncImg');
                   try {
                     if (!fs.existsSync(localDownloadFolder)) {
                       fs.mkdirSync(localDownloadFolder, { recursive: true });
