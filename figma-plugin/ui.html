@@ -347,22 +347,14 @@
     }
 
     .update-banner-icon {
-      width: 16px;
-      height: 16px;
+      width: 20px;
+      height: 20px;
       flex-shrink: 0;
     }
 
     .update-banner-text {
       flex: 1;
-    }
-
-    .update-banner-title {
       font-weight: 600;
-    }
-
-    .update-banner-version {
-      font-size: 11px;
-      opacity: 0.9;
     }
 
     .update-banner-actions {
@@ -1292,10 +1284,7 @@
           <svg class="update-banner-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
             <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
           </svg>
-          <div class="update-banner-text">
-            <div class="update-banner-title" id="updateBannerTitle">发现新版本</div>
-            <div class="update-banner-version" id="updateBannerVersion">v1.0.0 → v1.0.1</div>
-          </div>
+          <div class="update-banner-text" id="updateBannerText">发现新版本 v1.0.2</div>
         </div>
         <div class="update-banner-actions">
           <button class="update-banner-btn secondary" id="updateBannerLater">稍后</button>
@@ -2622,13 +2611,11 @@
     // 显示顶部更新通知条（统一显示，不区分插件/服务器）
     function showUpdateBanner(componentName, currentVer, latestVer) {
       const banner = document.getElementById('updateBanner');
-      const title = document.getElementById('updateBannerTitle');
-      const version = document.getElementById('updateBannerVersion');
+      const text = document.getElementById('updateBannerText');
       
-      if (banner && title && version) {
-        // 统一显示为"发现新版本"，用户无需感知是插件还是服务器
-        title.textContent = '发现新版本';
-        version.textContent = `v${latestVer}`;
+      if (banner && text) {
+        // 统一显示为"发现新版本 v版本号"
+        text.textContent = `发现新版本 v${latestVer}`;
         banner.classList.add('show');
         
         // 如果当前未最小化，调整窗口高度以适应 Banner
