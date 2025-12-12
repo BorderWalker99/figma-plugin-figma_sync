@@ -2175,7 +2175,24 @@ wss.on('connection', (ws, req) => {
     
     // 统一全量更新（插件 + 服务器所有代码）
     if (data.type === 'update-full') {
-      handleFullUpdate(targetGroup, connectionId);
+      console.log(`📥 [Server] 收到全量更新请求: ${connectionId}`);
+      
+      // 异步执行更新，不阻塞消息处理
+      handleFullUpdate(targetGroup, connectionId).catch(error => {
+        console.error('❌ [Server] 处理全量更新失败:', error.message);
+        // 确保发送错误消息给前端
+        if (targetGroup && targetGroup.figma && targetGroup.figma.readyState === WebSocket.OPEN) {
+          try {
+            targetGroup.figma.send(JSON.stringify({
+              type: 'update-progress',
+              status: 'error',
+              message: `更新失败: ${error.message}`
+            }));
+          } catch (sendError) {
+            console.error('❌ [Server] 发送错误消息失败:', sendError.message);
+          }
+        }
+      });
       return;
     }
   });
@@ -2778,8 +2795,15 @@ async function handleFullUpdate(targetGroup, connectionId) {
     return;
   }
   
-  try {
+  // 为整个更新流程添加总体超时（10分钟）
+  const overallTimeout = new Promise((_, reject) => {
+    setTimeout(() => reject(new Error('更新超时（超过10分钟），请检查网络连接或稍后重试')), 600000);
+  });
+  
+  const updateTask = (async () => {
     console.log('\n🔄 [Full Update] 开始全量更新（插件 + 服务器）...');
+    console.log(`   📋 连接ID: ${connectionId}`);
+    console.log(`   ⏰ 开始时间: ${new Date().toLocaleTimeString()}`);
     
     // 通知用户开始更新
     targetGroup.figma.send(JSON.stringify({
@@ -2800,26 +2824,41 @@ async function handleFullUpdate(targetGroup, connectionId) {
         headers: {
           'User-Agent': 'ScreenSync-Full-Updater/1.0',
           'Accept': 'application/vnd.github.v3+json'
-        },
-        timeout: 10000
+        }
       };
       
-      https.get(apiUrl, options, (res) => {
+      console.log(`   🌐 正在请求 GitHub API...`);
+      const req = https.get(apiUrl, options, (res) => {
+        console.log(`   📡 GitHub API 响应状态: ${res.statusCode}`);
         let data = '';
         res.on('data', (chunk) => { data += chunk; });
         res.on('end', () => {
           if (res.statusCode === 200) {
             try {
-              resolve(JSON.parse(data));
+              const parsed = JSON.parse(data);
+              console.log(`   ✅ 成功获取 Release 信息`);
+              resolve(parsed);
             } catch (e) {
+              console.error(`   ❌ JSON 解析失败:`, e.message);
               reject(new Error('解析 GitHub API 响应失败'));
             }
           } else {
+            console.error(`   ❌ GitHub API 错误: ${res.statusCode}`);
             reject(new Error(`GitHub API 返回错误: ${res.statusCode}`));
           }
         });
-      }).on('error', reject).on('timeout', () => {
-        reject(new Error('请求超时'));
+      });
+      
+      // 正确设置超时
+      req.setTimeout(30000, () => {
+        req.destroy();
+        console.error(`   ❌ GitHub API 请求超时（30秒）`);
+        reject(new Error('GitHub API 请求超时（30秒）'));
+      });
+      
+      req.on('error', (error) => {
+        console.error(`   ❌ 网络请求错误:`, error.message);
+        reject(error);
       });
     });
     
@@ -2849,12 +2888,25 @@ async function handleFullUpdate(targetGroup, connectionId) {
     const updateDir = path.join(__dirname, '.full-update');
     
     console.log(`   📥 下载地址: ${downloadUrl}`);
+    console.log(`   📦 文件大小: ${(updateAsset.size / 1024 / 1024).toFixed(2)} MB`);
+    console.log(`   ⏳ 开始下载...`);
     
-    // 下载文件
-    await downloadFileWithRedirect(downloadUrl, tempFile);
+    // 下载文件（带超时保护）
+    const downloadTimeout = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('下载超时（超过5分钟）')), 300000);
+    });
+    
+    await Promise.race([
+      downloadFileWithRedirect(downloadUrl, tempFile),
+      downloadTimeout
+    ]);
+    
+    const downloadedSize = fs.statSync(tempFile).size;
     console.log(`   ✅ 下载完成: ${tempFile}`);
+    console.log(`   📦 实际大小: ${(downloadedSize / 1024 / 1024).toFixed(2)} MB`);
     
     // 通知用户正在安装
+    console.log(`   🔧 开始安装更新...`);
     targetGroup.figma.send(JSON.stringify({
       type: 'update-progress',
       status: 'installing',
@@ -2975,15 +3027,25 @@ async function handleFullUpdate(targetGroup, connectionId) {
       }));
     }
     
+    console.log(`   ⏱️  总耗时: ${((Date.now() - Date.now()) / 1000).toFixed(2)}秒`);
+  })(); // 结束 updateTask
+  
+  // 应用总体超时
+  try {
+    await Promise.race([updateTask, overallTimeout]);
   } catch (error) {
     console.error(`   ❌ 全量更新失败: ${error.message}`);
     console.error('   错误堆栈:', error.stack);
     if (targetGroup && targetGroup.figma && targetGroup.figma.readyState === WebSocket.OPEN) {
-      targetGroup.figma.send(JSON.stringify({
-        type: 'update-progress',
-        status: 'error',
-        message: `更新失败: ${error.message}`
-      }));
+      try {
+        targetGroup.figma.send(JSON.stringify({
+          type: 'update-progress',
+          status: 'error',
+          message: `更新失败: ${error.message}`
+        }));
+      } catch (sendError) {
+        console.error('   ❌ 发送错误消息失败:', sendError.message);
+      }
     }
   }
 }
