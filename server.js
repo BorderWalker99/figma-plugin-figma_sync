@@ -460,6 +460,10 @@ const wss = new WebSocket.Server({
 
 const connections = new Map();
 
+// 用户实例映射（用于单实例限制）
+// Key: connectionId, Value: { figmaWs, registeredAt }
+const userInstances = new Map();
+
 let DRIVE_FOLDER_ID = process.env.GDRIVE_FOLDER_ID;
 
 // 如果环境变量未设置，尝试从 serviceAccountKey.js 读取默认值
@@ -1688,6 +1692,33 @@ wss.on('connection', (ws, req) => {
     
     const targetGroup = connections.get(connectionId);
     
+    // 插件实例注册（单实例限制）
+    if (data.type === 'register-instance' && clientType === 'figma') {
+      console.log(`🔒 [单实例检查] 新实例注册: ${connectionId}`);
+      
+      // 检查是否有旧实例
+      const oldInstance = userInstances.get(connectionId);
+      if (oldInstance && oldInstance.figmaWs && oldInstance.figmaWs !== ws) {
+        // 如果旧实例的连接仍然有效，向其发送关闭命令
+        if (oldInstance.figmaWs.readyState === 1) { // OPEN
+          console.log(`   ⚠️  检测到旧实例，发送关闭命令`);
+          try {
+            oldInstance.figmaWs.send(JSON.stringify({ type: 'force-close' }));
+          } catch (error) {
+            console.log(`   ❌ 发送关闭命令失败:`, error.message);
+          }
+        }
+      }
+      
+      // 注册新实例
+      userInstances.set(connectionId, {
+        figmaWs: ws,
+        registeredAt: Date.now()
+      });
+      console.log(`   ✅ 新实例已注册，活跃实例数: ${userInstances.size}`);
+      return;
+    }
+    
     // 更新检查（插件和服务器）
     if (data.type === 'check-plugin-update' || data.type === 'check-update') {
       if (targetGroup) {
@@ -2159,6 +2190,15 @@ wss.on('connection', (ws, req) => {
           group.mac.send(JSON.stringify({ type: 'stop-realtime' }));
         } catch (error) {
           console.error('   ❌ [Server] 通知 Mac 端停止监听失败:', error.message);
+        }
+      }
+      
+      // 清理单实例映射
+      if (clientType === 'figma') {
+        const instance = userInstances.get(connectionId);
+        if (instance && instance.figmaWs === ws) {
+          userInstances.delete(connectionId);
+          console.log(`🔒 [单实例] 实例已注销: ${connectionId}，剩余: ${userInstances.size}`);
         }
       }
       

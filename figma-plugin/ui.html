@@ -1723,6 +1723,13 @@
         updateStatus('connected', '已连接');
 
         if (ws.readyState === 1) {
+          // 注册插件实例（用于单实例限制）
+          ws.send(JSON.stringify({ 
+            type: 'register-instance',
+            connectionId: connectionId,
+            timestamp: Date.now()
+          }));
+          
           ws.send(JSON.stringify({ type: 'get-sync-mode' }));
           ws.send(JSON.stringify({ type: 'get-server-info' }));
           // 自动检测更新（不需要打开设置）
@@ -1751,6 +1758,18 @@
       ws.onmessage = function (event) {
         var data = JSON.parse(event.data);
         if (data.type === 'pong') { return; }
+
+        // 处理强制关闭（单实例限制）
+        if (data.type === 'force-close') {
+          log('⚠️  检测到您在其他文件中打开了插件，当前插件将自动关闭');
+          // 延迟 2 秒关闭，让用户看到提示
+          setTimeout(() => {
+            parent.postMessage({
+              pluginMessage: { type: 'close-plugin' }
+            }, '*');
+          }, 2000);
+          return;
+        }
 
         if (data.type === 'server-info') {
           if (data.path) {
@@ -1816,6 +1835,19 @@
           // 检查连接状态，只有在连接时才更新status
           if (!ws || ws.readyState !== 1) {
             updateStatus('disconnected', '连接断开');
+            return;
+          }
+          
+          // 检查是否有错误消息（如用户文件夹未初始化）
+          if (data.message && data.total === 0 && data.count === 0) {
+            log(`❌ ${data.message}`);
+            // 根据不同的错误消息给出友好提示
+            if (data.message.includes('未初始化') || data.message.includes('未连接')) {
+              alert(`同步失败：${data.message}\n\n💡 建议：\n1. 确保服务器正在运行\n2. 先在手机端上传至少一个文件\n3. 等待几秒后重试\n4. 如仍无法解决，请重启服务器`);
+            } else {
+              alert(`同步失败：${data.message}`);
+            }
+            updateStatus('connected', '同步失败');
             return;
           }
           

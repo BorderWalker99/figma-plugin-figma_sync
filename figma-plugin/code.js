@@ -1,6 +1,6 @@
 // code.js - 智能布局版本
 
-const PLUGIN_VERSION = '1.0.1'; // 插件版本号
+const PLUGIN_VERSION = '1.0.2'; // 插件版本号
 
 console.log('🚀 Figma插件启动');
 console.log('📦 插件版本:', PLUGIN_VERSION);
@@ -324,6 +324,13 @@ function adjustFrameSize() {
 
 figma.ui.onmessage = async (msg) => {
   console.log('📬 收到UI消息:', msg.type);
+  
+  // 处理强制关闭插件（单实例限制）
+  if (msg.type === 'close-plugin') {
+    console.log('🔒 收到关闭插件请求（检测到其他实例）');
+    figma.closePlugin();
+    return;
+  }
   
   // 处理服务器修复请求
   if (msg.type === 'repair-server') {
