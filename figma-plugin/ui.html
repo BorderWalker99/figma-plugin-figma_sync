@@ -1618,10 +1618,16 @@
     
     // 配置：定期检查更新的间隔（毫秒）
     const UPDATE_CHECK_INTERVAL = 60 * 60 * 1000; // 1小时检查一次
+    
+    // 日志配置：设为 false 可减少 Figma 控制台日志（降低 Datadog 警告）
+    const ENABLE_CONSOLE_LOG = false; // 生产环境建议设为 false
 
     // ========== 日志函数 ==========
     function log(msg) {
-      console.log(msg);
+      // 只在开发模式下输出到控制台，减少 Datadog 数据量
+      if (ENABLE_CONSOLE_LOG) {
+        console.log(msg);
+      }
       const logEl = document.getElementById('log');
       const time = new Date().toLocaleTimeString();
       logEl.innerHTML = `[${time}] ${msg}\n` + logEl.innerHTML;

@@ -325,12 +325,33 @@ async function listFolderFiles({ folderId, pageSize = 50, orderBy = 'createdTime
     params.supportsTeamDrives = true; // 兼容旧版 API
   }
 
-  const response = await drive.files.list(params);
+  try {
+    // 设置超时，防止 API 调用卡住
+    const response = await drive.files.list(params, {
+      timeout: 30000, // 30秒超时
+      retryConfig: {
+        retry: 2,
+        statusCodesToRetry: [[500, 599]],
+        retryDelay: 1000
+      }
+    });
 
-  return {
-    files: response.data.files || [],
-    nextPageToken: response.data.nextPageToken || null
-  };
+    return {
+      files: response.data.files || [],
+      nextPageToken: response.data.nextPageToken || null
+    };
+  } catch (error) {
+    // 增强错误信息，帮助诊断
+    const errorMsg = error.message || String(error);
+    if (error.code === 'ETIMEDOUT' || error.code === 'ESOCKETTIMEDOUT') {
+      throw new Error(`获取文件列表超时 (文件夹ID: ${folderId})。请检查网络连接或稍后重试。`);
+    } else if (errorMsg.includes('File not found') || errorMsg.includes('404')) {
+      throw new Error(`无法访问文件夹 (ID: ${folderId})。可能原因：\n   1. 文件夹ID不正确\n   2. Service Account 没有访问权限\n   3. 共享驱动器未正确配置`);
+    } else if (errorMsg.includes('Permission') || errorMsg.includes('403')) {
+      throw new Error(`Service Account 没有访问文件夹的权限 (ID: ${folderId})。请检查 Service Account 是否已添加到共享驱动器`);
+    }
+    throw error;
+  }
 }
 
 async function downloadFileBuffer(fileId) {
@@ -343,16 +364,25 @@ async function downloadFileBuffer(fileId) {
   // 对于 GIF 文件，这确保下载的是原始未压缩版本
   // 注意：Google Drive 可能会在上传时对某些文件进行优化，导致下载的文件与原始文件不同
   // 如果发现 GIF 质量下降，可能是 Google Drive 在上传时进行了处理
-  const response = await drive.files.get(
+  
+  // 添加超时保护，防止下载大文件时卡住
+  const downloadPromise = drive.files.get(
     { 
       fileId, 
       alt: 'media'
       // 不添加任何转换参数，确保下载原始文件
     }, 
     { 
-      responseType: 'arraybuffer'
+      responseType: 'arraybuffer',
+      timeout: 60000 // 60秒超时
     }
   );
+  
+  const timeoutPromise = new Promise((_, reject) => {
+    setTimeout(() => reject(new Error('文件下载超时（超过60秒）')), 60000);
+  });
+  
+  const response = await Promise.race([downloadPromise, timeoutPromise]);
   const buffer = Buffer.from(response.data);
   return buffer;
 }
@@ -376,7 +406,13 @@ async function trashFile(fileId, supportsAllDrives = true) {
   }
   
   try {
-    await drive.files.update(params);
+    // 添加超时保护
+    const deletePromise = drive.files.update(params, { timeout: 15000 }); // 15秒超时
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('删除文件超时（超过15秒）')), 15000);
+    });
+    
+    await Promise.race([deletePromise, timeoutPromise]);
     return true;
   } catch (error) {
     // 如果文件不存在，抛出更明确的错误

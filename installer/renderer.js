@@ -514,7 +514,7 @@ async function setupConfiguration() {
   // 创建配置
   const os = require('os');
   const localFolder = selectedMode === 'drive' 
-    ? path.join(installPath, '../ScreenSyncImg')
+    ? path.join(installPath, 'ScreenSyncImg')
     : path.join(os.homedir(), 'Library/Mobile Documents/com~apple~CloudDocs/ScreenSyncImg');
   
   const configResult = await ipcRenderer.invoke('setup-config', installPath, selectedMode, localFolder);

@@ -375,6 +375,22 @@ let realTimeStart = null;
 const knownFileIds = new Set();
 const pendingDeletes = new Map(); // fileId -> { filename, timestamp }
 const MAX_KNOWN_FILES = 10000; // 限制已知文件数量，防止内存无限增长
+
+// 安全的 WebSocket 消息发送函数，防止发送失败导致崩溃
+function safeSend(message) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    console.warn('⚠️  WebSocket 未连接，无法发送消息');
+    return false;
+  }
+  
+  try {
+    ws.send(JSON.stringify(message));
+    return true;
+  } catch (error) {
+    console.error('❌ 发送 WebSocket 消息失败:', error.message);
+    return false;
+  }
+}
 const CLEANUP_INTERVAL_MS = 5 * 60 * 1000; // 每5分钟清理一次
 
 async function initializeKnownFiles() {
@@ -454,7 +470,15 @@ async function pollDrive() {
       // 并发处理新文件（提高多图同步速度）
       const promises = newFiles.map(async (file) => {
         try {
-          await handleDriveFile(file, true);
+          // 为每个文件添加 60 秒超时保护
+          const fileTimeout = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error(`处理文件超时（${file.name}）`)), 60000);
+          });
+          
+          await Promise.race([
+            handleDriveFile(file, true),
+            fileTimeout
+          ]);
         } catch (fileError) {
           console.error(`   ❌ 处理文件失败: ${file.name}`, fileError.message);
           // 失败时移除，以便重试
@@ -462,7 +486,19 @@ async function pollDrive() {
         }
       });
       
-      await Promise.all(promises);
+      // 为整个并发处理添加总体超时（最多3分钟）
+      const allTimeout = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('批量处理超时（超过3分钟）')), 180000);
+      });
+      
+      try {
+        await Promise.race([
+          Promise.all(promises),
+          allTimeout
+        ]);
+      } catch (timeoutError) {
+        console.error('⚠️  批量处理超时，部分文件可能未处理完成');
+      }
     }
     
     // 更新 lastPollTime
@@ -860,6 +896,7 @@ async function handleDriveFile(file, deleteAfterSync = false) {
 
 async function performManualSync() {
   console.log('\n📦 [Drive] 执行手动同步...');
+  console.log(`   ⏰ 开始时间: ${new Date().toLocaleTimeString()}`);
   
   if (!CONFIG.userFolderId) {
     console.error('❌ [Drive] 用户文件夹未初始化，无法执行手动同步');
@@ -876,6 +913,7 @@ async function performManualSync() {
   
   if (!ws || ws.readyState !== WebSocket.OPEN) {
     console.error('❌ [Drive] WebSocket 未连接，无法执行手动同步');
+    console.error(`   WebSocket 状态: ${ws ? ws.readyState : 'null'}`);
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({
         type: 'manual-sync-complete',
@@ -887,15 +925,27 @@ async function performManualSync() {
     return;
   }
   
-  try {
+  // 为整个手动同步添加总体超时保护（5分钟）
+  const overallTimeout = new Promise((_, reject) => {
+    setTimeout(() => reject(new Error('手动同步总体超时（超过5分钟），请检查网络连接或减少待同步文件数量')), 300000);
+  });
+  
+  const syncTask = (async () => {
     console.log(`📂 [Drive] 正在同步用户专属文件夹: ${CONFIG.userFolderId}`);
     console.log(`   🔍 正在获取文件列表...`);
     
-    const { files } = await listFolderFiles({ 
+    // 添加额外的超时保护
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('获取文件列表超时（超过40秒）')), 40000);
+    });
+    
+    const listPromise = listFolderFiles({ 
       folderId: CONFIG.userFolderId, 
       pageSize: 200, 
       orderBy: 'createdTime asc' 
     });
+    
+    const { files } = await Promise.race([listPromise, timeoutPromise]);
 
     console.log(`   📋 找到 ${files.length} 个文件`);
     
@@ -929,67 +979,103 @@ async function performManualSync() {
     
     // 手动同步时，强制同步所有图片文件（不检查 knownFileIds）
     // 因为手动同步的目的就是同步残留的图片
-    console.log(`   🔄 手动同步模式：将处理所有 ${imageFiles.length} 个图片文件（包括已处理的）`);
+    console.log(`   🔄 手动同步模式：将并发处理所有 ${imageFiles.length} 个图片文件`);
     
-    for (const file of imageFiles) {
-      // 添加到已知文件列表（如果还没有）
-      const wasKnown = knownFileIds.has(file.id);
-      if (!wasKnown) {
-        knownFileIds.add(file.id);
-      }
+    // 使用并发处理提升性能，但限制并发数避免过载
+    const CONCURRENT_LIMIT = 3; // 同时处理3个文件
+    const results = [];
+    
+    for (let i = 0; i < imageFiles.length; i += CONCURRENT_LIMIT) {
+      const batch = imageFiles.slice(i, i + CONCURRENT_LIMIT);
+      console.log(`   📦 处理批次 ${Math.floor(i / CONCURRENT_LIMIT) + 1}/${Math.ceil(imageFiles.length / CONCURRENT_LIMIT)} (${batch.length} 个文件)`);
       
-      // 处理文件（手动同步时强制处理所有文件）
-      try {
-        // 检查文件是否需要手动拖入（GIF过大或视频文件）
-        const fileName = file.name.toLowerCase();
-        const isGif = fileName.endsWith('.gif');
-        const isVideo = fileName.endsWith('.mp4') || fileName.endsWith('.mov');
-        
-        // 如果是 GIF，先检查大小
-        if (isGif) {
-          try {
-            const originalBuffer = await downloadFileBuffer(file.id);
-            const originalSize = originalBuffer.length;
-            const maxGifSize = 100 * 1024 * 1024; // 100MB
-            
-            if (originalSize > maxGifSize) {
-              // GIF 过大，需要手动拖入，不算成功
-              console.log(`   ⚠️  GIF 文件过大，需要手动拖入: ${file.name}`);
-              // 发送 file-skipped 消息（handleDriveFile 中也会发送，但这里提前发送确保消息顺序）
-              if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({
-                  type: 'file-skipped',
-                  filename: file.name,
-                  reason: 'gif-too-large'
-                }));
-              }
-              // 跳过此文件，不增加成功计数
-              continue;
-            }
-          } catch (checkError) {
-            // 如果检查失败，继续正常处理流程
-            console.log(`   ⚠️  检查 GIF 大小失败，继续处理: ${checkError.message}`);
-          }
-        }
-        
-        // 调用通用处理函数，它会处理视频下载、本地保存和通知
-        await handleDriveFile(file, true);
-        
-        // 如果是视频文件，虽然没有上传到 Figma，但也算处理成功（已下载到本地）
-        success += 1;
-        await sleep(300); // 避免请求过快
-      } catch (error) {
-        console.error(`   ❌ 处理文件失败: ${file.name}`, error.message);
-        // 收集详细错误信息
-        processingErrors.push({
-          filename: file.name,
-          error: error.message,
-          stack: error.stack
-        });
-        // 如果处理失败，从 knownFileIds 中移除，以便下次可以重试
+      const batchPromises = batch.map(async (file) => {
+        const wasKnown = knownFileIds.has(file.id);
         if (!wasKnown) {
-          knownFileIds.delete(file.id);
+          knownFileIds.add(file.id);
         }
+        
+        // 为每个文件添加 60秒 超时保护
+        const fileTimeout = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error(`处理文件超时（超过60秒）: ${file.name}`)), 60000);
+        });
+        
+        const fileProcessing = (async () => {
+          try {
+            // 检查文件是否需要手动拖入（GIF过大或视频文件）
+            const fileName = file.name.toLowerCase();
+            const isGif = fileName.endsWith('.gif');
+            
+            // 如果是 GIF，先检查大小
+            if (isGif) {
+              try {
+                const originalBuffer = await downloadFileBuffer(file.id);
+                const originalSize = originalBuffer.length;
+                const maxGifSize = 100 * 1024 * 1024; // 100MB
+                
+                if (originalSize > maxGifSize) {
+                  console.log(`   ⚠️  GIF 文件过大，需要手动拖入: ${file.name}`);
+                  if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({
+                      type: 'file-skipped',
+                      filename: file.name,
+                      reason: 'gif-too-large'
+                    }));
+                  }
+                  return { success: false, skipped: true, file };
+                }
+              } catch (checkError) {
+                console.log(`   ⚠️  检查 GIF 大小失败，继续处理: ${checkError.message}`);
+              }
+            }
+            
+            // 调用通用处理函数
+            await handleDriveFile(file, true);
+            return { success: true, file };
+          } catch (error) {
+            console.error(`   ❌ 处理文件失败: ${file.name}`, error.message);
+            processingErrors.push({
+              filename: file.name,
+              error: error.message,
+              stack: error.stack
+            });
+            if (!wasKnown) {
+              knownFileIds.delete(file.id);
+            }
+            return { success: false, error, file };
+          }
+        })();
+        
+        // 使用 Promise.race 实现超时
+        try {
+          return await Promise.race([fileProcessing, fileTimeout]);
+        } catch (timeoutError) {
+          console.error(`   ⏱️  ${timeoutError.message}`);
+          processingErrors.push({
+            filename: file.name,
+            error: timeoutError.message
+          });
+          if (!wasKnown) {
+            knownFileIds.delete(file.id);
+          }
+          return { success: false, timeout: true, file };
+        }
+      });
+      
+      const batchResults = await Promise.allSettled(batchPromises);
+      
+      // 统计本批次结果
+      batchResults.forEach((result, idx) => {
+        if (result.status === 'fulfilled' && result.value.success) {
+          success += 1;
+        }
+      });
+      
+      results.push(...batchResults);
+      
+      // 批次间短暂延迟，避免过载
+      if (i + CONCURRENT_LIMIT < imageFiles.length) {
+        await sleep(200);
       }
     }
 
@@ -1010,17 +1096,22 @@ async function performManualSync() {
       console.log(`   📤 发送完成消息: count=${success}, total=${imageFiles.length}, errors=${processingErrors.length}`);
       ws.send(JSON.stringify(message));
     }
+  })(); // 结束 syncTask async 函数
+  
+  // 使用 Promise.race 应用总体超时
+  try {
+    await Promise.race([syncTask, overallTimeout]);
   } catch (error) {
     console.error('❌ 手动同步失败:', error.message);
     console.error('   错误堆栈:', error.stack);
     if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({
+      safeSend({
         type: 'manual-sync-complete',
         count: 0,
         total: 0,
         message: error.message,
         errors: [{ filename: '系统错误', error: error.message }]
-      }));
+      });
     }
   }
 }

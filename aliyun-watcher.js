@@ -752,24 +752,37 @@ async function performManualSync() {
   }
 
   try {
-    // 获取所有文件（处理分页）
-    let allFiles = [];
-    let nextPageToken = null;
+    console.log(`   🔍 正在获取文件列表...`);
     
-    do {
-      const result = await listFolderFiles({ 
-        folderId: CONFIG.userFolderId, 
-        pageSize: 200, 
-        orderBy: 'LastModified',
-        pageToken: nextPageToken
-      });
+    // 添加超时保护
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('获取文件列表超时（超过40秒）')), 40000);
+    });
+    
+    // 获取所有文件（处理分页）
+    const listPromise = (async () => {
+      let allFiles = [];
+      let nextPageToken = null;
       
-      if (result.files && result.files.length > 0) {
-        allFiles = allFiles.concat(result.files);
-      }
+      do {
+        const result = await listFolderFiles({ 
+          folderId: CONFIG.userFolderId, 
+          pageSize: 200, 
+          orderBy: 'LastModified',
+          pageToken: nextPageToken
+        });
+        
+        if (result.files && result.files.length > 0) {
+          allFiles = allFiles.concat(result.files);
+        }
+        
+        nextPageToken = result.nextPageToken;
+      } while (nextPageToken);
       
-      nextPageToken = result.nextPageToken;
-    } while (nextPageToken);
+      return allFiles;
+    })();
+    
+    const allFiles = await Promise.race([listPromise, timeoutPromise]);
 
     console.log(`   📋 找到 ${allFiles.length} 个文件`);
 
