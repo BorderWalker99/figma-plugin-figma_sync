@@ -84,23 +84,32 @@ echo -e "${YELLOW}🖥️  复制 GUI 安装器...${NC}"
 
 # 优先复制 DMG 文件（压缩过的），如果不存在则复制 .app
 DMG_FILE=""
-if [ -f "installer/dist/ScreenSync Installer-1.0.0-arm64.dmg" ]; then
-    DMG_FILE="installer/dist/ScreenSync Installer-1.0.0-arm64.dmg"
-elif [ -f "installer/dist/ScreenSync Installer-1.0.0.dmg" ]; then
-    DMG_FILE="installer/dist/ScreenSync Installer-1.0.0.dmg"
+# 查找最新的 arm64 DMG 文件
+if [ -n "$(find installer/dist -name "*.dmg" -type f 2>/dev/null)" ]; then
+    # 优先选择 arm64 版本
+    DMG_FILE=$(find installer/dist -name "*arm64.dmg" -type f | sort -V | tail -1)
+    # 如果没有 arm64，选择通用版本
+    if [ -z "$DMG_FILE" ]; then
+        DMG_FILE=$(find installer/dist -name "*.dmg" -type f | grep -v "arm64" | sort -V | tail -1)
+    fi
 fi
 
-if [ -n "$DMG_FILE" ]; then
+if [ -n "$DMG_FILE" ] && [ -f "$DMG_FILE" ]; then
     cp "$DMG_FILE" "$TEMP_DIR/"
     DMG_NAME=$(basename "$DMG_FILE")
     echo "   ✅ 已包含安装器磁盘映像: $DMG_NAME (压缩版)"
 else
-    # 回退到 .app 目录
-    cp -r "$INSTALLER_APP" "$TEMP_DIR/" 2>/dev/null || {
-        echo -e "${RED}❌ 复制 GUI 安装器失败${NC}"
+    # 回退到 .app 目录（如果存在）
+    if [ -d "$INSTALLER_APP" ]; then
+        cp -r "$INSTALLER_APP" "$TEMP_DIR/" 2>/dev/null || {
+            echo -e "${RED}❌ 复制 GUI 安装器失败${NC}"
+            exit 1
+        }
+        echo "   ✅ GUI 安装器已包含（首层目录）"
+    else
+        echo -e "${RED}❌ 未找到 DMG 文件或 .app 目录${NC}"
         exit 1
-    }
-    echo "   ✅ GUI 安装器已包含（首层目录）"
+    fi
 fi
 
 # 复制 Gatekeeper 修复脚本（放在首层）
@@ -319,8 +328,8 @@ https://github.com/BorderWalker99/figma-plugin-figma_sync/releases/latest
 下载文件：ScreenSync-UserPackage.tar.gz
 
 2. 安装插件
-(1) 打开终端，将安装包中的 “安装前_将此文件拖进终端按回车运行.command” 拖入终端并回车执行。
-(2) 双击 ScreenSync Installer-1.0.0-arm64.dmg 进行安装。
+(1) 打开终端，将安装包中的 "安装前_将此文件拖进终端按回车运行.command" 拖入终端并回车执行。
+(2) 双击 ScreenSync Installer-1.0.1-arm64.dmg 进行安装。
 (3) 在 Figma 中，通过 Import from manifest 导入：
 ScreenSync-UserPackage/figma-plugin/manifest.json
 

@@ -22,13 +22,14 @@ INSTALLER_NAME=""
 if [ -f "$SCRIPT_DIR/ScreenSync Installer.dmg" ]; then
     INSTALLER_PATH="$SCRIPT_DIR/ScreenSync Installer.dmg"
     INSTALLER_NAME="ScreenSync Installer.dmg"
-elif [ -f "$SCRIPT_DIR/ScreenSync Installer-1.0.0.dmg" ]; then
-    INSTALLER_PATH="$SCRIPT_DIR/ScreenSync Installer-1.0.0.dmg"
-    INSTALLER_NAME="ScreenSync Installer-1.0.0.dmg"
-# 兼容检查 arm64 DMG
-elif [ -f "$SCRIPT_DIR/ScreenSync Installer-1.0.0-arm64.dmg" ]; then
-    INSTALLER_PATH="$SCRIPT_DIR/ScreenSync Installer-1.0.0-arm64.dmg"
-    INSTALLER_NAME="ScreenSync Installer-1.0.0-arm64.dmg"
+# 查找任何版本的 arm64 DMG（优先）
+elif ls "$SCRIPT_DIR"/ScreenSync\ Installer-*-arm64.dmg 1> /dev/null 2>&1; then
+    INSTALLER_PATH=$(ls "$SCRIPT_DIR"/ScreenSync\ Installer-*-arm64.dmg | head -1)
+    INSTALLER_NAME=$(basename "$INSTALLER_PATH")
+# 查找任何版本的通用 DMG
+elif ls "$SCRIPT_DIR"/ScreenSync\ Installer-*.dmg 1> /dev/null 2>&1; then
+    INSTALLER_PATH=$(ls "$SCRIPT_DIR"/ScreenSync\ Installer-*.dmg | grep -v "arm64" | head -1)
+    INSTALLER_NAME=$(basename "$INSTALLER_PATH")
 # 回退检查 .app（旧版或解压版）
 elif [ -d "$SCRIPT_DIR/ScreenSync Installer.app" ]; then
     INSTALLER_PATH="$SCRIPT_DIR/ScreenSync Installer.app"

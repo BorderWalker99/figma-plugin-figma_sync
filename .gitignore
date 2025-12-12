@@ -39,9 +39,20 @@ figma-plugin-v*.zip
 *.tar.gz
 *.dmg
 
-# Installer 构建产物
+# Installer 构建产物（所有 dist 内容都是构建产物，不提交）
 installer/dist/
 installer/ScreenSyncImg/
+
+# 更新相关的临时文件和备份
+.plugin-update-temp.zip
+.server-update-temp.tar.gz
+.full-update-temp.tar.gz
+.plugin-update/
+.server-update/
+.full-update/
+.plugin-backup/
+.server-backup/
+.full-backup/
 
 # 临时文件
 *.tmp

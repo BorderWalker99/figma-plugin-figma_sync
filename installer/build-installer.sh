@@ -29,3 +29,19 @@ npm run build:mac
 echo -e "\n${GREEN}✅ 打包完成！${NC}"
 echo -e "${YELLOW}安装器位置: installer/dist/${NC}\n"
 
+# 自动清理重复的 .app 目录（已包含在 DMG 中）
+echo -e "${YELLOW}🧹 清理重复的构建产物...${NC}"
+if [ -d "dist/mac" ]; then
+    rm -rf dist/mac
+    echo -e "${GREEN}✅ 已删除 dist/mac/${NC}"
+fi
+if [ -d "dist/mac-arm64" ]; then
+    rm -rf dist/mac-arm64
+    echo -e "${GREEN}✅ 已删除 dist/mac-arm64/${NC}"
+fi
+echo -e "${GREEN}✅ 清理完成${NC}\n"
+
+echo -e "${BLUE}📦 最终构建产物：${NC}"
+ls -lh dist/*.dmg 2>/dev/null || echo "未找到 DMG 文件"
+echo ""
+
