@@ -2865,15 +2865,25 @@ async function handleFullUpdate(targetGroup, connectionId) {
     console.log(`   ✅ 获取到最新版本: ${releaseInfo.tag_name}`);
     
     // 查找更新包文件
-    const updateAsset = releaseInfo.assets.find(asset => 
-      asset.name.includes('ScreenSync-UserPackage') && asset.name.endsWith('.tar.gz')
+    // 优先查找轻量级更新包 (UpdatePackage)
+    let updateAsset = releaseInfo.assets.find(asset => 
+      asset.name.includes('ScreenSync-UpdatePackage') && asset.name.endsWith('.tar.gz')
     );
     
-    if (!updateAsset) {
-      throw new Error('未找到更新包文件，请确保 Release 中包含 ScreenSync-UserPackage.tar.gz');
+    if (updateAsset) {
+      console.log(`   ✨ 找到轻量级更新包: ${updateAsset.name} (${(updateAsset.size / 1024 / 1024).toFixed(2)} MB)`);
+    } else {
+      console.log('   ⚠️  未找到轻量级更新包，尝试查找完整包...');
+      updateAsset = releaseInfo.assets.find(asset => 
+        asset.name.includes('ScreenSync-UserPackage') && asset.name.endsWith('.tar.gz')
+      );
     }
     
-    console.log(`   📦 找到更新包: ${updateAsset.name} (${(updateAsset.size / 1024 / 1024).toFixed(2)} MB)`);
+    if (!updateAsset) {
+      throw new Error('未找到更新包文件，请确保 Release 中包含 ScreenSync-UpdatePackage 或 ScreenSync-UserPackage');
+    }
+    
+    console.log(`   📦 准备下载: ${updateAsset.name}`);
     
     // 通知用户正在下载
     targetGroup.figma.send(JSON.stringify({
@@ -2924,8 +2934,29 @@ async function handleFullUpdate(targetGroup, connectionId) {
     const execPromise = util.promisify(exec);
     
     // 解压 tar.gz
+    console.log(`   📦 开始解压 tar.gz 文件...`);
     await execPromise(`tar -xzf "${tempFile}" -C "${updateDir}"`);
     console.log(`   ✅ 解压完成到: ${updateDir}`);
+    
+    // 查找解压后的内容目录
+    const extractedItems = fs.readdirSync(updateDir).filter(item => !item.startsWith('.'));
+    let extractedDir = updateDir;
+    
+    // 如果解压出来只有一个文件夹，进入该文件夹
+    if (extractedItems.length === 1 && fs.statSync(path.join(updateDir, extractedItems[0])).isDirectory()) {
+      extractedDir = path.join(updateDir, extractedItems[0]);
+      console.log(`   📂 进入内容目录: ${extractedItems[0]}`);
+    } else {
+      // 尝试查找特定的目录名（兼容旧版包结构）
+      const possibleDirs = ['ScreenSync-UserPackage'];
+      for (const dir of possibleDirs) {
+        if (fs.existsSync(path.join(updateDir, dir))) {
+          extractedDir = path.join(updateDir, dir);
+          console.log(`   📂 找到内容目录: ${dir}`);
+          break;
+        }
+      }
+    }
     
     // 备份现有文件
     const backupDir = path.join(__dirname, '.full-backup');
@@ -2950,11 +2981,12 @@ async function handleFullUpdate(targetGroup, connectionId) {
       // 配置和工具
       'userConfig.js',
       'update-manager.js',
-      'package.json'
+      'package.json',
+      'VERSION.txt'
     ];
     
     // 备份并更新服务器文件
-    const extractedDir = path.join(updateDir, 'ScreenSync-UserPackage');
+    // const extractedDir = path.join(updateDir, 'ScreenSync-UserPackage'); // 已在上面动态获取
     let updatedCount = 0;
     
     for (const file of allFiles) {

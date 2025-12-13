@@ -143,6 +143,22 @@ else
     exit 1
 fi
 
+# 打包核心更新包
+echo -e "   ${YELLOW}正在打包核心更新包...${NC}"
+if ./package-core-update.sh > /dev/null 2>&1; then
+    CORE_UPDATE_TAR="ScreenSync-UpdatePackage-v${NEW_VERSION}.tar.gz"
+    if [ -f "$CORE_UPDATE_TAR" ]; then
+        CORE_SIZE=$(du -h "$CORE_UPDATE_TAR" | cut -f1)
+        echo -e "   ${GREEN}✅ 核心更新包打包完成: ${CORE_UPDATE_TAR} (${CORE_SIZE})${NC}"
+    else
+        echo -e "   ${RED}❌ 核心更新包打包失败：未找到 ${CORE_UPDATE_TAR}${NC}"
+        exit 1
+    fi
+else
+    echo -e "   ${RED}❌ 核心更新包打包失败${NC}"
+    exit 1
+fi
+
 # ==================== 步骤 3: 提交代码 ====================
 echo -e "\n${BLUE}📤 步骤 3/5: 提交代码到 GitHub...${NC}"
 
@@ -225,6 +241,7 @@ ${RELEASE_NOTES}
 
 *   ✅ **ScreenSync-UserPackage.tar.gz**: 包含安装器和所有文件的完整包，新用户请下载此文件。
 *   ⚠️ **figma-plugin-v${NEW_VERSION}.zip**: 无需下载，这是供软件自动更新功能使用的内部文件。
+*   ⚠️ **ScreenSync-UpdatePackage-v${NEW_VERSION}.tar.gz**: 无需下载，核心代码更新包。
 *   ⚠️ **Source code**: 无需下载，项目源码。
 
 ### 🔄 如何更新
@@ -242,6 +259,7 @@ ${RELEASE_NOTES}
     if gh release create "v${NEW_VERSION}" \
         "$PLUGIN_ZIP" \
         "$SERVER_TAR" \
+        "$CORE_UPDATE_TAR" \
         --title "$RELEASE_TITLE" \
         --notes "$RELEASE_BODY"; then
         echo -e "   ${GREEN}✅ Release v${NEW_VERSION} 发布成功${NC}"
@@ -260,7 +278,8 @@ echo -e "${GREEN}╚════════════════════
 echo -e "${BLUE}📦 版本信息：${NC}"
 echo -e "   版本号: ${GREEN}v${NEW_VERSION}${NC}"
 echo -e "   插件包: ${PLUGIN_ZIP} (${PLUGIN_SIZE})"
-echo -e "   服务器包: ${SERVER_TAR} (${SERVER_SIZE})"
+echo -e "   完整包: ${SERVER_TAR} (${SERVER_SIZE})"
+echo -e "   更新包: ${CORE_UPDATE_TAR} (${CORE_SIZE})"
 echo ""
 
 echo -e "${BLUE}🔗 查看 Release：${NC}"
@@ -279,7 +298,7 @@ read -p "是否清理本地打包文件？(y/N): " CLEANUP
 CLEANUP=${CLEANUP:-N}
 
 if [[ "$CLEANUP" =~ ^[Yy]$ ]]; then
-    rm -f "$PLUGIN_ZIP" "$SERVER_TAR"
+    rm -f "$PLUGIN_ZIP" "$SERVER_TAR" "$CORE_UPDATE_TAR"
     echo -e "${GREEN}✅ 本地打包文件已清理${NC}\n"
 else
     echo -e "${YELLOW}⚠️  本地打包文件已保留${NC}\n"
