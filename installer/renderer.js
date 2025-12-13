@@ -523,28 +523,12 @@ async function setupConfiguration() {
     userId = configResult.userId;
     
     // 根据模式决定是否显示用户ID
-    let userIdDisplay = '';
-    if (selectedMode === 'drive') {
-      // Google模式：显示用户ID和复制按钮
-      userIdDisplay = `
-        <div class="status-detail" style="display: flex; align-items: center; gap: 8px; margin-top: 4px;">
-          <span>您的 User ID：${userId}</span>
-          <button onclick="copyUserId('${userId}')" style="background: transparent; border: none; cursor: pointer; padding: 4px; display: flex; align-items: center; color: var(--text-secondary); transition: color 0.2s;" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--text-secondary)'" title="复制User ID">
-            <svg viewBox="0 0 24 24" style="width: 14px; height: 14px;" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-            </svg>
-          </button>
-        </div>`;
-    }
-    // iCloud模式：不显示用户ID
-    
+    // 配置完成后，不再显示 User ID（简化界面）
     configStatus.innerHTML = `
       <div class="status-item success">
         <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
         <div class="status-content">
           <div class="status-label">配置完成</div>
-          ${userIdDisplay}
         </div>
       </div>
     `;
