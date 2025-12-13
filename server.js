@@ -2375,7 +2375,15 @@ function downloadFileWithRedirect(url, destPath) {
     const https = require('https');
     const file = fs.createWriteStream(destPath);
     
-    const request = https.get(url, (response) => {
+    // 添加必要的请求头，GitHub 需要 User-Agent 和 Accept
+    const options = {
+      headers: {
+        'User-Agent': 'ScreenSync-Updater/1.0',
+        'Accept': 'application/vnd.github.v3+json'
+      }
+    };
+    
+    const request = https.get(url, options, (response) => {
       // 处理重定向 (HTTP 3xx)
       if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
         const redirectUrl = response.headers.location;
@@ -2394,7 +2402,8 @@ function downloadFileWithRedirect(url, destPath) {
       
       if (response.statusCode !== 200) {
         file.close();
-        fs.unlinkSync(destPath); // 删除失败的文件
+        if (fs.existsSync(destPath)) fs.unlinkSync(destPath); // 删除失败的文件
+        console.error(`   ❌ 下载失败: HTTP ${response.statusCode} - ${url}`);
         reject(new Error(`下载失败: HTTP ${response.statusCode}`));
         return;
       }
@@ -2411,6 +2420,7 @@ function downloadFileWithRedirect(url, destPath) {
     request.on('error', (err) => {
       file.close();
       if (fs.existsSync(destPath)) fs.unlinkSync(destPath);
+      console.error(`   ❌ 下载请求错误: ${err.message}`);
       reject(err);
     });
     
@@ -2418,6 +2428,7 @@ function downloadFileWithRedirect(url, destPath) {
       request.destroy();
       file.close();
       if (fs.existsSync(destPath)) fs.unlinkSync(destPath);
+      console.error(`   ❌ 下载超时: ${url}`);
       reject(new Error('下载超时'));
     });
   });
