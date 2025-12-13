@@ -15,6 +15,13 @@ echo -e "${BLUE}╚════════════════════�
 
 cd installer
 
+# 清理旧的构建产物（重要！防止缓存旧文件）
+if [ -d "dist" ]; then
+    echo -e "${YELLOW}🧹 清理旧的构建产物...${NC}"
+    rm -rf dist
+    echo -e "${GREEN}✅ 已清理 dist/ 目录${NC}\n"
+fi
+
 # 检查是否安装了 electron 和 electron-builder
 if [ ! -d "node_modules" ]; then
     echo -e "${YELLOW}📦 安装依赖...${NC}"
