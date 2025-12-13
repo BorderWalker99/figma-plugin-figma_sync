@@ -133,6 +133,9 @@ fi
 
 # 打包服务器
 echo -e "   ${YELLOW}正在打包服务器...${NC}"
+# 先清理日志和临时文件
+rm -f *.log 2>/dev/null || true
+rm -f .user-config.json .sync-mode 2>/dev/null || true
 if ./package-for-distribution.sh > /dev/null 2>&1; then
     SERVER_TAR="ScreenSync-UserPackage.tar.gz"
     if [ -f "$SERVER_TAR" ]; then

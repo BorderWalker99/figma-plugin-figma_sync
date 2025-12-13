@@ -56,6 +56,14 @@ mkdir -p "$TEMP_DIR/项目文件"
 
 echo -e "${GREEN}📦 开始打包...${NC}\n"
 
+# 清理不应打包的文件（日志、临时文件等）
+echo -e "${YELLOW}🧹 清理临时文件和日志...${NC}"
+rm -f *.log 2>/dev/null || true
+rm -f server-error.log 2>/dev/null || true
+rm -f .user-config.json 2>/dev/null || true
+rm -f .sync-mode 2>/dev/null || true
+echo "   ✅ 清理完成"
+
 # 0. 创建 README 和使用说明
 echo -e "${YELLOW}📝 创建说明文档...${NC}"
 
