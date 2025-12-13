@@ -329,7 +329,7 @@ https://github.com/BorderWalker99/figma-plugin-figma_sync/releases/latest
 
 2. 安装插件
 (1) 打开终端，将安装包中的 "安装前_将此文件拖进终端按回车运行.command" 拖入终端并回车执行。
-(2) 双击 ScreenSync Installer-1.0.1-arm64.dmg 进行安装。
+(2) 双击 ${DMG_NAME} 进行安装。
 (3) 在 Figma 中，通过 Import from manifest 导入：
 ScreenSync-UserPackage/figma-plugin/manifest.json
 

@@ -103,6 +103,10 @@ echo -e "   ${GREEN}✅ package.json 版本号已更新: v${NEW_VERSION}${NC}"
 sed -i '' "1,10s/\"version\": \"[^\"]*\"/\"version\": \"${NEW_VERSION}\"/" installer/package.json
 echo -e "   ${GREEN}✅ installer/package.json 版本号已更新: v${NEW_VERSION}${NC}"
 
+# 更新 installer/index.html 版本号 (显示在界面左下角)
+sed -i '' "s/v[0-9]\+\.[0-9]\+\.[0-9]\+/v${NEW_VERSION}/g" installer/index.html
+echo -e "   ${GREEN}✅ installer/index.html 版本号已更新: v${NEW_VERSION}${NC}"
+
 # 更新服务器版本号 (VERSION.txt)
 sed -i '' "s/版本: .*/版本: ${NEW_VERSION}/g" VERSION.txt
 sed -i '' "s/更新日期: .*/更新日期: $(date +"%Y-%m-%d")/g" VERSION.txt
