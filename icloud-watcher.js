@@ -1,4 +1,4 @@
-// icloud-watcher.js - 完全修复版（单一消息监听器）1.0
+// icloud-watcher.js - 完全修复版（单一消息监听器）
 const fs = require('fs');
 const path = require('path');
 const WebSocket = require('ws');

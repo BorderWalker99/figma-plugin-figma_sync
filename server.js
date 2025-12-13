@@ -1,4 +1,4 @@
-// server.js - WebSocket 服务器和 HTTP 上传接口1.0
+// server.js - WebSocket 服务器和 HTTP 上传接口
 
 // 全局错误处理（必须在最前面）
 process.on('uncaughtException', (error) => {

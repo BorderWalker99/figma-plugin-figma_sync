@@ -34,7 +34,7 @@ function readUserConfig() {
       return JSON.parse(content);
     }
   } catch (error) {
-    console.warn('⚠️  读取用户配置失败:', error.message);
+    console.warn('⚠️ 读取用户配置失败:', error.message);
   }
   return null;
 }
