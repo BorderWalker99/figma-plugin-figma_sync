@@ -2864,41 +2864,51 @@ async function handleFullUpdate(targetGroup, connectionId) {
     
     console.log(`   ✅ 获取到最新版本: ${releaseInfo.tag_name}`);
     
-    // 查找更新包文件
-    // 优先查找轻量级更新包 (UpdatePackage)
-    let updateAsset = releaseInfo.assets.find(asset => 
-      asset.name.includes('ScreenSync-UpdatePackage') && asset.name.endsWith('.tar.gz')
-    );
+    // 优先使用 Source Code (tarball) 作为轻量级更新包
+    // 这样不需要在 Release 中额外上传 UpdatePackage，直接复用 GitHub 生成的源码包
+    let downloadUrl;
+    let updateFilename;
+    let updateSize = 0;
     
-    if (updateAsset) {
-      console.log(`   ✨ 找到轻量级更新包: ${updateAsset.name} (${(updateAsset.size / 1024 / 1024).toFixed(2)} MB)`);
+    if (releaseInfo.tarball_url) {
+      downloadUrl = releaseInfo.tarball_url;
+      updateFilename = `source-code-${releaseInfo.tag_name}.tar.gz`;
+      console.log(`   ✨ 使用源码包作为更新源 (轻量级): ${downloadUrl}`);
     } else {
-      console.log('   ⚠️  未找到轻量级更新包，尝试查找完整包...');
-      updateAsset = releaseInfo.assets.find(asset => 
+      // 降级：查找 UserPackage
+      console.log('   ⚠️  未找到源码包链接，尝试查找完整包...');
+      const updateAsset = releaseInfo.assets.find(asset => 
         asset.name.includes('ScreenSync-UserPackage') && asset.name.endsWith('.tar.gz')
       );
+      
+      if (!updateAsset) {
+        throw new Error('未找到更新包文件 (Source Code 或 ScreenSync-UserPackage)');
+      }
+      
+      downloadUrl = updateAsset.browser_download_url;
+      updateFilename = updateAsset.name;
+      updateSize = updateAsset.size;
+      console.log(`   📦 找到完整更新包: ${updateFilename} (${(updateSize / 1024 / 1024).toFixed(2)} MB)`);
     }
-    
-    if (!updateAsset) {
-      throw new Error('未找到更新包文件，请确保 Release 中包含 ScreenSync-UpdatePackage 或 ScreenSync-UserPackage');
-    }
-    
-    console.log(`   📦 准备下载: ${updateAsset.name}`);
     
     // 通知用户正在下载
     targetGroup.figma.send(JSON.stringify({
       type: 'update-progress',
       status: 'downloading',
-      message: `正在下载 ${updateAsset.name}...`
+      message: '正在下载更新包...'
     }));
     
     // 下载更新包
-    const downloadUrl = updateAsset.browser_download_url;
+    // const downloadUrl = updateAsset.browser_download_url; // 已定义
     const tempFile = path.join(__dirname, '.full-update-temp.tar.gz');
     const updateDir = path.join(__dirname, '.full-update');
     
     console.log(`   📥 下载地址: ${downloadUrl}`);
-    console.log(`   📦 文件大小: ${(updateAsset.size / 1024 / 1024).toFixed(2)} MB`);
+    if (updateSize > 0) {
+      console.log(`   📦 文件大小: ${(updateSize / 1024 / 1024).toFixed(2)} MB`);
+    } else {
+      console.log(`   📦 文件大小: 未知 (源码包)`);
+    }
     console.log(`   ⏳ 开始下载...`);
     
     // 下载文件（带超时保护）
@@ -2939,24 +2949,43 @@ async function handleFullUpdate(targetGroup, connectionId) {
     console.log(`   ✅ 解压完成到: ${updateDir}`);
     
     // 查找解压后的内容目录
-    const extractedItems = fs.readdirSync(updateDir).filter(item => !item.startsWith('.'));
-    let extractedDir = updateDir;
-    
-    // 如果解压出来只有一个文件夹，进入该文件夹
-    if (extractedItems.length === 1 && fs.statSync(path.join(updateDir, extractedItems[0])).isDirectory()) {
-      extractedDir = path.join(updateDir, extractedItems[0]);
-      console.log(`   📂 进入内容目录: ${extractedItems[0]}`);
-    } else {
-      // 尝试查找特定的目录名（兼容旧版包结构）
-      const possibleDirs = ['ScreenSync-UserPackage'];
-      for (const dir of possibleDirs) {
-        if (fs.existsSync(path.join(updateDir, dir))) {
-          extractedDir = path.join(updateDir, dir);
-          console.log(`   📂 找到内容目录: ${dir}`);
-          break;
+    // 策略：递归查找 server.js 所在的目录
+    const findServerJs = (dir) => {
+      const items = fs.readdirSync(dir);
+      // 忽略隐藏文件
+      const visibleItems = items.filter(item => !item.startsWith('.'));
+      
+      if (visibleItems.includes('server.js') && visibleItems.includes('package.json')) {
+        return dir;
+      }
+      
+      for (const item of visibleItems) {
+        const itemPath = path.join(dir, item);
+        if (fs.statSync(itemPath).isDirectory()) {
+          // 只查找一层子目录，避免过深
+          const subItems = fs.readdirSync(itemPath);
+          if (subItems.includes('server.js')) {
+            return itemPath;
+          }
         }
       }
+      return null;
+    };
+    
+    let extractedDir = findServerJs(updateDir);
+    
+    if (!extractedDir) {
+        console.log('   ⚠️  未自动定位到根目录，尝试使用解压根目录');
+        // 如果解压出来只有一个文件夹，进入该文件夹
+        const extractedItems = fs.readdirSync(updateDir).filter(item => !item.startsWith('.'));
+        if (extractedItems.length === 1 && fs.statSync(path.join(updateDir, extractedItems[0])).isDirectory()) {
+          extractedDir = path.join(updateDir, extractedItems[0]);
+        } else {
+          extractedDir = updateDir;
+        }
     }
+    
+    console.log(`   📂 最终内容目录: ${extractedDir}`);
     
     // 备份现有文件
     const backupDir = path.join(__dirname, '.full-backup');
