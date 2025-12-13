@@ -26,9 +26,10 @@
       --text-secondary: #86868B;
       --text-tertiary: #AEAEB2;
       
-      --accent: #007AFF;
-      --accent-gradient: linear-gradient(135deg, #007AFF, #0062CC);
-      --accent-soft: rgba(0, 122, 255, 0.1);
+      /* Accent Blue: #0066FF (Contrast Ratio 4.67:1 with White, passes WCAG AA) */
+      --accent: #0066FF;
+      --accent-gradient: linear-gradient(135deg, #0066FF, #0052CC);
+      --accent-soft: rgba(0, 102, 255, 0.1);
       
       --success: #34C759;
       --success-bg: rgba(52, 199, 89, 0.1);
@@ -72,6 +73,9 @@
         --text-secondary: #8E8E93;
         --text-tertiary: #48484A;
         
+        --accent: #007AFF;
+        --accent-soft: rgba(0, 122, 255, 0.1);
+
         --divider: rgba(255, 255, 255, 0.08);
         --border: rgba(255, 255, 255, 0.12);
         
@@ -306,15 +310,24 @@
     /* Update Banner */
     .update-banner {
       display: none;
-      background: linear-gradient(135deg, var(--accent) 0%, #0066FF 100%);
-      color: white;
-      padding: 10px 12px;
-      font-size: 12px;
+      /* Light Mode: 10% Opacity */
+      background: color-mix(in srgb, var(--accent), transparent 90%);
+      color: var(--text-primary);
+      padding: 8px 8px 8px 12px;
+      font-size: 11px;
       line-height: 1.4;
       border-radius: var(--radius-s);
       animation: slideDown 0.3s ease;
       flex-shrink: 0;
       margin: 8px 0;
+      /* border: 1px solid color-mix(in srgb, var(--accent), transparent 80%); */
+    }
+
+    @media (prefers-color-scheme: dark) {
+      .update-banner {
+        /* Dark Mode: 30% Opacity */
+        background: color-mix(in srgb, var(--accent), transparent 70%);
+      }
     }
 
     .update-banner.show {
@@ -347,25 +360,28 @@
     }
 
     .update-banner-icon {
-      width: 20px;
-      height: 20px;
+      width: 16px;
+      height: 16px;
       flex-shrink: 0;
+      color: var(--accent);
     }
 
     .update-banner-text {
       flex: 1;
-      font-weight: 600;
+      font-weight: 500;
+      font-size: 13px;
     }
 
     .update-banner-actions {
       display: flex;
-      gap: 8px;
+      align-items: center;
+      gap: 6px;
       flex-shrink: 0;
     }
 
     .update-banner-btn {
-      padding: 6px 12px;
-      border-radius: var(--radius-s);
+      padding: 4px 6px;
+      border-radius: 6px;
       font-size: 11px;
       font-weight: 600;
       border: none;
@@ -375,28 +391,57 @@
     }
 
     .update-banner-btn.primary {
-      background: white;
-      color: var(--accent);
-    }
-
-    .update-banner-btn.primary:hover {
-      background: rgba(255, 255, 255, 0.9);
-      transform: translateY(-1px);
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-    }
-
-    .update-banner-btn.secondary {
-      background: rgba(255, 255, 255, 0.2);
+      background: var(--accent);
       color: white;
     }
 
+    .update-banner-btn.primary:hover {
+      filter: brightness(1.1);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    }
+
+    .update-banner-btn.secondary {
+      background: var(--bg-hover);
+      color: var(--text-primary);
+    }
+
     .update-banner-btn.secondary:hover {
-      background: rgba(255, 255, 255, 0.3);
+      background: var(--bg-active);
     }
 
     .update-banner-btn:disabled {
       opacity: 0.5;
       cursor: not-allowed;
+    }
+
+    .update-banner-close {
+      width: 20px;
+      height: 20px;
+      padding: 0;
+      background: transparent;
+      border: none;
+      border-radius: 4px;
+      color: var(--text-secondary);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s ease;
+      flex-shrink: 0;
+    }
+
+    .update-banner-close svg {
+      width: 14px;
+      height: 14px;
+    }
+
+    .update-banner-close:hover {
+      background: var(--bg-hover);
+      color: var(--text-primary);
+    }
+
+    .update-banner-close:active {
+      transform: scale(0.95);
     }
 
     /* Main Content Area */
@@ -669,23 +714,13 @@
     }
 
     .btn-primary {
-      background: #007AFF;
+      background: var(--accent);
       color: #FFFFFF;
     }
-    
+
     .btn-primary:hover {
-        background: #0051D5;
-        box-shadow: none;
-    }
-    
-    @media (prefers-color-scheme: dark) {
-        .btn-primary {
-            background: #0051D5;
-            color: #FFFFFF;
-        }
-        .btn-primary:hover {
-            background: #0040B3;
-        }
+      filter: brightness(1.1);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
     }
 
     .btn-secondary {
@@ -710,13 +745,13 @@
     }
 
     .btn-danger {
-        background: #FF3B30;
+        background: var(--danger);
         color: #FFFFFF;
     }
     
     .btn-danger:hover {
-        background: #CC2E26;
-        opacity: 1;
+        filter: brightness(1.1);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
     }
     
     @media (prefers-color-scheme: dark) {
@@ -1020,7 +1055,7 @@
       background: var(--bg-card);
       /* border: 1px solid var(--border); */
       border-radius: var(--radius-m);
-      padding: 8px 16px;
+      padding: 8px 12px;
       box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12), 0 0 1px rgba(0, 0, 0, 0.1);
       font-size: 13px;
       font-weight: 500;
@@ -1033,7 +1068,7 @@
       width: fit-content;
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
     }
     
     @media (prefers-color-scheme: dark) {
@@ -1281,14 +1316,19 @@
     <div class="update-banner" id="updateBanner">
       <div class="update-banner-content">
         <div class="update-banner-info">
-          <svg class="update-banner-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+          <svg class="update-banner-icon" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M19 9l1.25-2.75L23 5l-2.75-1.25L19 1l-1.25 2.75L15 5l2.75 1.25L19 9zm-7.5.5L9 4 6.5 9.5 1 12l5.5 2.5L9 20l2.5-5.5L17 12l-5.5-2.5z"/>
           </svg>
           <div class="update-banner-text" id="updateBannerText">发现新版本 v1.0.2</div>
         </div>
         <div class="update-banner-actions">
-          <button class="update-banner-btn secondary" id="updateBannerLater">稍后</button>
           <button class="update-banner-btn primary" id="updateBannerNow">立即更新</button>
+          <button class="update-banner-close" id="updateBannerClose">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
         </div>
       </div>
     </div>
@@ -1332,7 +1372,7 @@
         </div>
 
           <div class="feature-card" id="manualBtn">
-            <div class="card-icon" style="color: #007AFF; background: rgba(0, 122, 255, 0.15);">
+            <div class="card-icon" style="color: var(--accent); background: var(--accent-soft);">
                <!-- Manual: Download (Arrow + Bar) - Adjusted for visual weight -->
                <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="0">
                  <path d="M19 9h-4V3H9v6H5l7 8 7-8zM5 19v3h14v-3H5z"></path>
@@ -2176,8 +2216,8 @@
         }
       } else {
         // Manual Mode Setup
-        activeModeIcon.style.color = '#007AFF';
-        activeModeIcon.style.background = 'rgba(0, 122, 255, 0.15)';
+        activeModeIcon.style.color = 'var(--accent)';
+        activeModeIcon.style.background = 'var(--accent-soft)';
         activeModeIcon.innerHTML = `<svg style="width: 14px; height: 14px;" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="0"><path d="M19 9h-4V3H9v6H5l7 8 7-8zM5 19v3h14v-3H5z"></path></svg>`;
         activeModeTitle.textContent = '手动模式';
         document.getElementById('modeSubtitle').textContent = '准备同步';
@@ -2989,22 +3029,21 @@
     toggleMinimizeBtn.onclick = toggleMinimize;
     
     // 更新通知条按钮事件
-    const updateBannerLaterBtn = document.getElementById('updateBannerLater');
+    const updateBannerCloseBtn = document.getElementById('updateBannerClose');
     const updateBannerNowBtn = document.getElementById('updateBannerNow');
     
-    if (updateBannerLaterBtn) {
-      updateBannerLaterBtn.onclick = function() {
+    if (updateBannerCloseBtn) {
+      updateBannerCloseBtn.onclick = function() {
         // 记录用户忽略的版本，避免重复提示同一版本
         if (pendingUpdateType === 'plugin' && latestPluginVersion) {
           dismissedPluginVersion = latestPluginVersion;
-          console.log(`🔕 用户选择稍后更新插件 v${latestPluginVersion}`);
+          console.log(`🔕 用户关闭了插件更新提示 v${latestPluginVersion}`);
         } else if (pendingUpdateType === 'server' && pendingUpdateData.latestVersion) {
           dismissedServerVersion = pendingUpdateData.latestVersion;
-          console.log(`🔕 用户选择稍后更新服务器 v${pendingUpdateData.latestVersion}`);
+          console.log(`🔕 用户关闭了服务器更新提示 v${pendingUpdateData.latestVersion}`);
         }
         
         hideUpdateBanner();
-        showToast('稍后提醒', 'success');
       };
     }
     
@@ -3200,6 +3239,17 @@
     loadServerPath(); // 加载保存的服务器路径
     // 请求当前插件版本
     parent.postMessage({ pluginMessage: { type: 'get-plugin-version' } }, '*');
+
+    // // 临时显示 Update Banner 用于调整样式（开发调试用）
+    // setTimeout(() => {
+    //   const banner = document.getElementById('updateBanner');
+    //   const text = document.getElementById('updateBannerText');
+    //   if (banner && text) {
+    //     text.textContent = '发现新版本 v1.0.2';
+    //     banner.classList.add('show');
+    //     console.log('🎨 临时显示 Update Banner 用于样式调整');
+    //   }
+    // }, 500);
 
     window.addEventListener('beforeunload', function () {
       stopRealtimeSync();
