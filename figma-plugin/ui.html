@@ -1633,6 +1633,7 @@
     let skippedFilesSet = new Set(); // 用于去重
     let heartbeatTimer = null;
     let updateCheckTimer = null; // 定期检查更新的定时器
+    let isManualSyncing = false; // 防止手动同步重复点击的标志
     let currentMode = null;
     let currentSyncMode = null;
     let serverInstallPath = null;
@@ -1870,6 +1871,8 @@
               delete syncBtn.dataset.syncTimeout;
             }
             
+            // 重置标志和按钮状态
+            isManualSyncing = false;
             syncBtn.disabled = false;
             syncBtn.textContent = '立即同步';
           }
@@ -2030,6 +2033,8 @@
         if (statusEl && (statusEl.classList.contains('connected') || statusEl.textContent.includes('已连接') || statusEl.textContent.includes('运行中'))) {
         updateStatus('disconnected', '连接失败');
         }
+        // 重置同步标志，防止按钮永久禁用
+        isManualSyncing = false;
       };
 
       ws.onclose = function () {
@@ -2039,6 +2044,8 @@
         
         if (heartbeatTimer) clearInterval(heartbeatTimer);
         if (updateCheckTimer) clearInterval(updateCheckTimer); // 清除更新检查定时器
+        // 重置同步标志，防止按钮永久禁用
+        isManualSyncing = false;
         setTimeout(connect, 2000); // 缩短重连间隔到 2 秒，体验更流畅
       };
     }
@@ -2251,6 +2258,7 @@
       manualDragCount = 0;
       skippedFilesSet.clear();
       gifBackupCount = 0;
+      isManualSyncing = false; // 重置手动同步标志
       document.getElementById('count').textContent = '0';
       
       currentMode = null;
@@ -2263,11 +2271,17 @@
     document.getElementById('manualBtn').onclick = function () { showWorkArea('manual'); };
 
     document.getElementById('syncBtn').onclick = function () {
+      // 第一道防线：使用 JavaScript 标志变量（更快更可靠）
+      if (isManualSyncing) {
+        console.log('⚠️  同步正在进行中，请勿重复点击（标志阻止）');
+        return;
+      }
+      
       const syncBtn = document.getElementById('syncBtn');
       
-      // 检查是否正在同步（防止重复触发）
+      // 第二道防线：检查按钮状态
       if (syncBtn.disabled) {
-        console.log('⚠️  同步正在进行中，请勿重复点击');
+        console.log('⚠️  同步正在进行中，请勿重复点击（按钮已禁用）');
         return;
       }
       
@@ -2278,14 +2292,16 @@
         return;
       }
       
-      // 立即禁用按钮，防止重复点击（在所有检查之后，发送消息之前）
+      // 立即设置标志和禁用按钮（双重保护）
+      isManualSyncing = true;
       syncBtn.disabled = true;
       syncBtn.textContent = '同步中...';
       
       // 设置超时保护：如果 60 秒内没有收到响应，自动恢复按钮
       const syncTimeout = setTimeout(() => {
-        if (syncBtn.disabled) {
+        if (isManualSyncing || syncBtn.disabled) {
           console.warn('⚠️  同步超时，自动恢复按钮状态');
+          isManualSyncing = false;
           syncBtn.disabled = false;
           syncBtn.textContent = '立即同步';
           updateStatus('connected', '同步超时');
@@ -2307,6 +2323,7 @@
       } catch (error) {
         console.error('❌ 发送同步请求失败:', error);
         clearTimeout(syncTimeout);
+        isManualSyncing = false; // 重置标志
         syncBtn.disabled = false;
         syncBtn.textContent = '立即同步';
         updateStatus('connected', '发送失败');
