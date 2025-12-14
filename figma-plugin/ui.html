@@ -2762,9 +2762,9 @@
         dismissedPluginVersion = null;
         dismissedServerVersion = null;
         
-        // 3秒后提示用户重启
+        // 3秒后提示用户重启插件
         setTimeout(() => {
-          showToast('请关闭并重新打开插件，然后重启服务器以应用更新', 'success');
+          showToast('更新完成！请关闭并重新打开插件', 'success');
         }, 3000);
         
       } else if (data.status === 'error') {
@@ -3051,11 +3051,8 @@
           ws.send(JSON.stringify({ type: 'update-full' }));
           console.log('📤 发送全量更新请求（插件 + 服务器）');
           
-          // 显示更新进度提示
-          const updateText = document.querySelector('.update-banner-text');
-          if (updateText) {
-            updateText.textContent = '正在下载更新...';
-          }
+          // 不修改 banner 主文字，保持"发现新版本 vX.X.X"
+          // 进度信息通过 handleUpdateProgress 处理（只修改按钮文字）
         } else {
           showToast('未连接到服务器', 'error');
           updateBannerNowBtn.disabled = false;

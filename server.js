@@ -3086,18 +3086,38 @@ async function handleFullUpdate(targetGroup, connectionId) {
     console.log(`\n✅ [Full Update] 全量更新完成！`);
     console.log(`   ✅ 成功更新 ${updatedCount} 个文件`);
     console.log(`   📦 备份位置: ${backupDir}`);
-    console.log(`   🔄 请关闭并重新打开插件以应用更新`);
-    console.log(`   💡 然后重启服务器\n`);
+    console.log(`   🔄 准备自动重启服务器以应用更新...\n`);
     
-    // 通知用户更新完成
+    // 通知用户更新完成（在重启前发送）
     if (targetGroup.figma && targetGroup.figma.readyState === WebSocket.OPEN) {
       targetGroup.figma.send(JSON.stringify({
         type: 'update-progress',
         status: 'completed',
-        message: `更新完成！已更新 ${updatedCount} 个文件`,
+        message: `更新完成！服务器将自动重启...`,
         updatedCount: updatedCount
       }));
     }
+    
+    // 延迟 2 秒后自动重启服务器（让前端收到消息）
+    setTimeout(() => {
+      console.log(`\n🔄 [Full Update] 正在重启服务器以应用更新...`);
+      
+      // 如果是通过 launchd 运行的，直接退出进程，launchd 会自动重启
+      if (process.env.LAUNCHED_BY_LAUNCHD || fs.existsSync(path.join(os.homedir(), 'Library/LaunchAgents/com.screensync.server.plist'))) {
+        console.log('   ✅ 检测到 launchd 服务，进程退出后将自动重启');
+        process.exit(0); // 正常退出，launchd 会自动重启
+      } else {
+        // 手动运行的情况，使用 spawn 重启
+        console.log('   ✅ 手动重启服务器进程');
+        const { spawn } = require('child_process');
+        const child = spawn(process.argv[0], process.argv.slice(1), {
+          detached: true,
+          stdio: 'ignore'
+        });
+        child.unref();
+        process.exit(0);
+      }
+    }, 2000);
     
     console.log(`   ⏱️  总耗时: ${((Date.now() - Date.now()) / 1000).toFixed(2)}秒`);
   })(); // 结束 updateTask
