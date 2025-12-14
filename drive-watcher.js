@@ -371,6 +371,7 @@ let isRealTimeMode = false;
 let isPolling = false;
 let lastPollTime = null;
 let realTimeStart = null;
+let isSyncing = false; // 防止重复触发手动同步
 
 const knownFileIds = new Set();
 const pendingDeletes = new Map(); // fileId -> { filename, timestamp }
@@ -898,6 +899,22 @@ async function performManualSync() {
   console.log('\n📦 [Drive] 执行手动同步...');
   console.log(`   ⏰ 开始时间: ${new Date().toLocaleTimeString()}`);
   
+  // 防止重复触发
+  if (isSyncing) {
+    console.warn('⚠️  [Drive] 手动同步正在进行中，跳过本次请求');
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      safeSend({
+        type: 'manual-sync-complete',
+        count: 0,
+        total: 0,
+        message: '同步正在进行中，请勿重复触发'
+      });
+    }
+    return;
+  }
+  
+  isSyncing = true; // 标记为正在同步
+  
   // 如果用户文件夹未初始化，尝试重新初始化（可能是第一次使用，用户刚上传文件）
   if (!CONFIG.userFolderId) {
     console.log('⚠️  [Drive] 用户文件夹未初始化，尝试重新初始化...');
@@ -911,13 +928,14 @@ async function performManualSync() {
     } catch (error) {
       console.error(`❌ [Drive] 重新初始化失败: ${error.message}`);
       if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({
+        safeSend({
           type: 'manual-sync-complete',
           count: 0,
           total: 0,
           message: `用户文件夹未初始化。${error.message.includes('未找到') ? '请先在手机端上传至少一个文件。' : '请检查网络连接并重试。'}`
-        }));
+        });
       }
+      isSyncing = false; // 重置标志
       return;
     }
   }
@@ -926,13 +944,14 @@ async function performManualSync() {
     console.error('❌ [Drive] WebSocket 未连接，无法执行手动同步');
     console.error(`   WebSocket 状态: ${ws ? ws.readyState : 'null'}`);
     if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({
+      safeSend({
         type: 'manual-sync-complete',
         count: 0,
         total: 0,
         message: 'WebSocket 未连接'
-      }));
+      });
     }
+    isSyncing = false; // 重置标志
     return;
   }
   
@@ -981,6 +1000,7 @@ async function performManualSync() {
           errors: []
         }));
       }
+      // 不在这里重置 isSyncing，finally 块会处理
       return;
     }
 
@@ -1124,6 +1144,10 @@ async function performManualSync() {
         errors: [{ filename: '系统错误', error: error.message }]
       });
     }
+  } finally {
+    // 无论成功还是失败，都要重置同步标志
+    isSyncing = false;
+    console.log('   🔓 手动同步标志已重置');
   }
 }
 
@@ -1411,14 +1435,10 @@ async function start() {
     console.warn('   ℹ️  服务将继续运行，等待用户上传文件后重新初始化\n');
     // 不退出进程，继续运行，等待用户上传文件后在 performManualSync 中重新初始化
   }
-    console.error('   5. 检查 .user-config.json 中的 userId 是否正确\n');
-    process.exit(1);
-  }
 
-  // 验证用户文件夹ID已设置
+  // 验证用户文件夹ID已设置（如果初始化失败则跳过）
   if (!CONFIG.userFolderId) {
-    console.error('❌ 用户文件夹ID未设置，无法继续');
-    process.exit(1);
+    console.warn('⚠️  用户文件夹ID未设置，将在手动同步时重新初始化\n');
   }
 
   // 不再在启动时初始化已知文件列表

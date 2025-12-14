@@ -1864,6 +1864,12 @@
           // 恢复同步按钮状态
           const syncBtn = document.getElementById('syncBtn');
           if (syncBtn) {
+            // 清除超时定时器
+            if (syncBtn.dataset.syncTimeout) {
+              clearTimeout(parseInt(syncBtn.dataset.syncTimeout));
+              delete syncBtn.dataset.syncTimeout;
+            }
+            
             syncBtn.disabled = false;
             syncBtn.textContent = '立即同步';
           }
@@ -2259,6 +2265,12 @@
     document.getElementById('syncBtn').onclick = function () {
       const syncBtn = document.getElementById('syncBtn');
       
+      // 检查是否正在同步（防止重复触发）
+      if (syncBtn.disabled) {
+        console.log('⚠️  同步正在进行中，请勿重复点击');
+        return;
+      }
+      
       // 检查连接状态
       if (!ws || ws.readyState !== 1) {
         log('❌ 未连接');
@@ -2266,17 +2278,39 @@
         return;
       }
       
-      // 禁用按钮，防止重复点击
+      // 立即禁用按钮，防止重复点击（在所有检查之后，发送消息之前）
       syncBtn.disabled = true;
-      const originalText = syncBtn.textContent;
       syncBtn.textContent = '同步中...';
+      
+      // 设置超时保护：如果 60 秒内没有收到响应，自动恢复按钮
+      const syncTimeout = setTimeout(() => {
+        if (syncBtn.disabled) {
+          console.warn('⚠️  同步超时，自动恢复按钮状态');
+          syncBtn.disabled = false;
+          syncBtn.textContent = '立即同步';
+          updateStatus('connected', '同步超时');
+        }
+      }, 60000);
+      
+      // 保存超时 ID，以便在收到响应时清除
+      syncBtn.dataset.syncTimeout = syncTimeout;
       
       log('🫳🏻 开始同步...');
       updateStatus('connected', '正在同步');
       manualDragCount = 0;
       skippedFilesSet.clear();
       gifBackupCount = 0;
-      ws.send(JSON.stringify({ type: 'manual-sync' }));
+      
+      // 发送同步请求
+      try {
+        ws.send(JSON.stringify({ type: 'manual-sync' }));
+      } catch (error) {
+        console.error('❌ 发送同步请求失败:', error);
+        clearTimeout(syncTimeout);
+        syncBtn.disabled = false;
+        syncBtn.textContent = '立即同步';
+        updateStatus('connected', '发送失败');
+      }
     };
 
     document.getElementById('stopBtn').onclick = function() {
