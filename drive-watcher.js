@@ -898,17 +898,28 @@ async function performManualSync() {
   console.log('\n📦 [Drive] 执行手动同步...');
   console.log(`   ⏰ 开始时间: ${new Date().toLocaleTimeString()}`);
   
+  // 如果用户文件夹未初始化，尝试重新初始化（可能是第一次使用，用户刚上传文件）
   if (!CONFIG.userFolderId) {
-    console.error('❌ [Drive] 用户文件夹未初始化，无法执行手动同步');
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({
-        type: 'manual-sync-complete',
-        count: 0,
-        total: 0,
-        message: '用户文件夹未初始化'
-      }));
+    console.log('⚠️  [Drive] 用户文件夹未初始化，尝试重新初始化...');
+    try {
+      const userFolderId = await initializeUserFolder();
+      if (userFolderId) {
+        console.log(`✅ [Drive] 重新初始化成功，用户文件夹ID: ${userFolderId}`);
+      } else {
+        throw new Error('重新初始化失败，返回的文件夹ID为空');
+      }
+    } catch (error) {
+      console.error(`❌ [Drive] 重新初始化失败: ${error.message}`);
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'manual-sync-complete',
+          count: 0,
+          total: 0,
+          message: `用户文件夹未初始化。${error.message.includes('未找到') ? '请先在手机端上传至少一个文件。' : '请检查网络连接并重试。'}`
+        }));
+      }
+      return;
     }
-    return;
   }
   
   if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -1388,16 +1399,18 @@ async function start() {
     console.log(`   📂 用户专属文件夹ID: ${CONFIG.userFolderId}`);
     console.log(`   ⚠️  不会监听共享文件夹根目录\n`);
   } catch (error) {
-    console.error('\n❌ 初始化用户文件夹失败，无法启动');
-    console.error(`   错误信息: ${error.message}`);
-    if (error.stack) {
-      console.error(`   错误堆栈:\n${error.stack}`);
-    }
-    console.error('\n💡 可能的解决方案：');
-    console.error('   1. 检查 GDRIVE_FOLDER_ID 环境变量是否正确');
-    console.error('   2. 检查 serviceAccountKey.js 中的 defaultFolderId 是否正确');
-    console.error('   3. 确认 Service Account 有访问共享驱动器的权限');
-    console.error('   4. 确认 Service Account 有在共享驱动器中创建文件夹的权限');
+    console.warn('\n⚠️  初始化用户文件夹失败（可能是第一次使用，用户还未上传文件）');
+    console.warn(`   错误信息: ${error.message}`);
+    console.warn('\n💡 解决方案：');
+    console.warn('   1. 如果是第一次使用，请先在手机端上传至少一个文件');
+    console.warn('   2. 上传后，手动同步会自动重新初始化文件夹');
+    console.warn('   3. 如果问题持续，请检查：');
+    console.warn('      - GDRIVE_FOLDER_ID 环境变量是否正确');
+    console.warn('      - serviceAccountKey.js 中的 defaultFolderId 是否正确');
+    console.warn('      - Service Account 是否有访问和创建文件夹的权限\n');
+    console.warn('   ℹ️  服务将继续运行，等待用户上传文件后重新初始化\n');
+    // 不退出进程，继续运行，等待用户上传文件后在 performManualSync 中重新初始化
+  }
     console.error('   5. 检查 .user-config.json 中的 userId 是否正确\n');
     process.exit(1);
   }
