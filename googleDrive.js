@@ -42,6 +42,11 @@ function createDriveClient() {
     scopes: SCOPES
   });
 
+  // 预授权以避免首次调用时的延迟和潜在超时
+  authClient.authorize().catch(err => {
+    console.warn('⚠️  [Google Drive] 预授权失败（将在首次使用时重试）:', err.message);
+  });
+
   return google.drive({ version: 'v3', auth: authClient });
 }
 
@@ -325,33 +330,65 @@ async function listFolderFiles({ folderId, pageSize = 50, orderBy = 'createdTime
     params.supportsTeamDrives = true; // 兼容旧版 API
   }
 
-  try {
-    // 设置超时，防止 API 调用卡住
-    const response = await drive.files.list(params, {
-      timeout: 30000, // 30秒超时
-      retryConfig: {
-        retry: 2,
-        statusCodesToRetry: [[500, 599]],
-        retryDelay: 1000
-      }
-    });
+  // 实现重试机制以应对临时网络波动
+  const maxRetries = 3;
+  let lastError;
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      // 设置超时，防止 API 调用卡住
+      const response = await drive.files.list(params, {
+        timeout: 30000, // 30秒超时
+        retryConfig: {
+          retry: 2,
+          statusCodesToRetry: [[500, 599]],
+          retryDelay: 1000
+        }
+      });
 
-    return {
-      files: response.data.files || [],
-      nextPageToken: response.data.nextPageToken || null
-    };
-  } catch (error) {
-    // 增强错误信息，帮助诊断
-    const errorMsg = error.message || String(error);
-    if (error.code === 'ETIMEDOUT' || error.code === 'ESOCKETTIMEDOUT') {
-      throw new Error(`获取文件列表超时 (文件夹ID: ${folderId})。请检查网络连接或稍后重试。`);
-    } else if (errorMsg.includes('File not found') || errorMsg.includes('404')) {
-      throw new Error(`无法访问文件夹 (ID: ${folderId})。可能原因：\n   1. 文件夹ID不正确\n   2. Service Account 没有访问权限\n   3. 共享驱动器未正确配置`);
-    } else if (errorMsg.includes('Permission') || errorMsg.includes('403')) {
-      throw new Error(`Service Account 没有访问文件夹的权限 (ID: ${folderId})。请检查 Service Account 是否已添加到共享驱动器`);
+      if (attempt > 1) {
+        console.log(`✅ [Google Drive] listFolderFiles 重试成功 (第${attempt}次尝试)`);
+      }
+
+      return {
+        files: response.data.files || [],
+        nextPageToken: response.data.nextPageToken || null
+      };
+    } catch (error) {
+      lastError = error;
+      const errorMsg = error.message || String(error);
+      const errorCode = error.code || '';
+      
+      console.error(`❌ [Google Drive] listFolderFiles 失败 (尝试 ${attempt}/${maxRetries}):`, {
+        message: errorMsg,
+        code: errorCode
+      });
+      
+      // 如果是最后一次尝试，抛出详细错误
+      if (attempt === maxRetries) {
+        if (errorCode === 'ETIMEDOUT' || errorCode === 'ESOCKETTIMEDOUT') {
+          throw new Error(`获取文件列表超时 (文件夹ID: ${folderId})。请检查网络连接或稍后重试。`);
+        } else if (errorCode === 'ENOTFOUND' || errorMsg.includes('getaddrinfo')) {
+          throw new Error(`无法连接到 Google Drive API。请检查：\n   1. 网络连接是否正常\n   2. 是否需要配置代理\n   3. DNS 是否可以解析 googleapis.com`);
+        } else if (errorMsg.includes('token') || errorMsg.includes('oauth2')) {
+          throw new Error(`Google Drive 认证失败。请检查 Service Account 配置是否正确。\n原始错误: ${errorMsg}`);
+        } else if (errorMsg.includes('File not found') || errorMsg.includes('404')) {
+          throw new Error(`无法访问文件夹 (ID: ${folderId})。可能原因：\n   1. 文件夹ID不正确\n   2. Service Account 没有访问权限\n   3. 共享驱动器未正确配置`);
+        } else if (errorMsg.includes('Permission') || errorMsg.includes('403')) {
+          throw new Error(`Service Account 没有访问文件夹的权限 (ID: ${folderId})。请检查 Service Account 是否已添加到共享驱动器`);
+        }
+        throw error;
+      }
+      
+      // 不是最后一次尝试，等待后重试
+      const retryDelay = attempt * 2000; // 2秒, 4秒
+      console.log(`   ⏳ 等待 ${retryDelay/1000} 秒后重试...`);
+      await new Promise(resolve => setTimeout(resolve, retryDelay));
     }
-    throw error;
   }
+  
+  // 如果所有重试都失败（理论上不会到这里）
+  throw lastError;
 }
 
 async function downloadFileBuffer(fileId) {

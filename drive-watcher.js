@@ -1134,14 +1134,26 @@ async function performManualSync() {
     await Promise.race([syncTask, overallTimeout]);
   } catch (error) {
     console.error('❌ 手动同步失败:', error.message);
+    console.error('   错误代码:', error.code || 'N/A');
     console.error('   错误堆栈:', error.stack);
+    
+    // 提取更友好的错误信息
+    let userMessage = error.message;
+    if (error.message.includes('request to https://www.googleapis.com')) {
+      userMessage = '无法连接到 Google Drive API，请检查网络连接。\n原始错误: ' + error.message;
+    } else if (error.code === 'ENOTFOUND') {
+      userMessage = 'DNS 解析失败，请检查网络连接或 DNS 设置。';
+    } else if (error.code === 'ETIMEDOUT') {
+      userMessage = '连接超时，请检查网络连接或稍后重试。';
+    }
+    
     if (ws && ws.readyState === WebSocket.OPEN) {
       safeSend({
         type: 'manual-sync-complete',
         count: 0,
         total: 0,
-        message: error.message,
-        errors: [{ filename: '系统错误', error: error.message }]
+        message: userMessage,
+        errors: [{ filename: '系统错误', error: userMessage }]
       });
     }
   } finally {
