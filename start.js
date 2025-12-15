@@ -98,10 +98,29 @@ function checkEnvironment() {
   console.log('🔍 检查环境...');
   const nodeModulesPath = path.join(__dirname, 'node_modules');
   if (!fs.existsSync(nodeModulesPath)) {
-    console.error('❌ 错误: 未找到 node_modules 文件夹');
-    console.error('   依赖可能未安装完成');
-    console.error('   请运行: npm install');
-    return false;
+    console.warn('⚠️  警告: 未找到 node_modules 文件夹');
+    console.log('   🔧 正在尝试自动安装依赖...');
+    
+    try {
+      // 尝试自动安装依赖
+      execSync('npm install --production', {
+        cwd: __dirname,
+        stdio: 'inherit',
+        timeout: 300000 // 5 分钟超时
+      });
+      
+      console.log('✅ 依赖安装成功！');
+      
+      // 再次检查
+      if (!fs.existsSync(nodeModulesPath)) {
+        console.error('❌ 错误: 依赖安装后仍未找到 node_modules');
+        return false;
+      }
+    } catch (error) {
+      console.error('❌ 自动安装依赖失败:', error.message);
+      console.error('   请手动运行: npm install');
+      return false;
+    }
   }
 
   // 检查关键依赖
@@ -110,8 +129,26 @@ function checkEnvironment() {
     const depPath = path.join(nodeModulesPath, dep);
     if (!fs.existsSync(depPath)) {
       console.error(`❌ 错误: 缺少关键依赖 "${dep}"`);
-      console.error('   请运行: npm install');
-      return false;
+      console.log('   🔧 正在尝试重新安装依赖...');
+      
+      try {
+        execSync('npm install --production', {
+          cwd: __dirname,
+          stdio: 'inherit',
+          timeout: 300000
+        });
+        
+        // 再次检查
+        if (!fs.existsSync(depPath)) {
+          console.error(`❌ 重新安装后仍缺少 "${dep}"`);
+          return false;
+        }
+        
+        console.log(`✅ 依赖 "${dep}" 已安装`);
+      } catch (error) {
+        console.error(`❌ 安装依赖 "${dep}" 失败:`, error.message);
+        return false;
+      }
     }
   }
   console.log('✅ 环境检查通过');
@@ -191,15 +228,50 @@ function startServer() {
   services.push(server);
 }
 
-// 初始环境检查
-if (!checkEnvironment()) {
-  console.error('\n❌ 环境检查失败，无法启动服务');
-  console.error('   请使用 Manual_Start_Server.command 查看详细错误\n');
+// 初始环境检查（带重试机制）
+let envCheckAttempts = 0;
+const MAX_ENV_CHECK_ATTEMPTS = 3;
+
+function checkEnvironmentWithRetry() {
+  envCheckAttempts++;
+  
+  if (checkEnvironment()) {
+    return true;
+  }
+  
+  if (envCheckAttempts < MAX_ENV_CHECK_ATTEMPTS) {
+    console.warn(`\n⚠️  环境检查失败（第 ${envCheckAttempts}/${MAX_ENV_CHECK_ATTEMPTS} 次）`);
+    console.log(`   将在 10 秒后重试...\n`);
+    
+    setTimeout(() => {
+      if (!checkEnvironmentWithRetry()) {
+        console.error('\n❌ 环境检查多次失败，无法启动服务');
+        console.error('   请查看日志文件或联系作者获取帮助\n');
+        process.exit(1);
+      } else {
+        // 环境检查通过，继续启动
+        continueStartup();
+      }
+    }, 10000);
+    
+    return false; // 等待重试
+  }
+  
+  console.error('\n❌ 环境检查失败，已达到最大重试次数');
+  console.error('   请查看日志文件或联系作者获取帮助\n');
   process.exit(1);
+  return false;
 }
 
-// 启动服务器
-startServer();
+if (!checkEnvironmentWithRetry()) {
+  // 正在重试，退出当前流程
+  return;
+}
+
+// 环境检查通过，继续启动
+function continueStartup() {
+  // 启动服务器
+  startServer();
 
 // 启动监听器
 function startWatcher() {
@@ -334,20 +406,24 @@ setTimeout(() => {
   console.log('   Plugins → Development → Import plugin from manifest\n');
 }, 2000);
 
-// 优雅退出
-process.on('SIGINT', () => {
-  console.log('\n\n👋 正在停止所有服务...');
-  if (modeCheckInterval) {
-    clearInterval(modeCheckInterval);
-  }
-  services.forEach(s => s.kill());
-  // 清理配置文件
-  try {
-    if (fs.existsSync(SYNC_MODE_FILE)) {
-      fs.unlinkSync(SYNC_MODE_FILE);
+  // 优雅退出
+  process.on('SIGINT', () => {
+    console.log('\n\n👋 正在停止所有服务...');
+    if (modeCheckInterval) {
+      clearInterval(modeCheckInterval);
     }
-  } catch (error) {
-    // 忽略错误
-  }
-  process.exit(0);
-});
+    services.forEach(s => s.kill());
+    // 清理配置文件
+    try {
+      if (fs.existsSync(SYNC_MODE_FILE)) {
+        fs.unlinkSync(SYNC_MODE_FILE);
+      }
+    } catch (error) {
+      // 忽略错误
+    }
+    process.exit(0);
+  });
+}
+
+// 调用 continueStartup 启动服务
+continueStartup();

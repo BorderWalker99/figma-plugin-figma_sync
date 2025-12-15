@@ -680,7 +680,21 @@ ipcMain.handle('install-dependencies', async (event, installPath) => {
           return;
         }
         
-        console.log('✅ 依赖安装验证成功');
+        // 额外验证关键依赖
+        const criticalDeps = ['ws', 'express', 'sharp', 'chokidar'];
+        for (const dep of criticalDeps) {
+          const depPath = path.join(nodeModulesPath, dep);
+          if (!fs.existsSync(depPath)) {
+            console.error(`❌ 关键依赖 ${dep} 未安装`);
+            resolve({ 
+              success: false, 
+              error: `关键依赖 ${dep} 安装失败。\n请检查网络连接，或尝试重新安装。` 
+            });
+            return;
+          }
+        }
+        
+        console.log('✅ 依赖安装验证成功（所有关键依赖已确认）');
         resolve({ success: true });
       } else {
         console.error('❌ npm install 失败');
@@ -797,20 +811,42 @@ ipcMain.handle('start-server', async (event, installPath) => {
       event.sender.send('server-output', { data: data.toString() });
     });
     
-    // 等待几秒检查服务器是否正常启动
-    setTimeout(async () => {
-      // 检查进程是否还在运行
-      try {
-        process.kill(child.pid, 0); // 检查进程是否存在
+    // 等待几秒并多次检查服务器是否正常启动（最多 30 秒）
+    let checkAttempts = 0;
+    const maxCheckAttempts = 10;
+    const checkInterval = setInterval(async () => {
+      checkAttempts++;
+      
+      const isRunning = await checkPort(8888);
+      if (isRunning) {
+        clearInterval(checkInterval);
+        console.log(`✅ 服务器启动验证成功（第 ${checkAttempts} 次检查）`);
         resolve({ success: true, pid: child.pid });
-      } catch (error) {
-        // 进程退出了，再次检查端口，也许是刚才启动成功了但脱离了子进程，或者被自动重启管理接管了
-        const isRunningNow = await checkPort(8888);
-        if (isRunningNow) {
-           resolve({ success: true, message: '服务器已启动' });
-        } else {
-           resolve({ success: false, error: '服务器启动失败' });
+        return;
+      }
+      
+      if (checkAttempts >= maxCheckAttempts) {
+        clearInterval(checkInterval);
+        console.error(`❌ 服务器启动验证失败（检查了 ${checkAttempts} 次）`);
+        
+        // 读取错误日志
+        const errorLogPath = path.join(installPath, 'server-error.log');
+        let errorDetails = '';
+        if (fs.existsSync(errorLogPath)) {
+          try {
+            const errorLog = fs.readFileSync(errorLogPath, 'utf8');
+            errorDetails = errorLog.slice(-500);
+          } catch (e) {
+            // 忽略
+          }
         }
+        
+        resolve({ 
+          success: false, 
+          error: `服务器启动失败\n端口 8888 在 30 秒内未响应\n\n${errorDetails ? '错误日志:\n' + errorDetails : ''}` 
+        });
+      } else {
+        console.log(`   检查服务器状态... (${checkAttempts}/${maxCheckAttempts})`);
       }
     }, 3000);
     
@@ -861,60 +897,46 @@ ipcMain.handle('setup-autostart', async (event, installPath) => {
       fs.writeFileSync(plistPath, plistContent, 'utf8');
       
       // 卸载旧的服务（忽略错误）
-      exec(`launchctl unload "${plistPath}"`, () => {
-        // 加载新服务
-        exec(`launchctl load "${plistPath}"`, (loadError, stdout, stderr) => {
-          // 即使有 stderr，如果服务已经加载也是正常的
-          if (loadError && !stderr.includes('already loaded')) {
-            console.error('Launchctl load error:', loadError, stderr);
-            // 尝试继续启动，也许只是加载警告
-          }
-          
-          // 立即启动服务，忽略 stderr 以防弹窗
-          exec(`launchctl start com.screensync.server 2>/dev/null`, (startError, startStdout, startStderr) => {
-            if (startError) {
-              console.error('⚠️  启动服务失败:', startError.message);
-              // console.error('   stdout:', startStdout); // 减少噪音
-              // console.error('   stderr:', startStderr); // 减少噪音
+      exec(`launchctl unload "${plistPath}" 2>/dev/null`, () => {
+        // 等待 1 秒确保卸载完成
+        setTimeout(() => {
+          // 加载新服务（RunAtLoad 为 true，会自动启动）
+          exec(`launchctl load "${plistPath}"`, (loadError, stdout, stderr) => {
+            // 检查是否加载成功
+            if (loadError && !stderr.includes('already loaded')) {
+              console.error('❌ Launchctl load 失败:', loadError.message);
+              console.error('   stderr:', stderr);
+              resolve({ 
+                success: false, 
+                error: `配置自动启动失败\n${stderr || loadError.message}` 
+              });
+              return;
             }
             
-            // 等待2秒后检查服务是否真的在运行
-            setTimeout(() => {
-              // 检查端口 8888 是否在监听
-              exec(`lsof -i :8888 | grep LISTEN`, (checkError, checkStdout) => {
-                if (checkError || !checkStdout) {
-                  console.error('❌ 服务器启动验证失败');
-                  console.error('   端口 8888 未监听');
-                  
-                  // 读取错误日志（如果存在）
-                  const errorLogPath = path.join(installPath, 'server-error.log');
-                  let errorDetails = '';
-                  if (fs.existsSync(errorLogPath)) {
-                    try {
-                      const errorLog = fs.readFileSync(errorLogPath, 'utf8');
-                      // 只取最后500字符
-                      errorDetails = errorLog.slice(-500);
-                    } catch (e) {
-                      // 忽略
-                    }
-                  }
-                  
-                  resolve({ 
-                    success: false, 
-                    error: '服务器启动失败\n\n可能原因：\n1. 依赖未完全安装\n2. 端口被占用\n\n请查看安装目录下的 server-error.log 文件' + (errorDetails ? '\n\n最近的错误：\n' + errorDetails : '')
-                  });
-                } else {
-                  console.log('✅ 服务器运行验证成功');
-                  console.log('   端口 8888 正在监听');
-                  resolve({ 
-                    success: true, 
-                    message: '服务器已配置为自动启动' 
-                  });
-                }
-              });
-            }, 2000);
+            console.log('✅ LaunchAgent 已加载');
+            console.log('   正在验证服务是否成功启动...');
+            
+            // 等待 5 秒后验证服务是否真的在运行
+            setTimeout(async () => {
+              const isRunning = await checkPort(8888);
+              if (isRunning) {
+                console.log('✅ 服务器运行验证成功');
+                console.log('   服务已配置为开机自动启动');
+                resolve({ 
+                  success: true, 
+                  message: '服务器已配置为开机自动启动' 
+                });
+              } else {
+                console.warn('⚠️  LaunchAgent 已配置，但服务未运行');
+                console.warn('   开机后将自动启动');
+                resolve({ 
+                  success: true, 
+                  message: '服务器已配置为开机自动启动（当前未运行，开机后自动启动）' 
+                });
+              }
+            }, 5000);
           });
-        });
+        }, 1000);
       });
       
     } catch (error) {

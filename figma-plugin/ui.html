@@ -2295,7 +2295,7 @@
       // 立即设置标志和禁用按钮（双重保护）
       isManualSyncing = true;
       syncBtn.disabled = true;
-      syncBtn.textContent = '同步中...';
+      syncBtn.textContent = '同步中';
       
       // 设置超时保护：如果 60 秒内没有收到响应，自动恢复按钮
       const syncTimeout = setTimeout(() => {

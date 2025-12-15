@@ -572,42 +572,45 @@ window.finishInstallation = async function() {
   const originalText = button.textContent;
   
   try {
-    // 显示配置中状态
+    // 显示启动中状态
     button.disabled = true;
+    button.textContent = '正在启动服务器';
+    
+    // 步骤 1：先手动启动服务器（确保依赖已安装且服务正常）
+    const startResult = await ipcRenderer.invoke('start-server', installPath);
+    
+    if (!startResult.success) {
+      // 启动失败
+      button.disabled = false;
+      button.textContent = originalText;
+      showToast('服务器启动失败，请检查日志', 'error');
+      console.error('服务器启动失败:', startResult.error);
+      return; // 提前返回，不配置自动启动
+    }
+    
+    // 步骤 2：服务器启动成功后，配置自动启动
     button.textContent = '正在配置自动启动';
+    const autostartResult = await ipcRenderer.invoke('setup-autostart', installPath);
     
-    // 配置服务器自动启动
-    const result = await ipcRenderer.invoke('setup-autostart', installPath);
-    
-    if (result.success) {
+    if (autostartResult.success) {
       // 配置成功
       button.textContent = '配置完成';
-      showToast(result.message || '服务器已配置为自动启动', 'success');
+      showToast('安装完成！服务器已启动并配置为开机自启', 'success');
       
       // 延迟1.5秒后关闭，让用户看到成功消息
       setTimeout(() => {
         ipcRenderer.invoke('quit-app');
       }, 1500);
     } else {
-      // 配置失败，尝试手动启动服务器作为备选
-      console.warn('自动启动配置失败:', result.error);
-      button.textContent = '正在启动服务器';
+      // 配置自动启动失败，但服务器已启动
+      console.warn('自动启动配置失败:', autostartResult.error);
+      button.textContent = '启动成功（自启失败）';
+      showToast('服务器已启动，但自动启动配置失败', 'warning');
       
-      const startResult = await ipcRenderer.invoke('start-server', installPath);
-      
-      if (startResult.success) {
-        button.textContent = '启动成功';
-        showToast('服务器已启动', 'success');
-        setTimeout(() => {
-          ipcRenderer.invoke('quit-app');
-        }, 1500);
-      } else {
-        // 两种方式都失败
-        button.disabled = false;
-        button.textContent = originalText;
-        showToast('配置失败，请在重启后手动启动', 'error');
-        console.error('服务器启动失败:', startResult.error);
-      }
+      // 仍然关闭安装器，因为服务器已经在运行
+      setTimeout(() => {
+        ipcRenderer.invoke('quit-app');
+      }, 2000);
     }
   } catch (err) {
     // 出错，恢复按钮状态
