@@ -40,8 +40,41 @@ function cleanupPort() {
   }
 }
 
-// 清理端口
+// 检查并清理旧的 watcher 进程
+function cleanupWatcherProcesses() {
+  if (process.platform === 'win32') {
+    return;
+  }
+  
+  try {
+    // 查找旧的 drive-watcher.js 和 aliyun-watcher.js 进程
+    const result = execSync("ps aux | grep -E '(drive-watcher|aliyun-watcher|icloud-watcher)\\.js' | grep -v grep | awk '{print $2}'").toString().trim();
+    
+    if (result) {
+      console.log(`🧹 发现旧的 watcher 进程，正在清理...`);
+      const pids = result.split('\n');
+      for (const pid of pids) {
+        if (pid) {
+          try {
+            process.kill(parseInt(pid), 'SIGTERM'); // 使用 SIGTERM 让进程优雅退出
+            console.log(`   ✅ 已终止旧 watcher 进程 PID: ${pid}`);
+          } catch (e) {
+            console.log(`   ⚠️  无法终止进程 ${pid}: ${e.message}`);
+          }
+        }
+      }
+      
+      // 等待进程退出
+      execSync('sleep 1');
+    }
+  } catch (error) {
+    // 忽略错误（通常表示没有找到旧进程）
+  }
+}
+
+// 清理端口和旧进程
 cleanupPort();
+cleanupWatcherProcesses();
 
 // 从环境变量读取同步模式，默认 Google Drive
 let SYNC_MODE = process.env.SYNC_MODE || 'drive';
@@ -272,6 +305,35 @@ if (!checkEnvironmentWithRetry()) {
 function continueStartup() {
   // 启动服务器
   startServer();
+  
+  // 延迟启动监听器，避免重复启动
+  setTimeout(() => {
+    startWatcher();
+    startModeCheck(); // 启动模式检查
+    
+    console.log('\n✅ 所有服务已启动！');
+    console.log('\n📱 下一步：在Figma Desktop中运行插件');
+    console.log('   Plugins → Development → Import plugin from manifest\n');
+  }, 2000);
+  
+  // 优雅退出
+  process.on('SIGINT', () => {
+    console.log('\n\n👋 正在停止所有服务...');
+    if (modeCheckInterval) {
+      clearInterval(modeCheckInterval);
+    }
+    services.forEach(s => s.kill());
+    // 清理配置文件
+    try {
+      if (fs.existsSync(SYNC_MODE_FILE)) {
+        fs.unlinkSync(SYNC_MODE_FILE);
+      }
+    } catch (error) {
+      // 忽略错误
+    }
+    process.exit(0);
+  });
+}
 
 // 启动监听器
 function startWatcher() {
@@ -394,35 +456,6 @@ function startModeCheck() {
       startWatcher();
     }
   }, 3000);
-}
-
-// 2. 延迟启动监听器
-setTimeout(() => {
-  startWatcher();
-  startModeCheck(); // 启动模式检查
-  
-  console.log('\n✅ 所有服务已启动！');
-  console.log('\n📱 下一步：在Figma Desktop中运行插件');
-  console.log('   Plugins → Development → Import plugin from manifest\n');
-}, 2000);
-
-  // 优雅退出
-  process.on('SIGINT', () => {
-    console.log('\n\n👋 正在停止所有服务...');
-    if (modeCheckInterval) {
-      clearInterval(modeCheckInterval);
-    }
-    services.forEach(s => s.kill());
-    // 清理配置文件
-    try {
-      if (fs.existsSync(SYNC_MODE_FILE)) {
-        fs.unlinkSync(SYNC_MODE_FILE);
-      }
-    } catch (error) {
-      // 忽略错误
-    }
-    process.exit(0);
-  });
 }
 
 // 调用 continueStartup 启动服务
