@@ -108,10 +108,10 @@ if [ -n "$(find installer/dist -name "*.dmg" -type f 2>/dev/null)" ]; then
 fi
 
 if [ -n "$DMG_FILE" ] && [ -f "$DMG_FILE" ]; then
-    # 复制并重命名为"第二步_双击安装.dmg"
+    # 重命名 DMG 为更清晰的步骤指引
     cp "$DMG_FILE" "$TEMP_DIR/第二步_双击安装.dmg"
     DMG_NAME="第二步_双击安装.dmg"
-    echo "   ✅ 已包含安装器磁盘映像: $DMG_NAME"
+    echo "   ✅ 已包含安装器磁盘映像: $DMG_NAME (压缩版)"
 else
     # 回退到 .app 目录（如果存在）
     if [ -d "$INSTALLER_APP" ]; then
@@ -127,9 +127,9 @@ else
 fi
 
 # 复制 Gatekeeper 修复脚本（放在首层）
-if [ -f "第一步_拖进终端按回车运行.command" ]; then
-    cp "第一步_拖进终端按回车运行.command" "$TEMP_DIR/"
-    chmod +x "$TEMP_DIR/第一步_拖进终端按回车运行.command"
+if [ -f "第一步_拖进终端回车运行.command" ]; then
+    cp "第一步_拖进终端回车运行.command" "$TEMP_DIR/"
+    chmod +x "$TEMP_DIR/第一步_拖进终端回车运行.command"
     echo "   ✅ Gatekeeper 修复脚本已包含（首层目录）"
 fi
 
@@ -200,12 +200,12 @@ ScreenSync - iPhone截图自动同步到Figma
 ⚠️ 步骤 1：解决安全提示（必做）
 由于 macOS 安全机制，首次运行需要清除隔离属性：
 1. 打开"终端"应用
-2. 将"第一步_拖进终端按回车运行.command"拖入终端窗口
+2. 将"第一步_拖进终端回车运行.command"拖入终端窗口
 3. 按回车键运行
 4. 看到"✅ 准备完成！"后关闭终端
 
 步骤 2：安装软件
-1. 双击 "第二步_双击安装.dmg" 挂载安装盘
+1. 双击 "ScreenSync Installer.dmg" 挂载安装盘
 2. 在弹出的窗口中双击 "ScreenSync Installer"
 3. 按照图形界面提示完成配置
 
@@ -269,7 +269,7 @@ Q: 提示"ScreenSync Installer 已损坏"怎么办？
 A: 请执行步骤 1 中的脚本修复。
 
 Q: 安装器在哪里？
-A: 解压后的文件夹中，名为 "第二步_双击安装.dmg"，双击后即可看到安装器
+A: 解压后的文件夹中，名为 "ScreenSync Installer.dmg"，双击后即可看到安装器
 
 Q: 如何找到 manifest.json？
 A: 安装完成后，在安装目录下的 figma-plugin 文件夹中
@@ -342,8 +342,8 @@ https://github.com/BorderWalker99/figma-plugin-figma_sync/releases/latest
 下载文件：ScreenSync-UserPackage.tar.gz
 
 2. 安装插件
-(1) 打开终端，将安装包中的 "第一步_拖进终端按回车运行.command" 拖入终端并回车执行。
-(2) 双击 第二步_双击安装.dmg 进行安装。
+(1) 打开终端，将安装包中的 "第一步_拖进终端回车运行.command" 拖入终端并回车执行。
+(2) 双击 ${DMG_NAME} 进行安装。
 (3) 在 Figma 中，通过 Import from manifest 导入：
 ScreenSync-UserPackage/figma-plugin/manifest.json
 
@@ -427,7 +427,7 @@ echo -e "${YELLOW}📦 包含内容：${NC}"
 echo ""
 echo -e "${GREEN}首层目录（用户直接看到）：${NC}"
 echo "   ✅ README_请先阅读.txt"
-echo "   ✅ 第一步_拖进终端按回车运行.command（Gatekeeper 修复）"
+echo "   ✅ 第一步_拖进终端回车运行.command（Gatekeeper 修复）"
 echo "   ✅ 第二步_双击安装.dmg（图形化安装器）"
 echo ""
 echo -e "${BLUE}项目文件/目录（安装所需的所有文件）：${NC}"
@@ -452,8 +452,8 @@ echo -e "${BLUE}║  用户使用流程（认知负担最轻）：              
 echo -e "${BLUE}║  1. 解压文件包                                             ║${NC}"
 echo -e "${BLUE}║  2. 阅读 README_请先阅读.txt                               ║${NC}"
 echo -e "${BLUE}║  3. 如提示安全问题：                                       ║${NC}"
-echo -e "${BLUE}║     将"第一步_拖进终端按回车运行"拖入终端并回车           ║${NC}"
-echo -e "${BLUE}║  4. 双击 第二步_双击安装.dmg 运行安装器                   ║${NC}"
+echo -e "${BLUE}║     将"安装前:将此文件拖进终端按回车运行"拖入终端并回车   ║${NC}"
+echo -e "${BLUE}║  4. 双击 ScreenSync Installer.dmg 运行安装器              ║${NC}"
 echo -e "${BLUE}║  5. 按照图形界面完成安装                                   ║${NC}"
 echo -e "${BLUE}║  6. 在 Figma 中导入插件：                                  ║${NC}"
 echo -e "${BLUE}║     Plugins → Development → Import plugin from manifest   ║${NC}"
