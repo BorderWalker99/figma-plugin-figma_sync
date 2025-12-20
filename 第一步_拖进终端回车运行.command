@@ -18,8 +18,12 @@ echo ""
 INSTALLER_PATH=""
 INSTALLER_NAME=""
 
-# 优先检查 DMG（压缩版）
-if [ -f "$SCRIPT_DIR/ScreenSync Installer.dmg" ]; then
+# 优先检查新的统一命名 DMG
+if [ -f "$SCRIPT_DIR/第二步_双击安装.dmg" ]; then
+    INSTALLER_PATH="$SCRIPT_DIR/第二步_双击安装.dmg"
+    INSTALLER_NAME="第二步_双击安装.dmg"
+# 兼容旧版本的命名
+elif [ -f "$SCRIPT_DIR/ScreenSync Installer.dmg" ]; then
     INSTALLER_PATH="$SCRIPT_DIR/ScreenSync Installer.dmg"
     INSTALLER_NAME="ScreenSync Installer.dmg"
 # 查找任何版本的 arm64 DMG（优先）
@@ -37,7 +41,8 @@ elif [ -d "$SCRIPT_DIR/ScreenSync Installer.app" ]; then
 fi
 
 if [ -z "$INSTALLER_PATH" ]; then
-    echo "❌ 错误: 未找到安装器 (ScreenSync Installer.dmg 或 .app)"
+    echo "❌ 错误: 未找到安装器"
+    echo "   正在查找: 第二步_双击安装.dmg 或 ScreenSync Installer.dmg/.app"
     echo "   请确保此脚本与安装器在同一目录下"
     echo ""
     read -p "按回车键退出..."
