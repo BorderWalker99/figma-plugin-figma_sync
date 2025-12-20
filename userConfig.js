@@ -192,14 +192,35 @@ function getLocalDownloadFolder() {
         return customPath;
       } else {
         console.warn(`⚠️  配置的本地文件夹路径无效（父目录不存在）: ${customPath}`);
-        console.warn(`   将使用默认路径: ${path.join(os.homedir(), 'ScreenSyncImg')}`);
+        console.warn(`   将使用默认路径: ${getDefaultDownloadFolder()}`);
       }
     } catch (error) {
       console.warn(`⚠️  验证本地文件夹路径时出错: ${error.message}`);
     }
   }
-  // 默认路径：用户主目录下的 ScreenSyncImg
-  return path.join(os.homedir(), 'ScreenSyncImg');
+  // 返回默认路径
+  return getDefaultDownloadFolder();
+}
+
+/**
+ * 获取默认下载文件夹路径
+ * 开发环境：source code 文件夹内的 ScreenSyncImg
+ * 生产环境：用户主目录下的 ScreenSyncImg
+ */
+function getDefaultDownloadFolder() {
+  // 检测是否为开发环境（通过检查是否存在 package.json 和 .git）
+  const isDevelopment = fs.existsSync(path.join(__dirname, 'package.json')) && 
+                        fs.existsSync(path.join(__dirname, '.git'));
+  
+  if (isDevelopment) {
+    // 开发环境：使用 source code 文件夹内的 ScreenSyncImg
+    const devPath = path.join(__dirname, 'ScreenSyncImg');
+    console.log(`🧪 [开发环境] 使用项目内的下载文件夹: ${devPath}`);
+    return devPath;
+  } else {
+    // 生产环境：用户主目录下的 ScreenSyncImg
+    return path.join(os.homedir(), 'ScreenSyncImg');
+  }
 }
 
 /**

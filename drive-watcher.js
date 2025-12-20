@@ -368,6 +368,7 @@ async function initializeUserFolder() {
 let ws = null;
 let pollTimer = null;
 let isRealTimeMode = false;
+let wasRealTimeMode = false; // 记录断开前是否是实时模式，用于重连后恢复
 let isPolling = false;
 let lastPollTime = null;
 let realTimeStart = null;
@@ -414,18 +415,22 @@ async function initializeKnownFiles() {
 }
 
 async function pollDrive() {
-  if (!isRealTimeMode) return;
+  if (!isRealTimeMode) {
+    // 静默跳过，不打印日志（避免日志刷屏）
+    return;
+  }
   if (isPolling) {
     console.log('⏳ [Drive] 上次轮询尚未结束，跳过本次轮询');
     return;
   }
   if (!CONFIG.userFolderId) {
-    console.error('❌ 用户文件夹未初始化');
+    console.error('❌ 用户文件夹未初始化，跳过轮询');
     return;
   }
 
   isPolling = true;
   const pollStart = new Date();
+  console.log(`\n🔍 [Drive] 开始轮询 (${pollStart.toLocaleTimeString()})`);
 
   try {
     // 构造增量查询条件
@@ -452,19 +457,26 @@ async function pollDrive() {
     const newFiles = [];
     for (const file of imageFiles) {
       // 1. 去重
-      if (knownFileIds.has(file.id)) continue;
+      if (knownFileIds.has(file.id)) {
+        console.log(`   ⏭️  跳过已知文件: ${file.name}`);
+        continue;
+      }
       
       // 2. 严格时间过滤（只处理启动后创建的文件）
       const fileTime = new Date(file.createdTime);
       if (realTimeStart && fileTime < realTimeStart) {
+        console.log(`   ⏭️  跳过旧文件: ${file.name} (创建于 ${fileTime.toLocaleString()})`);
         knownFileIds.add(file.id); // 标记为已知，下次不再处理
         continue;
       }
       
+      console.log(`   ✅ 发现新文件: ${file.name} (创建于 ${fileTime.toLocaleString()})`);
       knownFileIds.add(file.id);
       newFiles.push(file);
     }
 
+    console.log(`📊 [Drive] 轮询结果: 总文件 ${allFiles.length}，图片/视频 ${imageFiles.length}，新文件 ${newFiles.length}`);
+    
     if (newFiles.length > 0) {
       console.log(`🔄 [Drive] 检测到 ${newFiles.length} 个新文件，并发处理...`);
       
@@ -509,11 +521,13 @@ async function pollDrive() {
     
   } catch (error) {
     console.error('⚠️  轮询失败:', error.message);
+    console.error('   错误详情:', error.stack || error);
+    // 即使失败，也确保下次轮询能继续
   } finally {
     isPolling = false;
-    if (isRealTimeMode && pollTimer) {
-      pollTimer = setTimeout(pollDrive, CONFIG.pollIntervalMs);
-    }
+    // 注意：不需要在这里手动调度下次轮询，因为 startPolling() 已经设置了 setInterval
+    // 这个 finally 块只负责清理状态
+    console.log(`   ⏱️  轮询完成 (耗时 ${(new Date() - pollStart) / 1000} 秒)`);
   }
 }
 
@@ -1166,6 +1180,7 @@ async function performManualSync() {
 function startPolling() {
   if (pollTimer) {
     clearInterval(pollTimer);
+    pollTimer = null;
   }
   // 注意：不立即执行轮询，因为启动实时模式时已经初始化了 knownFileIds
   // 立即执行可能会处理一些在初始化后、启动前新增的文件，但这是可以接受的
@@ -1191,6 +1206,13 @@ function connectWebSocket() {
 
   ws.on('open', () => {
     console.log('✅ [Drive] 已连接到服务器');
+    
+    // 如果之前是实时模式，重连后自动恢复
+    if (wasRealTimeMode && !isRealTimeMode) {
+      console.log('🔄 [Drive] 检测到之前是实时模式，自动恢复...');
+      isRealTimeMode = true;
+      startPolling();
+    }
   });
 
   ws.on('message', async (data) => {
@@ -1329,14 +1351,18 @@ function connectWebSocket() {
         console.log('\n🎯 [Drive] 启动实时同步模式...');
         // 先确保已知文件列表已初始化，避免处理已有文件
         console.log(`📊 [Drive] 当前 knownFileIds 数量: ${knownFileIds.size}`);
-        if (knownFileIds.size === 0) {
-          console.log('📂 [Drive] 初始化已知文件列表（避免处理已有文件）...');
+        
+        // 无论 knownFileIds 是否为空，都需要设置 realTimeStart 时间基准
+        if (!realTimeStart || knownFileIds.size === 0) {
+          console.log('📂 [Drive] 初始化实时模式时间基准...');
           await initializeKnownFiles();
-          console.log(`✅ [Drive] 初始化完成，已记录 ${knownFileIds.size} 个现有文件`);
+          console.log(`✅ [Drive] 初始化完成，时间基准: ${realTimeStart.toISOString()}`);
         } else {
-          console.log(`ℹ️  [Drive] 已知文件列表已存在，跳过初始化`);
+          console.log(`ℹ️  [Drive] 实时模式时间基准已存在: ${realTimeStart.toISOString()}`);
         }
+        
         isRealTimeMode = true;
+        wasRealTimeMode = true; // 记录状态
         startPolling();
         // 注意：startPolling() 会立即执行一次 pollDrive()，但此时 knownFileIds 已经初始化
         // 所以不会处理已有文件，只会处理新文件
@@ -1346,6 +1372,7 @@ function connectWebSocket() {
       if (message.type === 'stop-realtime') {
         console.log('\n⏸️  [Drive] 停止实时同步模式');
         isRealTimeMode = false;
+        wasRealTimeMode = false; // 用户主动停止，清除记录
         stopPolling();
         return;
       }
@@ -1361,6 +1388,12 @@ function connectWebSocket() {
 
   ws.on('close', () => {
     console.log('⚠️  [Drive] 服务器连接断开，5秒后重连');
+    // 记录断开前的实时模式状态
+    wasRealTimeMode = isRealTimeMode;
+    if (wasRealTimeMode) {
+      console.log('   📝 已记录实时模式状态，重连后将自动恢复');
+    }
+    // 暂停实时模式（重连后会自动恢复）
     isRealTimeMode = false;
     stopPolling();
     setTimeout(connectWebSocket, 5000);
