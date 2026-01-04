@@ -1,6 +1,6 @@
 // code.js - 智能布局版本
 
-const PLUGIN_VERSION = '1.0.1'; // 插件版本号
+const PLUGIN_VERSION = '1.0.2'; // 插件版本号
 
 console.log('🚀 Figma插件启动');
 console.log('📦 插件版本:', PLUGIN_VERSION);
@@ -602,13 +602,56 @@ figma.ui.onmessage = async (msg) => {
   // 处理服务器修复请求
   if (msg.type === 'repair-server') {
     console.log('🔧 收到服务器修复请求');
-    // Figma 插件无法直接执行系统命令，但可以通过 UI 显示提示
-    // 实际修复由后端的 WebSocket 消息处理
-    figma.ui.postMessage({
-      type: 'repair-server-response',
-      success: true,
-      message: '正在尝试修复服务器连接...'
-    });
+    
+    // 尝试通过 AppleScript 启动服务器
+    try {
+      const { exec } = require('child_process');
+      const installPath = msg.installPath || '/Applications/ScreenSync - SourceCode';
+      
+      console.log('   📂 安装路径:', installPath);
+      console.log('   🚀 尝试启动服务器...');
+      
+      // 方法 1: 尝试使用 launchctl 启动 LaunchAgent
+      exec('launchctl start com.screensync.server 2>&1', (error, stdout, stderr) => {
+        if (error) {
+          console.log('   ⚠️  LaunchAgent 启动失败，尝试直接启动...');
+          
+          // 方法 2: 直接启动 Node.js 进程
+          const startCommand = `cd "${installPath}" && npm start > /dev/null 2>&1 &`;
+          exec(startCommand, (error2, stdout2, stderr2) => {
+            if (error2) {
+              console.log('   ❌ 直接启动失败:', error2.message);
+              figma.ui.postMessage({
+                type: 'repair-server-response',
+                success: false,
+                message: '自动启动失败，请手动启动服务器'
+              });
+            } else {
+              console.log('   ✅ 服务器启动成功');
+              figma.ui.postMessage({
+                type: 'repair-server-response',
+                success: true,
+                message: '服务器已自动启动，正在重新连接...'
+              });
+            }
+          });
+        } else {
+          console.log('   ✅ LaunchAgent 启动成功');
+          figma.ui.postMessage({
+            type: 'repair-server-response',
+            success: true,
+            message: '服务器已自动启动，正在重新连接...'
+          });
+        }
+      });
+    } catch (error) {
+      console.error('   ❌ 修复失败:', error);
+      figma.ui.postMessage({
+        type: 'repair-server-response',
+        success: false,
+        message: '自动修复失败: ' + error.message
+      });
+    }
     return;
   }
   

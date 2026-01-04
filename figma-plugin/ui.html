@@ -2064,13 +2064,14 @@
           if (!ws || ws.readyState !== WebSocket.OPEN) {
             // 连接失败，尝试修复服务
             if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-              log('⚠️ 连接失败，尝试修复服务...');
+              log('⚠️ 连接失败，尝试自动启动服务器...');
               repairServerConnection();
             } else {
-              log('❌ 多次重连失败');
+              log('❌ 多次重连失败，请手动操作');
               updateStatus('disconnected', '连接失败');
-              showToast('连接失败，请检查服务器状态', 'error');
-              reconnectAttempts = 0; // 重置计数
+              
+              // 显示友好的错误提示和解决方案
+              showServerStartHelp();
             }
           } else {
             // 连接成功，重置计数
@@ -2082,40 +2083,89 @@
       }, 1500);
     }
     
-    // 修复服务器连接（后端自动修复）
+    // 修复服务器连接（自动启动服务器）
     function repairServerConnection() {
-      log('🔧 正在尝试修复服务器...');
+      log('🔧 正在尝试自动启动服务器...');
+      showToast('正在启动服务器...', 'loading');
       
-      // 使用 iframe 触发后端修复脚本（通过 Figma plugin API）
+      // 触发后端自动启动服务器
       parent.postMessage({
         pluginMessage: {
           type: 'repair-server',
-          installPath: serverInstallPath
+          installPath: serverInstallPath || '/Applications/ScreenSync - SourceCode'
         }
       }, '*');
       
-      // 等待5秒后再次尝试连接
+      // 等待7秒让服务器完全启动
       setTimeout(() => {
-        log('🔄 修复完成，重新尝试连接...');
+        log('🔄 服务器已启动，正在连接...');
         connect();
         
+        // 等待连接建立
         setTimeout(() => {
           if (!ws || ws.readyState !== WebSocket.OPEN) {
             if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+              log('⚠️  仍未连接，继续尝试...');
+              reconnectAttempts++;
               attemptReconnect();
             } else {
-              log('❌ 修复失败，请手动检查');
+              log('❌ 自动修复失败');
               updateStatus('disconnected', '修复失败');
-              showToast('自动修复失败，请查看文档', 'error');
+              showToast('自动启动失败，请联系开发者', 'error');
               reconnectAttempts = 0;
             }
           } else {
             reconnectAttempts = 0;
-            log('✅ 修复成功，服务已连接');
-            showToast('服务已修复并重新连接', 'success');
+            log('✅ 服务器已启动并连接成功');
+            showToast('服务器已自动启动', 'success');
           }
-        }, 2000);
-      }, 5000);
+        }, 3000);
+      }, 7000);
+    }
+    
+    // 显示服务器启动帮助
+    function showServerStartHelp() {
+      const helpHtml = `
+        <div style="padding: 20px; text-align: center;">
+          <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
+          <div style="font-size: 16px; font-weight: 600; margin-bottom: 12px; color: var(--text-primary);">
+            服务器未运行
+          </div>
+          <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 20px; line-height: 1.6;">
+            无法连接到本地服务器。<br/>
+            请尝试以下解决方案：
+          </div>
+          <button onclick="retryStartServer()" style="
+            padding: 10px 24px;
+            background: var(--accent);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            margin-bottom: 12px;
+            width: 200px;
+          ">
+            🔄 重新尝试启动
+          </button>
+          <div style="font-size: 12px; color: var(--text-tertiary); margin-top: 16px; padding: 12px; background: var(--bg-secondary); border-radius: 8px; text-align: left;">
+            <div style="font-weight: 600; margin-bottom: 8px;">💡 如果仍无法连接：</div>
+            <div>1. 检查"系统偏好设置 → 用户与群组 → 登录项"</div>
+            <div>2. 确保 ScreenSync 服务已启用</div>
+            <div>3. 重启电脑后重试</div>
+          </div>
+        </div>
+      `;
+      
+      // 替换主界面内容
+      document.querySelector('.container').innerHTML = helpHtml;
+      
+      // 定义重试函数
+      window.retryStartServer = function() {
+        // 恢复原始界面
+        location.reload();
+      };
     }
 
     function connect() {
