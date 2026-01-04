@@ -761,23 +761,23 @@ async function performManualSync() {
     
     // 获取所有文件（处理分页）
     const listPromise = (async () => {
-      let allFiles = [];
-      let nextPageToken = null;
+    let allFiles = [];
+    let nextPageToken = null;
+    
+    do {
+      const result = await listFolderFiles({ 
+        folderId: CONFIG.userFolderId, 
+        pageSize: 200, 
+        orderBy: 'LastModified',
+        pageToken: nextPageToken
+      });
       
-      do {
-        const result = await listFolderFiles({ 
-          folderId: CONFIG.userFolderId, 
-          pageSize: 200, 
-          orderBy: 'LastModified',
-          pageToken: nextPageToken
-        });
-        
-        if (result.files && result.files.length > 0) {
-          allFiles = allFiles.concat(result.files);
-        }
-        
-        nextPageToken = result.nextPageToken;
-      } while (nextPageToken);
+      if (result.files && result.files.length > 0) {
+        allFiles = allFiles.concat(result.files);
+      }
+      
+      nextPageToken = result.nextPageToken;
+    } while (nextPageToken);
       
       return allFiles;
     })();

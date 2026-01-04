@@ -3341,18 +3341,29 @@
       const bannerBtn = document.getElementById('updateBannerNow');
       
       if (data.status === 'downloading') {
-        showToast(data.message || '正在下载...', 'loading');
+        // 显示下载进度
+        const progressText = data.progress ? ` (${data.progress}%)` : '';
+        const message = data.message || '正在下载...';
+        showToast(message, 'loading');
         if (bannerBtn) {
           bannerBtn.disabled = true;
-          bannerBtn.textContent = '下载中...';
+          bannerBtn.textContent = data.progress ? `${data.progress}%` : '下载中...';
         }
-        // 不修改 banner 主文字，保持"发现新版本 vX.X.X"
+      } else if (data.status === 'extracting') {
+        showToast(data.message || '正在解压...', 'loading');
+        if (bannerBtn) {
+          bannerBtn.textContent = '解压中...';
+        }
+      } else if (data.status === 'checking') {
+        showToast(data.message || '正在检查文件...', 'loading');
+        if (bannerBtn) {
+          bannerBtn.textContent = '检查中...';
+        }
       } else if (data.status === 'installing') {
         showToast(data.message || '正在安装...', 'loading');
         if (bannerBtn) {
           bannerBtn.textContent = '安装中...';
         }
-        // 不修改 banner 主文字
       } else if (data.status === 'completed') {
         const successMsg = data.message || `更新完成！已更新 ${data.updatedCount || 0} 个文件`;
         showToast(successMsg, 'success');
