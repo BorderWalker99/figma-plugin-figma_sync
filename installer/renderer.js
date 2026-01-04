@@ -60,7 +60,7 @@ window.nextStep = function() {
   if (currentStep === 1 && selectedMode === 'icloud') {
     if (icloudSpaceAvailable === false) {
       // 空间不足，弹出错误 toast
-      showToast('iCloud 空间不足，建议选择 Google Cloud 模式', 'error');
+      showToast('iCloud 空间不足', 'error');
       return; // 阻止进入下一步
     }
   }
@@ -292,7 +292,7 @@ async function checkSystemRequirements() {
               showToast('Homebrew 安装成功', 'success');
               checkSystemRequirements(); // 重新检查所有依赖
             } else {
-              showToast('Homebrew 尚未安装，请在终端中完成安装后再检测', 'error');
+              showToast('Homebrew 尚未安装', 'error');
             }
           };
         } else {
@@ -307,10 +307,10 @@ async function checkSystemRequirements() {
           checkSystemRequirements(); // 重新检查
         }
       } else {
-        showToast(result.error || '无法打开终端安装 Homebrew', 'error');
+        showToast(result.error || '无法安装 Homebrew', 'error');
         if (result.manualCommand) {
           // 显示手动安装命令
-          showToast('请手动在终端中运行此命令安装 Homebrew', 'error');
+          showToast('请手动安装 Homebrew', 'error');
         }
         installBtn.disabled = false;
         installBtn.textContent = '安装 Homebrew';
@@ -373,7 +373,7 @@ async function checkSystemRequirements() {
               showToast('Node.js 安装成功', 'success');
               checkSystemRequirements(); // 重新检查所有依赖
             } else {
-              showToast('Node.js 尚未安装，请在终端中完成安装后再检测', 'error');
+              showToast('Node.js 尚未安装', 'error');
             }
           };
         } else {
@@ -388,7 +388,7 @@ async function checkSystemRequirements() {
           checkSystemRequirements(); // 重新检查
         }
       } else {
-        showToast(result.error || '无法打开终端安装 Node.js', 'error');
+        showToast(result.error || '无法安装 Node.js', 'error');
         installBtn.disabled = false;
         installBtn.textContent = '安装 Node.js';
       }
@@ -447,7 +447,7 @@ async function checkSystemRequirements() {
               showToast('ImageMagick 安装成功', 'success');
               checkSystemRequirements(); // 重新检查所有依赖
             } else {
-              showToast('ImageMagick 尚未安装，请在终端中完成安装后再检测', 'error');
+              showToast('ImageMagick 尚未安装', 'error');
             }
           };
         } else {
@@ -462,7 +462,7 @@ async function checkSystemRequirements() {
           checkSystemRequirements(); // 重新检查
         }
       } else {
-        showToast(result.error || '无法打开终端安装 ImageMagick', 'error');
+        showToast(result.error || '无法安装 ImageMagick', 'error');
         installBtn.disabled = false;
         installBtn.textContent = '安装 ImageMagick';
       }
@@ -521,7 +521,7 @@ async function checkSystemRequirements() {
               showToast('FFmpeg 安装成功', 'success');
               checkSystemRequirements(); // 重新检查所有依赖
             } else {
-              showToast('FFmpeg 尚未安装，请在终端中完成安装后再检测', 'error');
+              showToast('FFmpeg 尚未安装', 'error');
             }
           };
         } else {
@@ -536,7 +536,7 @@ async function checkSystemRequirements() {
           checkSystemRequirements(); // 重新检查
         }
       } else {
-        showToast(result.error || '无法打开终端安装 FFmpeg', 'error');
+        showToast(result.error || '无法安装 FFmpeg', 'error');
         installBtn.disabled = false;
         installBtn.textContent = '安装 FFmpeg';
       }
@@ -701,7 +701,7 @@ async function copyUserId(userId) {
   try {
     await ipcRenderer.invoke('copy-to-clipboard', userId);
     // 显示复制成功的提示
-    showToast('User ID 已复制到剪贴板', 'success');
+    showToast('User ID 已复制', 'success');
   } catch (error) {
     console.error('复制失败:', error);
     showToast('复制失败', 'error');
@@ -731,19 +731,34 @@ window.finishInstallation = async function() {
       // 启动失败
       button.disabled = false;
       button.textContent = originalText;
-      showToast('服务器启动失败，请检查日志', 'error');
+      showToast('服务器启动失败', 'error');
       console.error('服务器启动失败:', startResult.error);
       return; // 提前返回，不配置自动启动
     }
     
-    // 步骤 2：服务器启动成功后，配置自动启动
+    // 步骤 2：如果是 iCloud 模式，配置文件夹为"始终保留下载"
+    if (selectedMode === 'icloud') {
+      button.textContent = '正在配置 iCloud 文件夹';
+      console.log('📁 检测到 iCloud 模式，配置文件夹为"始终保留下载"...');
+      const icloudResult = await ipcRenderer.invoke('setup-icloud-keep-downloaded');
+      if (icloudResult.success) {
+        console.log('✅ iCloud 文件夹配置成功');
+        if (icloudResult.warning) {
+          console.warn('⚠️ ', icloudResult.warning);
+        }
+      } else {
+        console.warn('⚠️  iCloud 文件夹配置失败（不影响使用）');
+      }
+    }
+    
+    // 步骤 3：服务器启动成功后，配置自动启动
     button.textContent = '正在配置自动启动';
     const autostartResult = await ipcRenderer.invoke('setup-autostart', installPath);
     
     if (autostartResult.success) {
       // 配置成功
       button.textContent = '配置完成';
-      showToast('安装完成！服务器已启动并配置为开机自启', 'success');
+      showToast('服务自启动已配置完成', 'success');
       
       // 延迟1.5秒后关闭，让用户看到成功消息
       setTimeout(() => {
@@ -753,7 +768,7 @@ window.finishInstallation = async function() {
       // 配置自动启动失败，但服务器已启动
       console.warn('自动启动配置失败:', autostartResult.error);
       button.textContent = '启动成功（自启失败）';
-      showToast('服务器已启动，但自动启动配置失败', 'warning');
+      showToast('服务器已启动', 'warning');
       
       // 仍然关闭安装器，因为服务器已经在运行
         setTimeout(() => {
@@ -764,7 +779,7 @@ window.finishInstallation = async function() {
     // 出错，恢复按钮状态
     button.disabled = false;
     button.textContent = originalText;
-    showToast('配置失败，请重试或联系作者', 'error');
+    showToast('配置失败', 'error');
     console.error('配置自动启动失败:', err);
   }
 }

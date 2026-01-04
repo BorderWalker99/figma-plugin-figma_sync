@@ -109,6 +109,9 @@ function connectWebSocket() {
     try {
       const message = JSON.parse(data);
       
+      // 打印所有接收到的消息（用于调试）
+      console.log(`📨 [iCloud Watcher] 收到消息: ${message.type}`, message.connectionId ? `(from ${message.connectionId})` : '(from server)');
+      
       // 处理文件导入失败消息（需要手动拖入，保留源文件）
       if (message.type === 'screenshot-failed') {
         const filename = message.filename;
@@ -161,7 +164,14 @@ function connectWebSocket() {
       if (message.type === 'figma-connected') {
         console.log('✅ Figma插件已连接\n');
       } else if (message.type === 'start-realtime') {
-        console.log('\n🎯 启动实时同步模式...\n');
+        console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        console.log('🎯 收到 start-realtime 指令');
+        console.log('   当前状态:');
+        console.log(`   • isRealTimeMode: ${isRealTimeMode}`);
+        console.log(`   • watcher 存在: ${watcher ? '是' : '否'}`);
+        console.log(`   • iCloud 路径: ${CONFIG.icloudPath}`);
+        console.log(`   • 路径存在: ${fs.existsSync(CONFIG.icloudPath) ? '是' : '否'}`);
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
         isRealTimeMode = true;
         startWatching();
       } else if (message.type === 'stop-realtime') {
@@ -235,21 +245,31 @@ function scheduleReconnect() {
 
 // ============= 实时监听模式 =============
 function startWatching() {
+  console.log(`\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+  console.log(`🚀 [startWatching] 函数被调用`);
+  console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`);
+  
   if (watcher) {
-    console.log('⚠️  停止旧的监听器...');
+    console.log('⚠️  检测到旧的监听器，正在停止...');
     stopWatching();
   }
   
   if (!fs.existsSync(CONFIG.icloudPath)) {
-    console.log('📁 创建同步文件夹...');
+    console.log(`📁 iCloud 文件夹不存在，正在创建: ${CONFIG.icloudPath}`);
     fs.mkdirSync(CONFIG.icloudPath, { recursive: true });
+    console.log(`✅ 文件夹创建成功\n`);
+  } else {
+    console.log(`✅ iCloud 文件夹已存在: ${CONFIG.icloudPath}\n`);
   }
   
   const startTime = new Date();
-  console.log(`\n🎯 [iCloud] 实时模式启动时间: ${startTime.toISOString()}`);
-  console.log(`👀 开始监听文件夹: ${CONFIG.icloudPath}`);
-  console.log(`📸 支持格式: ${CONFIG.supportedFormats.join(', ')}`);
-  console.log(`🚫 忽略文件夹: GIFs/ (导出的 GIF 存放位置)`);
+  console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+  console.log(`🎯 [iCloud] 实时监听器初始化`);
+  console.log(`   启动时间: ${startTime.toISOString()}`);
+  console.log(`   监听路径: ${CONFIG.icloudPath}`);
+  console.log(`   支持格式: ${CONFIG.supportedFormats.join(', ')}`);
+  console.log(`   忽略文件夹: GIFs/ (导出的 GIF 存放位置)`);
+  console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
   
   // 扫描当前已存在的文件（用于日志记录）
   try {
@@ -271,6 +291,7 @@ function startWatching() {
     console.warn('   ⚠️  扫描现有文件失败，继续启动监听');
   }
   
+  console.log(`\n🔧 正在创建 chokidar watcher...`);
   watcher = chokidar.watch(CONFIG.icloudPath, {
     persistent: true,
     ignoreInitial: true,
@@ -287,15 +308,20 @@ function startWatching() {
       pollInterval: 100
     }
   });
+  console.log(`✅ chokidar watcher 已创建\n`);
   
   const handleFileEvent = (filePath) => {
     const filename = path.basename(filePath);
     const relativePath = path.relative(CONFIG.icloudPath, filePath);
-    console.log(`🔍 [iCloud Watcher] 检测到文件变更: ${relativePath}`);
+    console.log(`\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+    console.log(`🔍 [iCloud Watcher] 检测到文件变更`);
+    console.log(`   文件: ${relativePath}`);
+    console.log(`   时间: ${new Date().toISOString()}`);
+    console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
 
     // 双重保险：即使 chokidar ignored 配置失效，也在这里再次检查
     if (relativePath.startsWith('GIFs' + path.sep) || relativePath === 'GIFs') {
-      console.log(`🚫 [iCloud] 忽略 GIFs 文件夹内容: ${relativePath}`);
+      console.log(`🚫 [iCloud] 忽略 GIFs 文件夹内容: ${relativePath}\n`);
       return;
     }
     
@@ -305,12 +331,13 @@ function startWatching() {
         lowerFilename.endsWith('.miff') || 
         lowerFilename.endsWith('.cache') ||
         lowerFilename.includes('.tmp')) {
-        console.log(`🙈 [iCloud] 忽略临时文件: ${filename}`);
+        console.log(`🙈 [iCloud] 忽略临时文件: ${filename}\n`);
         return;
     }
 
+    console.log(`   检查实时模式状态: ${isRealTimeMode ? '✅ 已开启' : '❌ 已关闭'}`);
     if (!isRealTimeMode) {
-      console.log(`⏸️  实时模式已关闭，忽略文件: ${path.basename(filePath)}`);
+      console.log(`⏸️  实时模式已关闭，忽略文件: ${path.basename(filePath)}\n`);
       return;
     }
     
@@ -475,13 +502,22 @@ function startWatching() {
     }
   };
   
+  console.log(`📝 注册 'add' 事件监听器...`);
   watcher.on('add', handleFileEvent);
+  console.log(`📝 注册 'change' 事件监听器...`);
   watcher.on('change', handleFileEvent);
+  console.log(`✅ 事件监听器已注册\n`);
   
+  console.log(`⏳ 等待 watcher 'ready' 事件...\n`);
   watcher.on('ready', () => {
     const readyTime = new Date();
-    console.log(`✅ [iCloud] 实时监听已就绪 (${readyTime.toISOString()})`);
-    console.log(`ℹ️  [iCloud] 从现在开始，新添加的文件将自动同步到 Figma\n`);
+    console.log(`\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+    console.log(`✅ [iCloud] 实时监听已就绪`);
+    console.log(`   时间: ${readyTime.toISOString()}`);
+    console.log(`   状态: isRealTimeMode = ${isRealTimeMode}`);
+    console.log(`   路径: ${CONFIG.icloudPath}`);
+    console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+    console.log(`ℹ️  从现在开始，新添加的文件将自动同步到 Figma\n`);
     
     // 尝试设置文件夹为"始终保留下载" (Keep Downloaded)
     try {
@@ -622,9 +658,48 @@ async function performManualSync() {
         }
       }
       
-      // 如果是 GIF，先检查大小
+      // 如果是 GIF，先检查文件是否可读，然后检查大小
       if (isGif) {
         try {
+          // 🔍 确保文件已完全从 iCloud 下载（与 syncScreenshot 中的逻辑一致）
+          console.log(`   🎬 检测到 GIF 文件: ${file}`);
+          console.log(`   🔍 检查文件是否已从 iCloud 下载...`);
+          try {
+            const fd = fs.openSync(filePath, 'r');
+            const buffer = Buffer.alloc(8);
+            fs.readSync(fd, buffer, 0, 8, 0);
+            fs.closeSync(fd);
+            console.log(`   ✅ 文件可读，继续处理`);
+          } catch (readError) {
+            console.log(`   ⚠️  文件预读取失败 (可能是 iCloud 尚未下载完成)`);
+            console.log(`   📋 错误: ${readError.message} (errno: ${readError.errno || readError.code})`);
+            
+            // 尝试使用 brctl download 强制下载
+            try {
+              console.log(`   ☁️  尝试使用 brctl 强制下载...`);
+              exec(`brctl download "${filePath}"`);
+            } catch (e) {
+              // 忽略 brctl 错误
+            }
+
+            console.log(`   ⏳ 等待 5 秒后重试...`);
+            await sleep(5000);
+            
+            // 再次尝试读取
+            try {
+              const fd = fs.openSync(filePath, 'r');
+              const buffer = Buffer.alloc(8);
+              fs.readSync(fd, buffer, 0, 8, 0);
+              fs.closeSync(fd);
+              console.log(`   ✅ 重试成功，文件已可读`);
+            } catch (retryError) {
+              const errorMsg = `GIF 文件尚未从 iCloud 下载完成。\n\n请在 iCloud 云盘中找到 ScreenSyncImg 文件夹，点击文件旁的云朵图标下载，或右键选择"始终保留在此 Mac 上"。\n\n(系统错误: ${retryError.message})`;
+              console.error(`   ❌ ${errorMsg}`);
+              throw new Error(errorMsg);
+            }
+          }
+          
+          // 检查文件大小
           const stats = fs.statSync(filePath);
           const fileSize = stats.size;
           const maxGifSize = 100 * 1024 * 1024; // 100MB
@@ -657,17 +732,61 @@ async function performManualSync() {
             continue;
           }
         } catch (checkError) {
-          // 如果检查失败，继续正常处理流程
-          console.log(`   ⚠️  检查 GIF 大小失败，继续处理: ${checkError.message}`);
+          // 如果检查失败，记录错误并跳过此文件
+          console.error(`   ❌ GIF 文件检查失败: ${checkError.message}`);
+          processingErrors.push({
+            filename: file,
+            error: checkError.message,
+            stack: checkError.stack
+          });
+          continue;
         }
       }
       
       // 如果是视频文件，需要手动拖入，不算成功
       if (isVideo) {
-        console.log(`   ⚠️  视频文件需要手动拖入: ${file}`);
+        console.log(`   🎥 检测到视频文件: ${file}`);
+        console.log(`   ⚠️  视频文件需要手动拖入`);
         
-        // 自动缓存视频文件（用于导出带标注的 GIF 功能）
+        // 🔍 确保文件已完全从 iCloud 下载后再缓存
         try {
+          console.log(`   🔍 检查文件是否已从 iCloud 下载...`);
+          try {
+            const fd = fs.openSync(filePath, 'r');
+            const buffer = Buffer.alloc(8);
+            fs.readSync(fd, buffer, 0, 8, 0);
+            fs.closeSync(fd);
+            console.log(`   ✅ 文件可读，继续缓存`);
+          } catch (readError) {
+            console.log(`   ⚠️  文件预读取失败 (可能是 iCloud 尚未下载完成)`);
+            console.log(`   📋 错误: ${readError.message} (errno: ${readError.errno || readError.code})`);
+            
+            // 尝试使用 brctl download 强制下载
+            try {
+              console.log(`   ☁️  尝试使用 brctl 强制下载...`);
+              exec(`brctl download "${filePath}"`);
+            } catch (e) {
+              // 忽略 brctl 错误
+            }
+
+            console.log(`   ⏳ 等待 5 秒后重试...`);
+            await sleep(5000);
+            
+            // 再次尝试读取
+            try {
+              const fd = fs.openSync(filePath, 'r');
+              const buffer = Buffer.alloc(8);
+              fs.readSync(fd, buffer, 0, 8, 0);
+              fs.closeSync(fd);
+              console.log(`   ✅ 重试成功，文件已可读`);
+            } catch (retryError) {
+              const errorMsg = `视频文件尚未从 iCloud 下载完成。请在 iCloud 云盘中找到 ScreenSyncImg 文件夹，点击文件旁的云朵图标下载。\n\n(系统错误: ${retryError.message})`;
+              console.error(`   ❌ ${errorMsg}`);
+              throw new Error(errorMsg);
+            }
+          }
+          
+          // 自动缓存视频文件（用于导出带标注的 GIF 功能）
           const fileBuffer = fs.readFileSync(filePath);
           const userConfig = require('./userConfig');
           const cacheResult = userConfig.saveGifToCache(fileBuffer, file, null);
@@ -676,6 +795,7 @@ async function performManualSync() {
           }
         } catch (cacheError) {
           console.error(`   ⚠️  [GIF Cache] 缓存失败:`, cacheError.message);
+          // 即使缓存失败，也不阻止继续（视频文件本来就需要手动拖入）
         }
         
         // 发送 file-skipped 消息
@@ -777,6 +897,42 @@ async function syncScreenshot(filePath, deleteAfterSync = false) {
       // GIF 格式，检查文件大小
       console.log(`   🎬 检测到 GIF 格式...`);
       
+      // 🔍 确保文件已完全从 iCloud 下载
+      // 读取文件的前几个字节来触发 iCloud 下载并验证文件可读
+      try {
+        const fd = fs.openSync(filePath, 'r');
+        const buffer = Buffer.alloc(8);
+        fs.readSync(fd, buffer, 0, 8, 0);
+        fs.closeSync(fd);
+        console.log(`   ✅ 文件可读，继续处理`);
+      } catch (readError) {
+        console.log(`   ⚠️  文件预读取失败 (可能是 iCloud 尚未下载完成): ${readError.message}`);
+        console.log(`   📋 系统错误码: ${readError.errno || readError.code}`);
+        
+        // 尝试使用 brctl download 强制下载
+        try {
+          console.log(`   ☁️  尝试使用 brctl 强制下载...`);
+          exec(`brctl download "${filePath}"`);
+        } catch (e) {
+          // 忽略 brctl 错误
+        }
+
+        console.log(`   ⏳ 等待 5 秒后重试...`);
+        await sleep(5000);
+        
+        // 再次尝试读取，如果失败则抛出更明确的错误
+        try {
+          const fd = fs.openSync(filePath, 'r');
+          const buffer = Buffer.alloc(8);
+          fs.readSync(fd, buffer, 0, 8, 0);
+          fs.closeSync(fd);
+          console.log(`   ✅ 重试成功，文件已可读`);
+        } catch (retryError) {
+          throw new Error(`GIF 文件尚未从 iCloud 下载完成。\n\n请在 iCloud 云盘中找到 ScreenSyncImg 文件夹，点击文件旁的云朵图标下载，或右键选择"始终保留在此 Mac 上"。\n\n(系统错误: ${retryError.message})`);
+        }
+      }
+      
+      // 读取完整的GIF文件
       imageBuffer = fs.readFileSync(filePath);
       const originalSize = imageBuffer.length;
       const maxGifSize = 100 * 1024 * 1024; // 100MB（防止 Figma 死机）

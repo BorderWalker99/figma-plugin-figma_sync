@@ -1047,6 +1047,62 @@ ipcMain.handle('setup-autostart', async (event, installPath) => {
   });
 });
 
+// 配置 iCloud 文件夹为"始终保留下载"
+ipcMain.handle('setup-icloud-keep-downloaded', async () => {
+  return new Promise((resolve) => {
+    try {
+      const icloudPath = path.join(
+        os.homedir(),
+        'Library/Mobile Documents/com~apple~CloudDocs/ScreenSyncImg'
+      );
+      
+      console.log('☁️  配置 iCloud 文件夹为"始终保留下载"...');
+      console.log('   路径:', icloudPath);
+      
+      // 确保文件夹存在
+      if (!fs.existsSync(icloudPath)) {
+        console.log('   📁 文件夹不存在，正在创建...');
+        fs.mkdirSync(icloudPath, { recursive: true });
+        console.log('   ✅ 文件夹已创建');
+      }
+      
+      // 使用 brctl 命令设置文件夹为"始终保留下载"
+      // -R 表示递归（包括子文件夹和文件）
+      const command = `brctl download -R "${icloudPath}"`;
+      
+      exec(command, { timeout: 10000 }, (error, stdout, stderr) => {
+        if (error) {
+          console.warn('   ⚠️  brctl 命令执行失败（这不影响基本功能）:', error.message);
+          if (stderr) {
+            console.warn('   stderr:', stderr);
+          }
+          // 即使失败也返回成功，因为这不是关键功能
+          resolve({ 
+            success: true, 
+            warning: 'brctl 命令执行失败，但不影响基本功能',
+            message: error.message
+          });
+        } else {
+          console.log('   ✅ iCloud 文件夹已配置为"始终保留下载"');
+          if (stdout) {
+            console.log('   输出:', stdout.trim());
+          }
+          resolve({ success: true });
+        }
+      });
+      
+    } catch (error) {
+      console.error('❌ 配置 iCloud 文件夹失败:', error.message);
+      // 即使失败也返回成功，因为这不是关键功能
+      resolve({ 
+        success: true, 
+        warning: '配置失败，但不影响基本功能',
+        message: error.message
+      });
+    }
+  });
+});
+
 // 退出应用
 ipcMain.handle('quit-app', () => {
   console.log('收到退出请求，正在退出应用...');
