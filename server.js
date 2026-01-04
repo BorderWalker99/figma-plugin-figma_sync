@@ -621,10 +621,11 @@ async function composeAnnotatedGif({ frameName, annotationBytes, frameBounds, gi
   let downloadFolder;
   
   if (currentMode === 'icloud') {
-    // iCloud 模式：保存到 iCloud 文件夹
+    // iCloud 模式：保存到 iCloud/ScreenSyncImg/GIFs 子文件夹
+    // 这样监听器只需监听 ScreenSyncImg 根目录，不会与导出的 GIF 混淆
     downloadFolder = path.join(
       os.homedir(),
-      'Library/Mobile Documents/com~apple~CloudDocs/ScreenSyncImg'
+      'Library/Mobile Documents/com~apple~CloudDocs/ScreenSyncImg/GIFs'
     );
     console.log(`📂 [iCloud模式] 输出路径: ${downloadFolder}`);
   } else {
@@ -2958,9 +2959,10 @@ wss.on('connection', (ws, req) => {
       // 根据当前模式决定打开哪个文件夹
       const currentMode = process.env.SYNC_MODE || 'drive';
       if (currentMode === 'icloud') {
+        // iCloud 模式：打开 ScreenSyncImg/GIFs 子文件夹（导出的 GIF 存放位置）
         targetFolder = path.join(
           os.homedir(),
-          'Library/Mobile Documents/com~apple~CloudDocs/ScreenSyncImg'
+          'Library/Mobile Documents/com~apple~CloudDocs/ScreenSyncImg/GIFs'
         );
         console.log('   [iCloud模式] 目标文件夹:', targetFolder);
       } else {

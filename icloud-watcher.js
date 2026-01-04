@@ -245,8 +245,31 @@ function startWatching() {
     fs.mkdirSync(CONFIG.icloudPath, { recursive: true });
   }
   
+  const startTime = new Date();
+  console.log(`\n🎯 [iCloud] 实时模式启动时间: ${startTime.toISOString()}`);
   console.log(`👀 开始监听文件夹: ${CONFIG.icloudPath}`);
-  console.log(`📸 支持格式: ${CONFIG.supportedFormats.join(', ')}\n`);
+  console.log(`📸 支持格式: ${CONFIG.supportedFormats.join(', ')}`);
+  console.log(`🚫 忽略文件夹: GIFs/ (导出的 GIF 存放位置)`);
+  
+  // 扫描当前已存在的文件（用于日志记录）
+  try {
+    const existingFiles = fs.readdirSync(CONFIG.icloudPath).filter(file => {
+      const filePath = path.join(CONFIG.icloudPath, file);
+      const stats = fs.statSync(filePath);
+      if (stats.isDirectory()) return false;
+      const ext = path.extname(file).toLowerCase();
+      return CONFIG.supportedFormats.includes(ext);
+    });
+    console.log(`📊 [iCloud] 当前文件夹中有 ${existingFiles.length} 个文件将被标记为"已存在"（ignoreInitial）`);
+    if (existingFiles.length > 0 && existingFiles.length <= 10) {
+      existingFiles.forEach(file => console.log(`   - ${file}`));
+    } else if (existingFiles.length > 10) {
+      console.log(`   前3个: ${existingFiles.slice(0, 3).join(', ')} ...`);
+    }
+    console.log(`ℹ️  [iCloud] 实时模式将只处理监听启动后新添加的文件\n`);
+  } catch (error) {
+    console.warn('   ⚠️  扫描现有文件失败，继续启动监听');
+  }
   
   watcher = chokidar.watch(CONFIG.icloudPath, {
     persistent: true,
@@ -255,7 +278,9 @@ function startWatching() {
       '**/.temp-*/**',      // 忽略临时文件夹
       '**/.*',              // 忽略隐藏文件（以点开头）
       '**/.DS_Store',       // 忽略 macOS 系统文件
-      '**/Thumbs.db'        // 忽略 Windows 系统文件
+      '**/Thumbs.db',       // 忽略 Windows 系统文件
+      '**/GIFs',            // 忽略 GIFs 文件夹本身
+      '**/GIFs/**'          // 忽略 GIFs 文件夹内的所有内容（导出的 GIF 存放位置）
     ],
     awaitWriteFinish: {
       stabilityThreshold: 3500,  // 增加到 3.5 秒，确保大文件写入完成
@@ -265,14 +290,13 @@ function startWatching() {
   
   const handleFileEvent = (filePath) => {
     const filename = path.basename(filePath);
-    console.log(`🔍 [iCloud Watcher] 检测到文件变更: ${filename}`); // 调试日志
+    const relativePath = path.relative(CONFIG.icloudPath, filePath);
+    console.log(`🔍 [iCloud Watcher] 检测到文件变更: ${relativePath}`);
 
-    // 忽略 _exported 结尾的文件（这是服务器自己生成的导出 GIF）
-    // 使用 toLowerCase() 确保忽略大小写差异
-    // 移除末尾的点检查，以兼容 "xxx_exported 2.gif" 这种冲突重命名的情况
-    if (filename.toLowerCase().includes('_exported')) {
-        console.log(`🙈 [iCloud] 忽略已导出的 GIF: ${filename}`);
-        return;
+    // 双重保险：即使 chokidar ignored 配置失效，也在这里再次检查
+    if (relativePath.startsWith('GIFs' + path.sep) || relativePath === 'GIFs') {
+      console.log(`🚫 [iCloud] 忽略 GIFs 文件夹内容: ${relativePath}`);
+      return;
     }
     
     // 忽略 ImageMagick 的临时文件
@@ -455,7 +479,9 @@ function startWatching() {
   watcher.on('change', handleFileEvent);
   
   watcher.on('ready', () => {
-    console.log('✅ 实时监听已启动\n');
+    const readyTime = new Date();
+    console.log(`✅ [iCloud] 实时监听已就绪 (${readyTime.toISOString()})`);
+    console.log(`ℹ️  [iCloud] 从现在开始，新添加的文件将自动同步到 Figma\n`);
     
     // 尝试设置文件夹为"始终保留下载" (Keep Downloaded)
     try {
@@ -512,10 +538,11 @@ async function performManualSync() {
   const files = fs.readdirSync(CONFIG.icloudPath);
   const imageFiles = files.filter(file => {
     const ext = path.extname(file).toLowerCase();
+    const filePath = path.join(CONFIG.icloudPath, file);
     
-    // 忽略 _exported 结尾的文件（这是服务器自己生成的导出 GIF）
-    if (file.toLowerCase().includes('_exported')) {
-      console.log(`🙈 [手动同步] 忽略已导出的 GIF: ${file}`);
+    // 忽略 GIFs 子文件夹（导出的 GIF 存放位置）
+    if (file === 'GIFs' && fs.existsSync(filePath) && fs.statSync(filePath).isDirectory()) {
+      console.log(`🙈 [手动同步] 忽略 GIFs 子文件夹`);
       return false;
     }
     
