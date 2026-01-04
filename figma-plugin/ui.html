@@ -2048,11 +2048,18 @@
       log(`🔄 尝试重新连接 (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`);
       updateStatus('waiting', '正在连接');
       
-      // 首先尝试普通重连
+      // 🔧 关键修复：清理心跳定时器，防止干扰
+      if (heartbeatTimer) {
+        clearInterval(heartbeatTimer);
+        heartbeatTimer = null;
+        log('   已清理心跳定时器');
+      }
+      
+      // 🔧 关键修复：增加等待时间，确保旧连接完全释放（从 500ms 增加到 1500ms）
       setTimeout(() => {
         connect();
         
-        // 检查连接是否成功
+        // 检查连接是否成功（增加检查时间从 2s 到 3s）
         setTimeout(() => {
           if (!ws || ws.readyState !== WebSocket.OPEN) {
             // 连接失败，尝试修复服务
@@ -2071,8 +2078,8 @@
             log('✅ 重新连接成功');
             showToast('已重新连接', 'success');
           }
-        }, 2000);
-      }, 500);
+        }, 3000);
+      }, 1500);
     }
     
     // 修复服务器连接（后端自动修复）
@@ -2114,6 +2121,29 @@
     function connect() {
       // 不要在连接开始时立即更新status，避免重连时频繁切换
       // 只有在真正连接成功后才更新status
+      
+      // 🔧 关键修复：在创建新连接之前，彻底关闭旧连接
+      if (ws) {
+        try {
+          log('🧹 清理旧连接...');
+          // 移除所有事件监听器，防止触发 onclose 导致自动重连
+          ws.onopen = null;
+          ws.onmessage = null;
+          ws.onerror = null;
+          ws.onclose = null;
+          
+          // 如果连接还未完全关闭，强制关闭
+          if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+            ws.close();
+            log('   已关闭旧 WebSocket 连接');
+          }
+          
+          ws = null;
+        } catch (error) {
+          log('   ⚠️ 关闭旧连接时出错: ' + error.message);
+          ws = null;
+        }
+      }
 
       ws = new WebSocket(SERVER_URL + '?id=' + connectionId + '&type=figma');
 

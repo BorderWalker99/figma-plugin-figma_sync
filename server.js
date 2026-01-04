@@ -2817,6 +2817,20 @@ wss.on('connection', (ws, req) => {
   }
   
   const group = connections.get(connectionId);
+  
+  // 🔧 关键修复：如果已有相同类型的连接，先关闭旧连接
+  if (group[clientType]) {
+    const oldWs = group[clientType];
+    if (oldWs && oldWs.readyState !== WebSocket.CLOSED) {
+      console.log(`   🧹 检测到旧的 ${clientType} 连接，正在关闭...`);
+      try {
+        oldWs.close();
+      } catch (error) {
+        console.log(`   ⚠️ 关闭旧连接失败: ${error.message}`);
+      }
+    }
+  }
+  
   group[clientType] = ws;
   console.log(`🔌 WebSocket连接: ${clientType} (${connectionId})`);
   
@@ -3644,6 +3658,36 @@ wss.on('connection', (ws, req) => {
   });
 });
 
+// 🔧 定期清理僵死的 WebSocket 连接（每 30 秒检查一次）
+setInterval(() => {
+  let cleanedCount = 0;
+  for (const [connectionId, group] of connections.entries()) {
+    // 检查 figma 连接
+    if (group.figma && (group.figma.readyState === WebSocket.CLOSING || group.figma.readyState === WebSocket.CLOSED)) {
+      console.log(`🧹 [清理] 移除僵死的 figma 连接: ${connectionId}`);
+      delete group.figma;
+      cleanedCount++;
+    }
+    
+    // 检查 mac 连接
+    if (group.mac && (group.mac.readyState === WebSocket.CLOSING || group.mac.readyState === WebSocket.CLOSED)) {
+      console.log(`🧹 [清理] 移除僵死的 mac 连接: ${connectionId}`);
+      delete group.mac;
+      cleanedCount++;
+    }
+    
+    // 如果组为空，删除整个组
+    if (!group.figma && !group.mac) {
+      connections.delete(connectionId);
+      cancelFlags.delete(connectionId);
+    }
+  }
+  
+  if (cleanedCount > 0) {
+    console.log(`🧹 [清理] 已清理 ${cleanedCount} 个僵死连接，当前活跃连接: ${connections.size}`);
+  }
+}, 30000); // 每 30 秒执行一次
+
 // 检查并通知更新（插件和服务器）
 async function checkAndNotifyUpdates(targetGroup, connectionId) {
   if (!targetGroup || !targetGroup.figma || targetGroup.figma.readyState !== WebSocket.OPEN) {
@@ -4288,32 +4332,31 @@ async function handleFullUpdate(targetGroup, connectionId) {
     
     console.log(`   ✅ 获取到最新版本: ${releaseInfo.tag_name}`);
     
-    // 优先使用 Source Code (tarball) 作为轻量级更新包
-    // 这样不需要在 Release 中额外上传 UpdatePackage，直接复用 GitHub 生成的源码包
+    // 🔧 关键修复：必须使用 Release Assets 中的完整 UserPackage
+    // GitHub 的 tarball_url 只是源码快照，不包含编译后的插件和完整文件结构
     let downloadUrl;
     let updateFilename;
     let updateSize = 0;
     
-    if (releaseInfo.tarball_url) {
-      downloadUrl = releaseInfo.tarball_url;
-      updateFilename = `source-code-${releaseInfo.tag_name}.tar.gz`;
-      console.log(`   ✨ 使用源码包作为更新源 (轻量级): ${downloadUrl}`);
-    } else {
-      // 降级：查找 UserPackage
-      console.log('   ⚠️  未找到源码包链接，尝试查找完整包...');
-      const updateAsset = releaseInfo.assets.find(asset => 
-        asset.name.includes('ScreenSync-UserPackage') && asset.name.endsWith('.tar.gz')
-      );
-      
-      if (!updateAsset) {
-        throw new Error('未找到更新包文件 (Source Code 或 ScreenSync-UserPackage)');
-      }
-      
-      downloadUrl = updateAsset.browser_download_url;
-      updateFilename = updateAsset.name;
-      updateSize = updateAsset.size;
-      console.log(`   📦 找到完整更新包: ${updateFilename} (${(updateSize / 1024 / 1024).toFixed(2)} MB)`);
+    console.log(`   📦 正在查找完整更新包...`);
+    console.log(`   Available assets:`, releaseInfo.assets.map(a => a.name).join(', '));
+    
+    // 查找 ScreenSync-UserPackage（完整包，包含编译后的插件）
+    const updateAsset = releaseInfo.assets.find(asset => 
+      asset.name.includes('ScreenSync-UserPackage') && asset.name.endsWith('.tar.gz')
+    );
+    
+    if (!updateAsset) {
+      console.error(`   ❌ 未找到 UserPackage 更新包`);
+      console.error(`   Available assets:`, releaseInfo.assets.map(a => a.name));
+      throw new Error('未找到 ScreenSync-UserPackage 更新包。请确保 Release 中已上传完整的 UserPackage。');
     }
+    
+    downloadUrl = updateAsset.browser_download_url;
+    updateFilename = updateAsset.name;
+    updateSize = updateAsset.size;
+    console.log(`   ✅ 找到完整更新包: ${updateFilename}`);
+    console.log(`   📦 文件大小: ${(updateSize / 1024 / 1024).toFixed(2)} MB`);
     
     // 通知用户正在下载
     targetGroup.figma.send(JSON.stringify({
@@ -4328,11 +4371,7 @@ async function handleFullUpdate(targetGroup, connectionId) {
     const updateDir = path.join(__dirname, '.full-update');
     
     console.log(`   📥 下载地址: ${downloadUrl}`);
-    if (updateSize > 0) {
-      console.log(`   📦 文件大小: ${(updateSize / 1024 / 1024).toFixed(2)} MB`);
-    } else {
-      console.log(`   📦 文件大小: 未知 (源码包)`);
-    }
+    console.log(`   📦 文件大小: ${(updateSize / 1024 / 1024).toFixed(2)} MB`);
     console.log(`   ⏳ 开始下载...`);
     
     // 下载文件（带超时保护）
@@ -4402,6 +4441,8 @@ async function handleFullUpdate(targetGroup, connectionId) {
         console.log('   ⚠️  未自动定位到根目录，尝试使用解压根目录');
         // 如果解压出来只有一个文件夹，进入该文件夹
         const extractedItems = fs.readdirSync(updateDir).filter(item => !item.startsWith('.'));
+        console.log(`   Extracted items:`, extractedItems);
+        
         if (extractedItems.length === 1 && fs.statSync(path.join(updateDir, extractedItems[0])).isDirectory()) {
           extractedDir = path.join(updateDir, extractedItems[0]);
         } else {
@@ -4410,6 +4451,31 @@ async function handleFullUpdate(targetGroup, connectionId) {
     }
     
     console.log(`   📂 最终内容目录: ${extractedDir}`);
+    
+    // 🔧 验证目录结构
+    const requiredFiles = ['server.js', 'package.json'];
+    const requiredDirs = ['figma-plugin'];
+    const missingItems = [];
+    
+    for (const file of requiredFiles) {
+      if (!fs.existsSync(path.join(extractedDir, file))) {
+        missingItems.push(file);
+      }
+    }
+    
+    for (const dir of requiredDirs) {
+      if (!fs.existsSync(path.join(extractedDir, dir))) {
+        missingItems.push(dir + '/');
+      }
+    }
+    
+    if (missingItems.length > 0) {
+      console.error(`   ❌ 更新包不完整，缺少以下文件/目录:`, missingItems);
+      console.error(`   ❌ 目录内容:`, fs.readdirSync(extractedDir));
+      throw new Error(`更新包不完整，缺少必需的文件: ${missingItems.join(', ')}`);
+    }
+    
+    console.log(`   ✅ 目录结构验证通过`);
     
     // 备份现有文件
     const backupDir = path.join(__dirname, '.full-backup');
