@@ -4696,7 +4696,8 @@ async function handleFullUpdate(targetGroup, connectionId) {
         type: 'update-progress',
         status: 'completed',
         message: `更新完成！服务器将自动重启...`,
-        updatedCount: updatedCount
+        updatedCount: updatedCount,
+        latestVersion: releaseInfo.tag_name // 发送最新版本号
       }));
     }
     

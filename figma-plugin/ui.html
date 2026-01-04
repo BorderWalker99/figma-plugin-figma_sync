@@ -469,6 +469,20 @@
       filter: brightness(1.1);
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
     }
+    
+    /* 透明状态：去除蓝色背景，仅显示文字 */
+    .update-banner-btn.primary.transparent {
+      background: transparent;
+      color: var(--text-primary);
+      font-weight: 500;
+      cursor: default;
+      pointer-events: none;
+    }
+    
+    .update-banner-btn.primary.transparent:hover {
+      filter: none;
+      box-shadow: none;
+    }
 
     .update-banner-btn.secondary {
       background: var(--bg-hover);
@@ -2016,6 +2030,12 @@
     let dismissedServerVersion = null; // 用户点击"稍后"后记录的服务器版本
     let pendingPluginUpdateInfo = null; // 暂存的插件更新信息（等待版本信息到达后处理）
     
+    // 从 localStorage 读取已安装的服务器版本（防止更新后 banner 再次弹出）
+    let installedServerVersion = localStorage.getItem('currentServerVersion') || null;
+    if (installedServerVersion) {
+      console.log(`📌 从 localStorage 读取已安装版本: v${installedServerVersion}`);
+    }
+    
     // 配置：定期检查更新的间隔（毫秒）
     const UPDATE_CHECK_INTERVAL = 60 * 60 * 1000; // 1小时检查一次
     
@@ -3306,6 +3326,12 @@
     // 处理服务器更新信息
     function handleServerUpdateInfo(data) {
       if (data.hasUpdate) {
+        // 首先检查是否已经安装了这个版本（从 localStorage）
+        if (installedServerVersion && compareVersions(data.latestVersion, installedServerVersion) <= 0) {
+          console.log(`✅ 已安装最新版本: v${installedServerVersion}，跳过更新提示`);
+          return;
+        }
+        
         // 检查是否是用户已经点击"稍后"忽略的版本
         const shouldShow = !dismissedServerVersion || compareVersions(data.latestVersion, dismissedServerVersion) > 0;
         
@@ -3391,32 +3417,41 @@
       const bannerBtn = document.getElementById('updateBannerNow');
       
       if (data.status === 'downloading') {
-        // 显示下载进度
-        const progressText = data.progress ? ` (${data.progress}%)` : '';
-        const message = data.message || '正在下载...';
-        showToast(message, 'loading');
+        // 只更新按钮文字，不显示 toast
         if (bannerBtn) {
           bannerBtn.disabled = true;
+          // 去除蓝色背景：添加 transparent 类
+          bannerBtn.classList.add('transparent');
           bannerBtn.textContent = data.progress ? `${data.progress}%` : '下载中...';
         }
       } else if (data.status === 'extracting') {
-        showToast(data.message || '正在解压...', 'loading');
+        // 只更新按钮文字，不显示 toast
         if (bannerBtn) {
+          bannerBtn.classList.add('transparent');
           bannerBtn.textContent = '解压中...';
         }
       } else if (data.status === 'checking') {
-        showToast(data.message || '正在检查文件...', 'loading');
+        // 只更新按钮文字，不显示 toast
         if (bannerBtn) {
+          bannerBtn.classList.add('transparent');
           bannerBtn.textContent = '检查中...';
         }
       } else if (data.status === 'installing') {
-        showToast(data.message || '正在安装...', 'loading');
+        // 只更新按钮文字，不显示 toast
         if (bannerBtn) {
+          bannerBtn.classList.add('transparent');
           bannerBtn.textContent = '安装中...';
         }
       } else if (data.status === 'completed') {
         const successMsg = data.message || `更新完成！已更新 ${data.updatedCount || 0} 个文件`;
         showToast(successMsg, 'success');
+        
+        // 保存当前版本号到 localStorage，防止 banner 再次弹出
+        if (data.latestVersion) {
+          installedServerVersion = data.latestVersion.replace(/^v/, '');
+          localStorage.setItem('currentServerVersion', installedServerVersion);
+          console.log(`💾 已保存当前版本: ${installedServerVersion}`);
+        }
         
         // 隐藏更新通知条
         hideUpdateBanner();
@@ -3442,6 +3477,7 @@
         // 重置按钮状态，但保持 banner 主文字不变
         if (bannerBtn) {
           bannerBtn.disabled = false;
+          bannerBtn.classList.remove('transparent');
           bannerBtn.textContent = '立即更新';
         }
       }
