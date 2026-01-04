@@ -4256,20 +4256,20 @@ async function handleServerUpdate(targetGroup, connectionId) {
   }
 }
 
-// 统一全量更新功能（插件 + 服务器所有代码）
+// 统一更新功能（增量更新：只下载变化的文件）
 async function handleFullUpdate(targetGroup, connectionId) {
   if (!targetGroup || !targetGroup.figma || targetGroup.figma.readyState !== WebSocket.OPEN) {
     console.log('   ❌ Figma 客户端未连接，无法执行更新');
     return;
   }
   
-  // 为整个更新流程添加总体超时（10分钟）
+  // 为整个更新流程添加总体超时（5分钟，增量更新更快）
   const overallTimeout = new Promise((_, reject) => {
-    setTimeout(() => reject(new Error('更新超时（超过10分钟），请检查网络连接或稍后重试')), 600000);
+    setTimeout(() => reject(new Error('更新超时（超过5分钟），请检查网络连接或稍后重试')), 300000);
   });
   
   const updateTask = (async () => {
-    console.log('\n🔄 [Full Update] 开始全量更新（插件 + 服务器）...');
+    console.log('\n🔄 [Incremental Update] 开始增量更新（只下载变化的文件）...');
     console.log(`   📋 连接ID: ${connectionId}`);
     console.log(`   ⏰ 开始时间: ${new Date().toLocaleTimeString()}`);
     
@@ -4330,240 +4330,249 @@ async function handleFullUpdate(targetGroup, connectionId) {
       });
     });
     
-    console.log(`   ✅ 获取到最新版本: ${releaseInfo.tag_name}`);
+    const latestVersion = releaseInfo.tag_name;
+    console.log(`   ✅ 获取到最新版本: ${latestVersion}`);
     
-    // 🔧 关键修复：必须使用 Release Assets 中的完整 UserPackage
-    // GitHub 的 tarball_url 只是源码快照，不包含编译后的插件和完整文件结构
-    let downloadUrl;
-    let updateFilename;
-    let updateSize = 0;
-    
-    console.log(`   📦 正在查找完整更新包...`);
-    console.log(`   Available assets:`, releaseInfo.assets.map(a => a.name).join(', '));
-    
-    // 查找 ScreenSync-UserPackage（完整包，包含编译后的插件）
-    const updateAsset = releaseInfo.assets.find(asset => 
-      asset.name.includes('ScreenSync-UserPackage') && asset.name.endsWith('.tar.gz')
-    );
-    
-    if (!updateAsset) {
-      console.error(`   ❌ 未找到 UserPackage 更新包`);
-      console.error(`   Available assets:`, releaseInfo.assets.map(a => a.name));
-      throw new Error('未找到 ScreenSync-UserPackage 更新包。请确保 Release 中已上传完整的 UserPackage。');
+    // 读取当前版本
+    const currentVersionPath = path.join(__dirname, 'VERSION.txt');
+    let currentVersion = 'v0.0.0';
+    if (fs.existsSync(currentVersionPath)) {
+      currentVersion = fs.readFileSync(currentVersionPath, 'utf8').trim();
+      console.log(`   📌 当前版本: ${currentVersion}`);
+    } else {
+      console.log(`   ⚠️  未找到 VERSION.txt，假设为初始版本`);
     }
     
-    downloadUrl = updateAsset.browser_download_url;
-    updateFilename = updateAsset.name;
-    updateSize = updateAsset.size;
-    console.log(`   ✅ 找到完整更新包: ${updateFilename}`);
-    console.log(`   📦 文件大小: ${(updateSize / 1024 / 1024).toFixed(2)} MB`);
+    // 🚀 使用 GitHub Compare API 获取变化的文件列表
+    console.log(`   🔍 检查版本差异: ${currentVersion} → ${latestVersion}`);
+    const repo = 'BorderWalker99/figma-plugin-figma_sync';
+    const compareUrl = `https://api.github.com/repos/${repo}/compare/${currentVersion}...${latestVersion}`;
+    
+    const compareInfo = await new Promise((resolve, reject) => {
+      const options = {
+        headers: {
+          'User-Agent': 'ScreenSync-Incremental-Updater/1.0',
+          'Accept': 'application/vnd.github.v3+json'
+        }
+      };
+      
+      console.log(`   🌐 正在获取文件变化列表...`);
+      const req = https.get(compareUrl, options, (res) => {
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => {
+          if (res.statusCode === 200) {
+            try {
+              resolve(JSON.parse(data));
+            } catch (e) {
+              reject(new Error('解析 Compare API 响应失败'));
+            }
+          } else if (res.statusCode === 404) {
+            // 如果对比失败（可能是版本标签不存在），回退到全量更新
+            console.log(`   ⚠️  无法对比版本（${res.statusCode}），将下载所有文件`);
+            resolve(null);
+          } else {
+            reject(new Error(`Compare API 返回错误: ${res.statusCode}`));
+          }
+        });
+      });
+      
+      req.setTimeout(20000, () => {
+        req.destroy();
+        reject(new Error('Compare API 请求超时'));
+      });
+      
+      req.on('error', (error) => reject(error));
+    });
+    
+    // 确定需要更新的文件列表
+    let filesToUpdate = [];
+    const coreFiles = [
+      'server.js',
+      'start.js',
+      'googleDrive.js',
+      'drive-watcher.js',
+      'aliyunOSS.js',
+      'aliyun-watcher.js',
+      'icloud-watcher.js',
+      'userConfig.js',
+      'update-manager.js',
+      'package.json',
+      'VERSION.txt',
+      'figma-plugin/manifest.json',
+      'figma-plugin/code.js',
+      'figma-plugin/ui.html'
+    ];
+    
+    if (compareInfo && compareInfo.files) {
+      // 有版本对比信息，只更新变化的文件
+      const changedFiles = compareInfo.files
+        .filter(file => 
+          (file.status === 'modified' || file.status === 'added' || file.status === 'renamed') &&
+          coreFiles.some(cf => file.filename.includes(cf) || cf.includes(file.filename))
+        )
+        .map(file => {
+          // 对于 renamed 文件，使用新文件名
+          const filename = file.status === 'renamed' && file.filename !== file.previous_filename 
+            ? file.filename 
+            : file.filename;
+          // 移除可能的路径前缀（例如："ScreenSync - SourceCode/"）
+          return filename.replace(/^[^\/]+\//, '');
+        });
+      
+      filesToUpdate = [...new Set(changedFiles)]; // 去重
+      console.log(`   📝 检测到 ${filesToUpdate.length} 个文件有变化:`);
+      filesToUpdate.forEach(file => console.log(`      - ${file}`));
+    } else {
+      // 无法对比或首次安装，下载所有核心文件
+      filesToUpdate = coreFiles;
+      console.log(`   📦 将更新所有核心文件 (${filesToUpdate.length} 个)`);
+    }
+    
+    if (filesToUpdate.length === 0) {
+      console.log(`   ✅ 所有文件都是最新的，无需更新！`);
+      targetGroup.figma.send(JSON.stringify({
+        type: 'update-complete',
+        success: true,
+        message: '所有文件都是最新的'
+      }));
+      return;
+    }
     
     // 通知用户正在下载
     targetGroup.figma.send(JSON.stringify({
       type: 'update-progress',
       status: 'downloading',
-      message: '正在下载更新包...'
+      message: `正在下载 ${filesToUpdate.length} 个更新文件...`
     }));
     
-    // 下载更新包
-    // const downloadUrl = updateAsset.browser_download_url; // 已定义
-    const tempFile = path.join(__dirname, '.full-update-temp.tar.gz');
-    const updateDir = path.join(__dirname, '.full-update');
-    
-    console.log(`   📥 下载地址: ${downloadUrl}`);
-    console.log(`   📦 文件大小: ${(updateSize / 1024 / 1024).toFixed(2)} MB`);
-    console.log(`   ⏳ 开始下载...`);
-    
-    // 下载文件（带超时保护）
-    const downloadTimeout = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error('下载超时（超过5分钟）')), 300000);
-    });
-    
-    await Promise.race([
-      downloadFileWithRedirect(downloadUrl, tempFile),
-      downloadTimeout
-    ]);
-    
-    const downloadedSize = fs.statSync(tempFile).size;
-    console.log(`   ✅ 下载完成: ${tempFile}`);
-    console.log(`   📦 实际大小: ${(downloadedSize / 1024 / 1024).toFixed(2)} MB`);
-    
-    // 通知用户正在安装
-    console.log(`   🔧 开始安装更新...`);
-    targetGroup.figma.send(JSON.stringify({
-      type: 'update-progress',
-      status: 'installing',
-      message: '正在安装更新...'
-    }));
-    
-    // 解压到临时目录
-    if (fs.existsSync(updateDir)) {
-      fs.rmSync(updateDir, { recursive: true, force: true });
-    }
-    fs.mkdirSync(updateDir, { recursive: true });
-    
-    const { exec } = require('child_process');
-    const util = require('util');
-    const execPromise = util.promisify(exec);
-    
-    // 解压 tar.gz
-    console.log(`   📦 开始解压 tar.gz 文件...`);
-    await execPromise(`tar -xzf "${tempFile}" -C "${updateDir}"`);
-    console.log(`   ✅ 解压完成到: ${updateDir}`);
-    
-    // 查找解压后的内容目录
-    // 策略：递归查找 server.js 所在的目录
-    const findServerJs = (dir) => {
-      const items = fs.readdirSync(dir);
-      // 忽略隐藏文件
-      const visibleItems = items.filter(item => !item.startsWith('.'));
-      
-      if (visibleItems.includes('server.js') && visibleItems.includes('package.json')) {
-        return dir;
-      }
-      
-      for (const item of visibleItems) {
-        const itemPath = path.join(dir, item);
-        if (fs.statSync(itemPath).isDirectory()) {
-          // 只查找一层子目录，避免过深
-          const subItems = fs.readdirSync(itemPath);
-          if (subItems.includes('server.js')) {
-            return itemPath;
-          }
-        }
-      }
-      return null;
-    };
-    
-    let extractedDir = findServerJs(updateDir);
-    
-    if (!extractedDir) {
-        console.log('   ⚠️  未自动定位到根目录，尝试使用解压根目录');
-        // 如果解压出来只有一个文件夹，进入该文件夹
-        const extractedItems = fs.readdirSync(updateDir).filter(item => !item.startsWith('.'));
-        console.log(`   Extracted items:`, extractedItems);
-        
-        if (extractedItems.length === 1 && fs.statSync(path.join(updateDir, extractedItems[0])).isDirectory()) {
-          extractedDir = path.join(updateDir, extractedItems[0]);
-        } else {
-          extractedDir = updateDir;
-        }
-    }
-    
-    console.log(`   📂 最终内容目录: ${extractedDir}`);
-    
-    // 🔧 验证目录结构
-    const requiredFiles = ['server.js', 'package.json'];
-    const requiredDirs = ['figma-plugin'];
-    const missingItems = [];
-    
-    for (const file of requiredFiles) {
-      if (!fs.existsSync(path.join(extractedDir, file))) {
-        missingItems.push(file);
-      }
-    }
-    
-    for (const dir of requiredDirs) {
-      if (!fs.existsSync(path.join(extractedDir, dir))) {
-        missingItems.push(dir + '/');
-      }
-    }
-    
-    if (missingItems.length > 0) {
-      console.error(`   ❌ 更新包不完整，缺少以下文件/目录:`, missingItems);
-      console.error(`   ❌ 目录内容:`, fs.readdirSync(extractedDir));
-      throw new Error(`更新包不完整，缺少必需的文件: ${missingItems.join(', ')}`);
-    }
-    
-    console.log(`   ✅ 目录结构验证通过`);
-    
-    // 备份现有文件
-    const backupDir = path.join(__dirname, '.full-backup');
+    // 创建备份目录
+    const backupDir = path.join(__dirname, '.incremental-backup');
     if (fs.existsSync(backupDir)) {
       fs.rmSync(backupDir, { recursive: true, force: true });
     }
     fs.mkdirSync(backupDir, { recursive: true });
     
-    // 需要更新的所有文件列表
-    const allFiles = [
-      // 服务器核心文件
-      'server.js',
-      'start.js',
-      // Google Drive 相关
-      'googleDrive.js',
-      'drive-watcher.js',
-      // 阿里云 OSS 相关
-      'aliyunOSS.js',
-      'aliyun-watcher.js',
-      // iCloud 相关
-      'icloud-watcher.js',
-      // 配置和工具
-      'userConfig.js',
-      'update-manager.js',
-      'package.json',
-      'VERSION.txt'
-    ];
+    // 下载并更新变化的文件
+    console.log(`   📥 开始下载 ${filesToUpdate.length} 个文件...`);
+    let successCount = 0;
+    let failCount = 0;
     
-    // 备份并更新服务器文件
-    // const extractedDir = path.join(updateDir, 'ScreenSync-UserPackage'); // 已在上面动态获取
-    let updatedCount = 0;
-    
-    for (const file of allFiles) {
-      const srcPath = path.join(extractedDir, file);
-      const destPath = path.join(__dirname, file);
-      const backupPath = path.join(backupDir, file);
-      
-      if (fs.existsSync(srcPath)) {
+    for (const file of filesToUpdate) {
+      try {
+        // 从 GitHub raw 下载单个文件
+        const rawUrl = `https://raw.githubusercontent.com/${repo}/${latestVersion}/${file}`;
+        const destPath = path.join(__dirname, file);
+        const backupPath = path.join(backupDir, file);
+        
+        console.log(`   📥 [${successCount + failCount + 1}/${filesToUpdate.length}] ${file}`);
+        
         // 备份现有文件
         if (fs.existsSync(destPath)) {
+          const backupFileDir = path.dirname(backupPath);
+          if (!fs.existsSync(backupFileDir)) {
+            fs.mkdirSync(backupFileDir, { recursive: true });
+          }
           fs.copyFileSync(destPath, backupPath);
         }
-        // 更新文件
-        fs.copyFileSync(srcPath, destPath);
-        console.log(`   ✅ 已更新: ${file}`);
-        updatedCount++;
-      } else {
-        console.log(`   ⚠️  文件不存在，跳过: ${file}`);
-      }
-    }
-    
-    // 更新插件文件
-    const pluginSrcDir = path.join(extractedDir, 'figma-plugin');
-    const pluginDestDir = path.join(__dirname, 'figma-plugin');
-    
-    if (fs.existsSync(pluginSrcDir) && fs.existsSync(pluginDestDir)) {
-      const pluginFiles = ['manifest.json', 'code.js', 'ui.html'];
-      const pluginBackupDir = path.join(backupDir, 'figma-plugin');
-      fs.mkdirSync(pluginBackupDir, { recursive: true });
-      
-      for (const file of pluginFiles) {
-        const srcPath = path.join(pluginSrcDir, file);
-        const destPath = path.join(pluginDestDir, file);
-        const backupPath = path.join(pluginBackupDir, file);
         
-        if (fs.existsSync(srcPath)) {
-          // 备份现有文件
-          if (fs.existsSync(destPath)) {
-            fs.copyFileSync(destPath, backupPath);
-          }
-          // 更新文件
-          fs.copyFileSync(srcPath, destPath);
-          console.log(`   ✅ 已更新插件: ${file}`);
-          updatedCount++;
+        // 确保目标目录存在
+        const destFileDir = path.dirname(destPath);
+        if (!fs.existsSync(destFileDir)) {
+          fs.mkdirSync(destFileDir, { recursive: true });
+        }
+        
+        // 下载文件
+        await new Promise((resolve, reject) => {
+          const fileTimeout = setTimeout(() => {
+            reject(new Error('单文件下载超时（30秒）'));
+          }, 30000);
+          
+          https.get(rawUrl, { 
+            headers: { 'User-Agent': 'ScreenSync-Incremental-Updater/1.0' }
+          }, (res) => {
+            if (res.statusCode === 302 || res.statusCode === 301) {
+              // 处理重定向
+              https.get(res.headers.location, { 
+                headers: { 'User-Agent': 'ScreenSync-Incremental-Updater/1.0' }
+              }, (redirectRes) => {
+                const writeStream = fs.createWriteStream(destPath);
+                redirectRes.pipe(writeStream);
+                writeStream.on('finish', () => {
+                  clearTimeout(fileTimeout);
+                  writeStream.close();
+                  resolve();
+                });
+                writeStream.on('error', (err) => {
+                  clearTimeout(fileTimeout);
+                  reject(err);
+                });
+              });
+            } else if (res.statusCode === 200) {
+              const writeStream = fs.createWriteStream(destPath);
+              res.pipe(writeStream);
+              writeStream.on('finish', () => {
+                clearTimeout(fileTimeout);
+                writeStream.close();
+                resolve();
+              });
+              writeStream.on('error', (err) => {
+                clearTimeout(fileTimeout);
+                reject(err);
+              });
+            } else {
+              clearTimeout(fileTimeout);
+              reject(new Error(`下载失败: HTTP ${res.statusCode}`));
+            }
+          }).on('error', (err) => {
+            clearTimeout(fileTimeout);
+            reject(err);
+          });
+        });
+        
+        console.log(`      ✅ 成功`);
+        successCount++;
+        
+      } catch (error) {
+        console.error(`      ❌ 失败: ${error.message}`);
+        failCount++;
+        // 如果下载失败，尝试从备份恢复
+        const destPath = path.join(__dirname, file);
+        const backupPath = path.join(backupDir, file);
+        if (fs.existsSync(backupPath)) {
+          fs.copyFileSync(backupPath, destPath);
+          console.log(`      ↩️  已从备份恢复`);
         }
       }
     }
     
-    // 清理临时文件
-    if (fs.existsSync(tempFile)) {
-      fs.unlinkSync(tempFile);
-    }
-    if (fs.existsSync(updateDir)) {
-      fs.rmSync(updateDir, { recursive: true, force: true });
+    console.log(`   📊 更新统计: 成功 ${successCount}/${filesToUpdate.length}，失败 ${failCount}`);
+    
+    if (failCount > 0 && successCount === 0) {
+      throw new Error(`所有文件更新失败（${failCount}/${filesToUpdate.length}）`);
     }
     
-    console.log(`\n✅ [Full Update] 全量更新完成！`);
-    console.log(`   ✅ 成功更新 ${updatedCount} 个文件`);
+    if (failCount > 0) {
+      console.log(`   ⚠️  警告：${failCount} 个文件更新失败，但其他文件已成功更新`);
+    }
+    
+    // 通知用户正在安装
+    console.log(`   🔧 完成文件更新...`);
+    targetGroup.figma.send(JSON.stringify({
+      type: 'update-progress',
+      status: 'installing',
+      message: '正在重启服务...'
+    }));
+    
+    
+    // 清理备份目录（可选）
+    // 保留备份7天，用户可以手动恢复
+    
+    console.log(`\n✅ [Incremental Update] 增量更新完成！`);
+    console.log(`   ✅ 成功更新 ${successCount} 个文件`);
+    if (failCount > 0) {
+      console.log(`   ⚠️  ${failCount} 个文件更新失败`);
+    }
     console.log(`   📦 备份位置: ${backupDir}`);
     console.log(`   🔄 准备自动重启服务器以应用更新...\n`);
     
@@ -4573,7 +4582,8 @@ async function handleFullUpdate(targetGroup, connectionId) {
         type: 'update-progress',
         status: 'completed',
         message: `更新完成！服务器将自动重启...`,
-        updatedCount: updatedCount
+        updatedCount: successCount,
+        failedCount: failCount
       }));
     }
     
@@ -4605,7 +4615,7 @@ async function handleFullUpdate(targetGroup, connectionId) {
   try {
     await Promise.race([updateTask, overallTimeout]);
   } catch (error) {
-    console.error(`   ❌ 全量更新失败: ${error.message}`);
+    console.error(`   ❌ 增量更新失败: ${error.message}`);
     console.error('   错误堆栈:', error.stack);
     if (targetGroup && targetGroup.figma && targetGroup.figma.readyState === WebSocket.OPEN) {
       try {
