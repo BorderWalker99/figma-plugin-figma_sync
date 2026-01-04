@@ -417,6 +417,1145 @@ function readSyncModeFromFile() {
   return null;
 }
 
+// 递归删除文件夹的辅助函数
+function removeDirRecursive(dirPath) {
+  if (!fs.existsSync(dirPath)) return;
+  
+  const items = fs.readdirSync(dirPath);
+  for (const item of items) {
+    const itemPath = path.join(dirPath, item);
+    const stat = fs.statSync(itemPath);
+    
+    if (stat.isDirectory()) {
+      removeDirRecursive(itemPath); // 递归删除子文件夹
+    } else {
+      fs.unlinkSync(itemPath); // 删除文件
+    }
+  }
+  
+  fs.rmdirSync(dirPath); // 删除空文件夹
+}
+
+// 清理所有临时文件夹（启动时调用）
+function cleanupAllTempFolders() {
+  try {
+    const os = require('os');
+    const fs = require('fs');
+    const path = require('path');
+    
+    // iCloud 路径
+    const icloudPath = path.join(
+      os.homedir(),
+      'Library/Mobile Documents/com~apple~CloudDocs/ScreenSyncImg'
+    );
+    
+    // 本地路径
+    let localPath;
+    try {
+      const userConfig = require('./userConfig');
+      localPath = userConfig.getLocalDownloadFolder();
+    } catch (e) {
+      localPath = null;
+    }
+    
+    const foldersToCheck = [icloudPath, localPath].filter(Boolean);
+    
+    for (const folder of foldersToCheck) {
+      if (!fs.existsSync(folder)) continue;
+      
+      const items = fs.readdirSync(folder);
+      for (const item of items) {
+        // 匹配所有临时文件夹：.temp-gif-compose-*
+        if (item.startsWith('.temp-gif-compose')) {
+          const itemPath = path.join(folder, item);
+          try {
+            // 使用递归删除
+            if (fs.existsSync(itemPath) && fs.statSync(itemPath).isDirectory()) {
+              removeDirRecursive(itemPath);
+              console.log(`🧹 已清理旧临时文件夹: ${item}`);
+            }
+          } catch (cleanupError) {
+            console.warn(`⚠️  清理临时文件夹失败: ${item}`, cleanupError.message);
+          }
+        }
+      }
+    }
+  } catch (error) {
+    console.warn('⚠️  启动清理时出错（可忽略）:', error.message);
+  }
+}
+
+// GIF 标注合成函数
+async function composeAnnotatedGif({ frameName, annotationBytes, frameBounds, gifInfos, connectionId, shouldCancel, onProgress }) {
+  const fs = require('fs');
+  const path = require('path');
+  const { promisify } = require('util');
+  const execAsync = promisify(require('child_process').exec);
+  
+  // 进度汇报辅助函数
+  const reportProgress = (percent, message) => {
+    if (onProgress) {
+      onProgress(percent, message);
+    }
+  };
+
+  // 取消检查辅助函数
+  const checkCancelled = () => {
+    if (shouldCancel && shouldCancel()) {
+      throw new Error('GIF_EXPORT_CANCELLED');
+    }
+  };
+  
+  console.log('\n╔═══════════════════════════════════════════════════════╗');
+  console.log('║       🎬 开始合成带标注的 GIF                       ║');
+  console.log('╚═══════════════════════════════════════════════════════╝\n');
+  
+  // 诊断 ImageMagick
+  console.log('🔍 检查 ImageMagick 安装状态...');
+  
+  // 1. 定义查找路径和命令
+  const searchPaths = [
+    '/opt/homebrew/bin',  // Apple Silicon
+    '/usr/local/bin',     // Intel Mac
+    '/opt/local/bin',     // MacPorts
+    '/usr/bin',
+    '/bin'
+  ];
+  
+  // 2. 尝试自动修复 PATH
+  let pathModified = false;
+  for (const searchPath of searchPaths) {
+    if (fs.existsSync(searchPath) && !process.env.PATH.includes(searchPath)) {
+      process.env.PATH = `${searchPath}:${process.env.PATH}`;
+      pathModified = true;
+    }
+  }
+
+  if (pathModified) {
+    console.log('   ℹ️  已自动修正 PATH 环境变量');
+  }
+
+  try {
+    // 3. 直接验证 convert 命令可用性 (绕过 which)
+    let convertPath = 'convert';
+    let versionOutput = '';
+    let found = false;
+
+    // 先尝试直接运行 convert
+    try {
+      const result = await execAsync('convert --version');
+      versionOutput = result.stdout;
+      found = true;
+    } catch (e) {
+      // 如果直接运行失败，尝试绝对路径
+      for (const searchPath of searchPaths) {
+        const fullPath = path.join(searchPath, 'convert');
+        if (fs.existsSync(fullPath)) {
+          try {
+            const result = await execAsync(`"${fullPath}" --version`);
+            versionOutput = result.stdout;
+            convertPath = fullPath; // 记录找到的完整路径
+            // 确保这个路径在 PATH 中 (再次确认)
+            if (!process.env.PATH.includes(searchPath)) {
+               process.env.PATH = `${searchPath}:${process.env.PATH}`;
+            }
+            found = true;
+            break;
+          } catch (err) {
+            // 忽略执行错误
+          }
+        }
+      }
+    }
+
+    if (!found) {
+      throw new Error('无法执行 convert 命令');
+    }
+    
+    // 4. 检查是否真的是 ImageMagick
+    const versionLine = versionOutput.split('\n')[0].trim();
+    if (versionLine.toLowerCase().includes('imagemagick')) {
+      console.log(`   ✅ ImageMagick 已就绪: ${versionLine}`);
+    } else {
+      console.warn('   ⚠️  警告：检测到的 convert 可能不是 ImageMagick');
+      console.warn(`   版本信息: ${versionLine}`);
+    }
+
+    // 5. 验证其他必要命令 (identify, composite)
+    // 既然 convert 找到了，我们假设同目录下的其他命令也能用，或者就在 PATH 里
+    // 为了保险，我们可以简单测试一下 identify
+    try {
+      await execAsync('identify -version');
+    } catch (e) {
+      console.warn('   ⚠️  identify 命令执行失败，可能会影响部分功能');
+    }
+
+    console.log('');
+  } catch (e) {
+    console.error('\n❌ ImageMagick 未找到！');
+    console.error('   错误:', e.message);
+    console.error('');
+    console.error('📋 快速解决方案：');
+    console.error('   1. 重启服务器试试（Ctrl+C 然后 npm start）');
+    console.error('   2. 或运行: brew install imagemagick');
+    console.error('   3. 或运行: brew link imagemagick --force');
+    console.error('');
+    throw new Error('未找到 ImageMagick');
+  }
+  
+  console.log('📋 输入信息:');
+  console.log(`   Frame 名称: ${frameName || '未提供'}`);
+  console.log(`   Frame 尺寸: ${frameBounds.width}x${frameBounds.height}`);
+  console.log(`   GIF 数量: ${gifInfos.length}`);
+  gifInfos.forEach((gif, idx) => {
+    console.log(`      ${idx + 1}. ${gif.filename}`);
+    console.log(`         位置: (${gif.bounds.x}, ${gif.bounds.y}), 尺寸: ${gif.bounds.width}x${gif.bounds.height}`);
+  });
+  
+  // 1. 获取必要的配置
+  const userConfig = require('./userConfig');
+  const os = require('os');
+  
+  // 根据当前同步模式确定保存路径
+  const currentMode = process.env.SYNC_MODE || 'drive';
+  let downloadFolder;
+  
+  if (currentMode === 'icloud') {
+    // iCloud 模式：保存到 iCloud 文件夹
+    downloadFolder = path.join(
+      os.homedir(),
+      'Library/Mobile Documents/com~apple~CloudDocs/ScreenSyncImg'
+    );
+    console.log(`📂 [iCloud模式] 输出路径: ${downloadFolder}`);
+  } else {
+    // Google Drive 或其他模式
+    downloadFolder = userConfig.getLocalDownloadFolder();
+  }
+  
+  // 确保输出文件夹存在
+  if (!fs.existsSync(downloadFolder)) {
+    fs.mkdirSync(downloadFolder, { recursive: true });
+  }
+  
+  // 1.5. 提前检查输出文件是否已存在（避免不必要的处理）
+  // 生成输出文件名
+  const baseName = frameName || 'annotated';
+  const cleanBaseName = baseName.replace(/[\/\\?%*:|"<>]/g, '-');
+  const finalBaseName = cleanBaseName.endsWith('_exported') ? cleanBaseName : `${cleanBaseName}_exported`;
+  const outputFilename = `${finalBaseName}.gif`;
+  const outputPath = path.join(downloadFolder, outputFilename);
+  
+  // 如果文件已存在，直接跳过所有处理
+  if (fs.existsSync(outputPath)) {
+    console.log(`\n⏭️  文件已存在，跳过所有处理: ${outputFilename}`);
+    const stats = fs.statSync(outputPath);
+    reportProgress(100, '文件已存在，已跳过');
+    
+    return {
+      outputPath,
+      filename: outputFilename,
+      size: stats.size,
+      skipped: true
+    };
+  }
+  
+  // 为每个导出请求创建独立的临时文件夹（避免并发冲突）
+  // 使用 connectionId + 时间戳 确保唯一性
+  const uniqueId = `${connectionId}_${Date.now()}`;
+  const tempDir = path.join(downloadFolder, `.temp-gif-compose-${uniqueId}`);
+  if (!fs.existsSync(tempDir)) {
+    fs.mkdirSync(tempDir, { recursive: true });
+  }
+  console.log(`📁 临时文件夹: ${tempDir}`);
+  
+  // 2. 验证并查找所有原始 GIF/视频 文件
+  console.log(`\n🔍 正在查找所有原始 GIF/视频 文件...`);
+  
+  // 验证 gifInfos 数据结构
+  if (!gifInfos || !Array.isArray(gifInfos) || gifInfos.length === 0) {
+    throw new Error('gifInfos 为空或格式不正确');
+  }
+  
+  const gifPaths = [];
+  for (let i = 0; i < gifInfos.length; i++) {
+    const gif = gifInfos[i];
+    
+    // 验证每个 gif 对象的结构
+    if (!gif) {
+      console.error(`   ❌ GIF ${i + 1} 数据为空，跳过`);
+      continue;
+    }
+    
+    if (!gif.bounds) {
+      console.error(`   ❌ GIF ${i + 1} 缺少 bounds 信息:`, gif);
+      throw new Error(`GIF ${i + 1} (${gif.filename || '未知'}) 缺少位置信息 (bounds)`);
+    }
+    
+    console.log(`\n   处理 GIF ${i + 1}/${gifInfos.length}: ${gif.filename}`);
+    console.log(`      位置: (${gif.bounds.x}, ${gif.bounds.y}), 尺寸: ${gif.bounds.width}x${gif.bounds.height}`);
+    
+    let gifPath = null;
+    
+    // 方法 1：从缓存通过 ID 查找
+    if (gif.cacheId) {
+      console.log(`      1️⃣  尝试从缓存读取 (ID: ${gif.cacheId})...`);
+      const cacheResult = userConfig.getGifFromCache(null, gif.cacheId);
+      
+      if (cacheResult) {
+        gifPath = cacheResult.path;
+        console.log(`      ✅ 从缓存找到 (${(cacheResult.buffer.length / 1024 / 1024).toFixed(2)} MB)`);
+      }
+    }
+    
+    // 方法 2：从缓存通过文件名查找（精确匹配）
+    if (!gifPath && gif.filename) {
+      console.log(`      2️⃣  尝试从缓存通过文件名查找...`);
+      const cacheResult = userConfig.getGifFromCache(gif.filename, null);
+      
+      if (cacheResult) {
+        gifPath = cacheResult.path;
+        console.log(`      ✅ 从缓存找到（精确匹配）`);
+      }
+    }
+    
+    // 方法 2.5：从缓存通过文件名智能匹配
+    if (!gifPath && gif.filename) {
+      console.log(`      2.5️⃣  尝试从缓存智能匹配文件名...`);
+      
+      // 获取所有缓存文件
+      const gifCacheDir = path.join(__dirname, '.gif-cache');
+      if (fs.existsSync(gifCacheDir)) {
+        const cacheFiles = fs.readdirSync(gifCacheDir);
+        const metaFiles = cacheFiles.filter(f => f.endsWith('.meta.json'));
+        
+        console.log(`         缓存中有 ${metaFiles.length} 个文件`);
+        
+        // 解析目标文件名
+        const targetExt = path.extname(gif.filename).toLowerCase();
+        const targetName = path.basename(gif.filename, targetExt);
+        const targetNameClean = targetName.replace(/_\d+$/, '');
+        
+        console.log(`         查找目标: ${targetNameClean}${targetExt}`);
+        
+        // 遍历所有缓存文件，尝试匹配
+        for (const metaFile of metaFiles) {
+          try {
+            const metaPath = path.join(gifCacheDir, metaFile);
+            const metaData = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+            
+            if (metaData && metaData.originalFilename) {
+              const cacheExt = path.extname(metaData.originalFilename).toLowerCase();
+              const cacheName = path.basename(metaData.originalFilename, cacheExt);
+              const cacheNameClean = cacheName.replace(/_\d+$/, '');
+              
+              // 检查是否匹配
+              const compatibleExts = ['.mov', '.mp4', '.gif'];
+              const extsMatch = compatibleExts.includes(cacheExt) && compatibleExts.includes(targetExt);
+              
+              if (extsMatch) {
+                // 1. 精确匹配
+                if (cacheNameClean === targetNameClean) {
+                  const cacheId = path.basename(metaFile, '.meta.json');
+                  const cacheResult = userConfig.getGifFromCache(null, cacheId);
+                  if (cacheResult) {
+                    gifPath = cacheResult.path;
+                    console.log(`      ✅ 从缓存智能匹配找到: ${metaData.originalFilename}`);
+                    break;
+                  }
+                }
+                
+                // 2. 时间戳匹配（ScreenRecording 文件）
+                const timePattern = /\d{1,2}-\d{1,2}-\d{4}\s+\d{1,2}-\d{1,2}-\d{1,2}/;
+                const targetTime = targetNameClean.match(timePattern);
+                const cacheTime = cacheNameClean.match(timePattern);
+                
+                if (targetTime && cacheTime && targetTime[0] === cacheTime[0]) {
+                  const cacheId = path.basename(metaFile, '.meta.json');
+                  const cacheResult = userConfig.getGifFromCache(null, cacheId);
+                  if (cacheResult) {
+                    gifPath = cacheResult.path;
+                    console.log(`      ✅ 从缓存通过时间戳匹配找到: ${metaData.originalFilename}`);
+                    break;
+                  }
+                }
+              }
+            }
+          } catch (err) {
+            // 忽略解析错误
+          }
+        }
+      }
+    }
+    
+    // 方法 3：从 ScreenSyncImg 文件夹查找（智能匹配）
+    if (!gifPath && gif.filename) {
+      console.log(`      3️⃣  尝试从 ScreenSyncImg 文件夹查找...`);
+      console.log(`         目标文件: ${gif.filename}`);
+      
+      if (fs.existsSync(downloadFolder)) {
+        const filesInFolder = fs.readdirSync(downloadFolder);
+        console.log(`         文件夹中有 ${filesInFolder.length} 个文件`);
+        
+        // 解析目标文件名
+        const targetExt = path.extname(gif.filename).toLowerCase();
+        const targetName = path.basename(gif.filename, targetExt);
+        
+        // 移除可能的 _1, _2, _3 等后缀（macOS 自动添加的重复文件后缀）
+        const targetNameClean = targetName.replace(/_\d+$/, '');
+        
+        console.log(`         查找目标: ${targetNameClean} (扩展名: ${targetExt})`);
+        
+        // 查找匹配的文件（支持模糊匹配和扩展名变化）
+        const compatibleExts = ['.mov', '.mp4', '.gif'];
+        
+        const matchingFile = filesInFolder.find(f => {
+          // 跳过已导出的文件
+          if (f.toLowerCase().includes('_exported')) return false;
+          
+          const fExt = path.extname(f).toLowerCase();
+          const fName = path.basename(f, fExt);
+          const fNameClean = fName.replace(/_\d+$/, '');
+          
+          // 只处理视频/GIF 文件
+          if (!compatibleExts.includes(fExt)) return false;
+          
+          // 1. 完全匹配
+          if (f === gif.filename) return true;
+          
+          // 2. 文件名匹配（忽略后缀和扩展名）
+          if (fNameClean === targetNameClean) {
+            if (compatibleExts.includes(targetExt)) {
+              return true;
+            }
+          }
+          
+          // 3. 包含匹配（如果文件名很长，允许部分匹配）
+          if (fNameClean.includes(targetNameClean) || targetNameClean.includes(fNameClean)) {
+            if (compatibleExts.includes(targetExt)) {
+              return true;
+            }
+          }
+          
+          // 4. 宽松匹配：去掉所有特殊字符后比较
+          const targetSimple = targetNameClean.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+          const fSimple = fNameClean.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+          
+          if (targetSimple && fSimple && targetSimple.length > 5 && fSimple.length > 5) {
+            // 如果简化后的名称有一个包含另一个
+            if (targetSimple.includes(fSimple) || fSimple.includes(targetSimple)) {
+              return true;
+            }
+          }
+          
+          // 5. 时间戳匹配：针对 ScreenRecording 文件
+          // ScreenRecording_12-22-2025 22-27-25.mov
+          const timePattern = /\d{1,2}-\d{1,2}-\d{4}\s+\d{1,2}-\d{1,2}-\d{1,2}/;
+          const targetTime = targetNameClean.match(timePattern);
+          const fTime = fNameClean.match(timePattern);
+          
+          if (targetTime && fTime && targetTime[0] === fTime[0]) {
+            return true;
+          }
+          
+          return false;
+        });
+        
+        if (matchingFile) {
+          gifPath = path.join(downloadFolder, matchingFile);
+          console.log(`      ✅ 从本地文件夹找到: ${matchingFile}`);
+          if (matchingFile !== gif.filename) {
+            console.log(`         📝 注意：实际文件名与请求的文件名不同`);
+            console.log(`            请求: ${gif.filename}`);
+            console.log(`            实际: ${matchingFile}`);
+          }
+        } else {
+          console.log(`      ❌ 未找到匹配的文件`);
+          console.log(`         查找目标详情:`);
+          console.log(`            原始文件名: ${gif.filename}`);
+          console.log(`            清理后名称: ${targetNameClean}`);
+          console.log(`            扩展名: ${targetExt}`);
+          console.log(`         文件夹路径: ${downloadFolder}`);
+          console.log(`         文件夹内所有视频/GIF文件:`);
+          
+          const videoGifFiles = filesInFolder.filter(f => {
+            const ext = path.extname(f).toLowerCase();
+            return ['.mov', '.mp4', '.gif'].includes(ext) && !f.toLowerCase().includes('_exported');
+          });
+          
+          if (videoGifFiles.length === 0) {
+            console.log(`            ⚠️ 文件夹中没有视频/GIF文件！`);
+          } else {
+            videoGifFiles.slice(0, 20).forEach(f => {
+              console.log(`            - ${f}`);
+            });
+            if (videoGifFiles.length > 20) {
+              console.log(`            ... 还有 ${videoGifFiles.length - 20} 个文件未显示`);
+            }
+          }
+        }
+      } else {
+        console.log(`      ❌ ScreenSyncImg 文件夹不存在: ${downloadFolder}`);
+      }
+    }
+    
+    if (!gifPath) {
+      throw new Error(`未找到 GIF/视频文件: ${gif.filename}\n\n已尝试：\n• GIF 缓存 (ID: ${gif.cacheId || '无'})\n• 文件名匹配缓存\n• ScreenSyncImg 文件夹: ${downloadFolder}\n\n💡 提示：\n• 请确保文件在 ScreenSyncImg 文件夹中\n• iCloud 模式下，视频文件需要手动拖入 Figma\n• 检查文件名是否正确（去掉空格或特殊字符）`);
+    }
+    
+    // 再次验证 bounds 数据完整性
+    if (!gif.bounds || gif.bounds.x === undefined || gif.bounds.y === undefined) {
+      console.error(`      ❌ Bounds 数据不完整:`, gif.bounds);
+      throw new Error(`GIF ${i + 1} (${gif.filename}) 的位置信息不完整`);
+    }
+    
+    gifPaths.push({
+      path: gifPath,
+      bounds: gif.bounds
+    });
+    
+    console.log(`      ✅ 已添加到 gifPaths，bounds: (${gif.bounds.x}, ${gif.bounds.y}), ${gif.bounds.width}x${gif.bounds.height}`);
+  }
+  
+  console.log(`\n✅ 所有 ${gifPaths.length} 个文件已准备好`);
+  console.log(`\n📋 gifPaths 数组内容:`);
+  gifPaths.forEach((gp, idx) => {
+    console.log(`   ${idx + 1}. path: ${gp.path}`);
+    console.log(`      bounds:`, gp.bounds);
+  });
+  
+  // 2.5. 预处理：将视频文件转换为高帧率 GIF
+  console.log(`\n🎬 检查是否有视频文件需要转换...`);
+  
+  // 检查是否有视频文件
+  const hasVideo = gifPaths.some(item => {
+    const ext = path.extname(item.path).toLowerCase();
+    return ext === '.mp4' || ext === '.mov';
+  });
+  
+  // 如果有视频文件，预先检查 FFmpeg
+  if (hasVideo) {
+    console.log('   🔍 检测到视频文件，验证 FFmpeg...');
+    try {
+      await execAsync('which ffmpeg');
+      const ffmpegVersion = await execAsync('ffmpeg -version 2>&1 | head -1');
+      console.log(`   ✅ FFmpeg: ${ffmpegVersion.stdout.trim().split('\n')[0]}`);
+    } catch (e) {
+      throw new Error('未找到 FFmpeg\n\n视频转 GIF 需要 FFmpeg，请先安装:\nbrew install ffmpeg');
+    }
+  }
+  
+  for (let i = 0; i < gifPaths.length; i++) {
+    const item = gifPaths[i];
+    const ext = path.extname(item.path).toLowerCase();
+    
+    if (ext === '.mp4' || ext === '.mov') {
+      console.log(`\n   📹 检测到视频文件: ${path.basename(item.path)}`);
+      reportProgress(5 + (i / gifPaths.length) * 10, `正在转换视频 ${i + 1}/${gifPaths.length} 为高质量 GIF...`);
+      
+      // 使用 FFmpeg 两步法将视频转为高质量 GIF
+      const videoGifPath = path.join(tempDir, `video_${i}.gif`);
+      const palettePath = path.join(tempDir, `palette_${i}.png`);
+      
+      const videoW = Math.round(item.bounds.width);
+      const videoH = Math.round(item.bounds.height);
+      
+      // 先检测原视频的帧率和时长
+      let videoDuration = 0; // 视频时长（秒）
+      let videoFps = 30; // 原视频帧率
+      
+      try {
+        // 获取视频帧率
+        const probeCmd = `ffprobe -v error -select_streams v:0 -show_entries stream=r_frame_rate -of default=noprint_wrappers=1:nokey=1 "${item.path}"`;
+        const probeResult = await execAsync(probeCmd, { timeout: 10000 });
+        const fpsStr = probeResult.stdout.trim();
+        if (fpsStr) {
+          // 解析帧率，格式可能是 "30/1" 或 "30000/1001"
+          const [num, den] = fpsStr.split('/').map(Number);
+          videoFps = den ? num / den : num;
+          console.log(`   📊 原视频帧率: ${videoFps.toFixed(2)} fps`);
+        }
+        
+        // 获取视频时长
+        const durationCmd = `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${item.path}"`;
+        const durationResult = await execAsync(durationCmd, { timeout: 10000 });
+        const durationStr = durationResult.stdout.trim();
+        if (durationStr && !isNaN(parseFloat(durationStr))) {
+          videoDuration = parseFloat(durationStr);
+          console.log(`   ⏱️  视频时长: ${videoDuration.toFixed(2)} 秒`);
+        }
+      } catch (probeError) {
+        console.warn(`   ⚠️  无法检测视频信息，使用默认值`);
+      }
+      
+      // 选择一个 GIF 能精确支持的帧率（延迟为整数）
+      // 可用延迟：1, 2, 3, 4, 5... (对应 100fps, 50fps, 33.33fps, 25fps, 20fps...)
+      // 选择最接近原视频帧率的延迟
+      const idealDelay = 100 / videoFps;
+      const gifDelay = Math.max(1, Math.round(idealDelay)); // 至少1/100s（最高100fps）
+      const gifFps = 100 / gifDelay;
+      
+      console.log(`   💡 原视频: ${videoFps.toFixed(2)} fps (理想延迟 ${idealDelay.toFixed(2)}/100s)`);
+      console.log(`   🎯 GIF 帧率: ${gifFps.toFixed(2)} fps (延迟 ${gifDelay}/100s)`);
+      
+      // 计算速度误差
+      const speedRatio = gifFps / videoFps;
+      const speedError = Math.abs(1 - speedRatio) * 100;
+      
+      if (speedError < 5) {
+        console.log(`   ✅ 速度误差: ${speedError.toFixed(2)}% (可接受)`);
+      } else if (speedError < 15) {
+        console.log(`   ⚠️  速度误差: ${speedError.toFixed(2)}% (略有偏差，但 GIF 格式限制)`);
+      } else {
+        console.log(`   ⚠️  速度误差: ${speedError.toFixed(2)}% (GIF 格式限制，无法更精确)`);
+      }
+      
+      // 关键：使用 GIF 帧率从视频中提取帧，而不是原视频帧率
+      // 这样 GIF 的时长 = 帧数 × 延迟 = (时长 × GIF帧率) × (1/GIF帧率) = 时长 ✓
+      const targetFps = gifFps;
+      console.log(`   📐 提取策略: 按 ${targetFps.toFixed(2)} fps 从视频中重采样`);
+      
+      console.log(`   🎬 第 1/2 步：提取视频帧...`);
+      
+      // 第二步：先用 FFmpeg 提取帧为 PNG（最可靠的方法）
+      const framesDir = path.join(tempDir, `frames_${i}`);
+      fs.mkdirSync(framesDir, { recursive: true });
+      
+      // 关键：使用 fps 滤镜精确控制输出帧率
+      // fps 滤镜会将视频重采样到目标帧率，确保时长一致
+      const extractCmd = `ffmpeg -i "${item.path}" -vf "fps=${gifFps},scale=${videoW}:${videoH}:flags=lanczos" "${framesDir}/frame_%05d.png"`;
+      
+      console.log(`   🔧 提取帧命令: ${extractCmd.length > 150 ? extractCmd.substring(0, 150) + '...' : extractCmd}`);
+      
+      try {
+        await execAsync(extractCmd, { maxBuffer: 200 * 1024 * 1024, timeout: 180000 });
+        
+        // 统计提取的帧数
+        const extractedFrames = fs.readdirSync(framesDir).filter(f => f.endsWith('.png')).length;
+        const expectedFrames = Math.round(videoDuration * gifFps);
+        
+        console.log(`   ✅ 帧提取完成: ${extractedFrames} 帧`);
+        console.log(`   📊 预期帧数: ${expectedFrames} 帧 (覆盖率: ${((extractedFrames/expectedFrames)*100).toFixed(1)}%)`);
+        
+        if (extractedFrames < 10) {
+          throw new Error(`提取的帧数过少 (${extractedFrames}帧)，请检查视频文件`);
+        }
+        
+        console.log(`   🎬 第 2/2 步：组合为 GIF...`);
+        
+        // 第三步：用 ImageMagick 将 PNG 帧组合成 GIF
+        const tempGifPath = path.join(tempDir, `video_${i}_temp.gif`);
+        const combineCmd = `convert -delay ${gifDelay} -loop 0 "${framesDir}/frame_*.png" "${tempGifPath}"`;
+        
+        console.log(`   🔧 组合命令: ${combineCmd.length > 150 ? combineCmd.substring(0, 150) + '...' : combineCmd}`);
+        
+        await execAsync(combineCmd, { maxBuffer: 200 * 1024 * 1024, timeout: 180000 });
+        
+        // 临时GIF就是最终GIF（因为已经设置了delay）
+        // 重命名为最终文件名
+        fs.renameSync(tempGifPath, videoGifPath);
+        
+        console.log(`   ✅ GIF 生成完成`);
+        
+        // 验证最终 GIF 的帧数和延迟
+        try {
+          const finalFrameCountCmd = `identify "${videoGifPath}" | wc -l`;
+          const finalFramesResult = await execAsync(finalFrameCountCmd, { timeout: 10000 });
+          const finalFrames = parseInt(finalFramesResult.stdout.trim());
+          const expectedFrames = Math.round(videoDuration * gifFps);
+          
+          // 验证第一帧的延迟
+          const delayCheckCmd = `identify -format "%T\\n" "${videoGifPath}[0]"`;
+          const delayResult = await execAsync(delayCheckCmd, { timeout: 10000 });
+          const actualDelay = parseInt(delayResult.stdout.trim());
+          
+          // 计算实际时长
+          const actualDuration = (finalFrames * actualDelay) / 100;
+          
+          console.log(`   📊 最终 GIF 验证:`);
+          console.log(`      总帧数: ${finalFrames} 帧`);
+          console.log(`      预期帧数: ${expectedFrames} 帧`);
+          console.log(`      帧率覆盖: ${((finalFrames/expectedFrames)*100).toFixed(1)}%`);
+          console.log(`      帧延迟: ${actualDelay}/100s (应为 ${gifDelay}/100s)`);
+          console.log(`      实际时长: ${actualDuration.toFixed(2)}s (原视频 ${videoDuration.toFixed(2)}s)`);
+          console.log(`      时长误差: ${Math.abs(actualDuration - videoDuration).toFixed(2)}s`);
+          
+          if (finalFrames < expectedFrames * 0.8) {
+            console.warn(`   ⚠️  警告: 帧数少于预期`);
+          } else {
+            console.log(`   ✅ 帧数验证通过`);
+          }
+        } catch (verifyError) {
+          console.warn(`   ⚠️  无法验证 GIF 帧数:`, verifyError.message);
+        }
+        
+        // 清理临时帧文件夹
+        try {
+          removeDirRecursive(framesDir);
+          console.log(`   🧹 已清理临时帧文件`);
+        } catch (cleanupError) {
+          console.warn(`   ⚠️  清理临时文件失败（可忽略）:`, cleanupError.message);
+        }
+        
+        // 获取生成的 GIF 文件大小
+        const gifStats = fs.statSync(videoGifPath);
+        const gifSizeMB = (gifStats.size / 1024 / 1024).toFixed(2);
+        
+        // 验证 GIF 的实际帧延迟
+        let actualDelay = 0;
+        let estimatedDuration = 0;
+        try {
+          // 使用 identify 检查 GIF 的帧延迟
+          const identifyCmd = `identify -format "%T\\n" "${videoGifPath}" | head -1`;
+          const identifyResult = await execAsync(identifyCmd, { timeout: 10000 });
+          const delayStr = identifyResult.stdout.trim();
+          if (delayStr && !isNaN(parseInt(delayStr))) {
+            actualDelay = parseInt(delayStr); // 单位：百分之一秒
+            const totalFramesCmd = `identify "${videoGifPath}" | wc -l`;
+            const framesResult = await execAsync(totalFramesCmd, { timeout: 10000 });
+            const totalFrames = parseInt(framesResult.stdout.trim());
+            
+            if (totalFrames > 0) {
+              estimatedDuration = (totalFrames * actualDelay) / 100; // 转换为秒
+              console.log(`   ⏱️  GIF 信息: ${totalFrames} 帧, 每帧延迟 ${actualDelay}/100秒, 预估时长 ${estimatedDuration.toFixed(2)}秒`);
+              
+              if (videoDuration > 0) {
+                const speedRatio = videoDuration / estimatedDuration;
+                const speedPercent = (speedRatio * 100).toFixed(1);
+                
+                if (Math.abs(speedRatio - 1) > 0.05) {
+                  console.warn(`   ⚠️  速度偏差: GIF时长 (${estimatedDuration.toFixed(2)}s) vs 视频时长 (${videoDuration.toFixed(2)}s), 播放速度 ${speedPercent}%`);
+                } else {
+                  console.log(`   ✅ 速度验证: GIF 与视频时长匹配 (${speedPercent}%)`);
+                }
+              }
+              
+              // 验证延迟是否符合预期
+              if (actualDelay !== gifDelay) {
+                console.warn(`   ⚠️  延迟警告: 实际延迟 ${actualDelay}/100s 与目标延迟 ${gifDelay}/100s 不符`);
+              } else {
+                console.log(`   ✅ 延迟验证: 帧延迟正确设置为 ${actualDelay}/100秒 (${gifFps.toFixed(2)}fps)`);
+              }
+            }
+          }
+        } catch (verifyError) {
+          console.warn(`   ⚠️  无法验证 GIF 帧延迟:`, verifyError.message);
+        }
+        
+        console.log(`   ✅ 视频已转换为高质量 GIF (${gifFps.toFixed(2)}fps, ${gifSizeMB}MB): ${path.basename(videoGifPath)}`);
+        
+        // 更新路径为转换后的 GIF
+        item.path = videoGifPath;
+        
+        // 清理临时调色板文件
+        try {
+          if (fs.existsSync(palettePath)) {
+            fs.unlinkSync(palettePath);
+          }
+        } catch (cleanupError) {
+          console.warn(`   ⚠️  清理调色板文件失败（可忽略）: ${cleanupError.message}`);
+        }
+      } catch (ffmpegError) {
+        console.error(`   ❌ GIF 生成失败: ${ffmpegError.message}`);
+        throw new Error(`视频转 GIF 失败: ${ffmpegError.message}\n\n请确保已安装 FFmpeg: brew install ffmpeg`);
+      }
+    }
+  }
+  
+  // 3. 保存标注层 PNG
+  const annotationPath = path.join(tempDir, 'annotation.png');
+  const annotationBuffer = Buffer.from(annotationBytes);
+  fs.writeFileSync(annotationPath, annotationBuffer);
+  console.log(`\n💾 标注层已保存: ${annotationPath} (${(annotationBuffer.length / 1024).toFixed(2)} KB)`);
+  
+  // 4. 使用 ImageMagick 合成多个 GIF + 标注
+  console.log(`\n🎨 开始合成 ${gifPaths.length} 个 GIF...`);
+  console.log(`   Frame 尺寸: ${frameBounds.width}x${frameBounds.height}`);
+  console.log(`\n📝 输出文件名: ${outputFilename}`);
+  
+  try {
+    const frameW = Math.round(frameBounds.width);
+    const frameH = Math.round(frameBounds.height);
+    
+    if (gifPaths.length === 1) {
+      // 单个 GIF：使用原有的简单逻辑
+      console.log(`\n🎨 单个 GIF 模式 - 快速合成...`);
+      reportProgress(10, '正在准备合成...');
+      const gifInfo = gifPaths[0];
+      
+      // 验证 gifInfo 结构
+      console.log(`   验证 gifInfo:`, {
+        hasPath: !!gifInfo.path,
+        hasBounds: !!gifInfo.bounds,
+        boundsKeys: gifInfo.bounds ? Object.keys(gifInfo.bounds) : 'null'
+      });
+      
+      if (!gifInfo || !gifInfo.bounds) {
+        console.error(`   ❌ gifInfo 结构无效:`, gifInfo);
+        throw new Error('GIF 信息结构无效，缺少 bounds 数据');
+      }
+      
+      const offsetX = Math.round(gifInfo.bounds.x);
+      const offsetY = Math.round(gifInfo.bounds.y);
+      const gifW = Math.round(gifInfo.bounds.width);
+      const gifH = Math.round(gifInfo.bounds.height);
+      
+      console.log(`   GIF 位置参数: offsetX=${offsetX}, offsetY=${offsetY}, width=${gifW}, height=${gifH}`);
+      
+      // 修复: 添加 null: 分隔符，修正 ImageMagick 7 兼容性
+      // 改进颜色保持：使用 -dither Floyd-Steinberg 和 -colors 256 保持最大颜色信息
+      const command = `convert "${gifInfo.path}" -coalesce -resize ${gifW}x${gifH}! -background none -splice ${offsetX}x0 -splice 0x${offsetY} -extent ${frameW}x${frameH} null: \\( "${annotationPath}" \\) -compose over -layers composite -dither Floyd-Steinberg -colors 256 "${outputPath}"`;
+      
+      console.log(`   执行命令...`);
+      reportProgress(30, '正在合成 GIF 与标注 (ImageMagick)...');
+      console.log(`   命令: ${command.substring(0, 150)}...`);
+      await execAsync(command, { maxBuffer: 50 * 1024 * 1024 });
+      
+      reportProgress(90, '合成完成，正在清理...');
+    } else {
+      // 多个 GIF：逐帧提取和合成
+      console.log(`\n🎨 多个 GIF 模式 - 逐帧提取合成...`);
+      reportProgress(5, '正在分析 GIF 帧结构...');
+      console.log(`   ⚠️  这会需要一些时间...`);
+      
+      // 新策略：逐帧提取、合成、重组
+      // 这是处理多个动画 GIF 最可靠的方法
+      
+      // 第一步：获取所有 GIF 的帧数和延迟时间
+      console.log(`\n   第 1 步：分析 GIF 信息...`);
+      const gifInfoArray = [];
+      
+      for (let i = 0; i < gifPaths.length; i++) {
+        checkCancelled(); // 检查是否被取消
+        const gifInfo = gifPaths[i];
+        
+        // 获取 GIF 的帧数
+        const identifyCmd = `identify -format "%n\\n" "${gifInfo.path}" | head -1`;
+        const result = await execAsync(identifyCmd);
+        const frameCount = parseInt(result.stdout.trim()) || 1;
+        
+        // 获取每一帧的延迟时间，并计算精确总时长
+        // -format "%T\n" 会输出每一帧的延迟（单位 1/100 秒）
+        const delayCmd = `identify -format "%T\\n" "${gifInfo.path}"`;
+        const delayResult = await execAsync(delayCmd);
+        
+        // 解析每一帧的延迟
+        const delays = delayResult.stdout.trim().split('\n')
+          .map(d => parseInt(d.trim()))
+          .filter(d => !isNaN(d));
+          
+        // 计算实际总时长（所有帧延迟之和）
+        const totalDurationTicks = delays.reduce((sum, d) => sum + d, 0);
+        const totalDuration = totalDurationTicks / 100;
+        
+        // 计算平均延迟作为参考
+        const avgDelay = delays.length > 0 ? Math.round(totalDurationTicks / delays.length) : 5;
+        // 如果有些帧延迟为0，通常播放器会按默认值处理（如10ms），这里我们统一修正为最小 2 ticks (20ms) 以防过快
+        const safeDelay = avgDelay < 2 ? 10 : avgDelay;
+        
+        gifInfoArray.push({
+          frameCount,
+          delay: safeDelay, // 平均/主要延迟
+          delays: delays,   // 保存所有帧的延迟详情
+          totalDuration
+        });
+        
+        console.log(`      GIF ${i + 1}: ${frameCount} 帧, 平均延迟: ${safeDelay}/100秒, 实际总时长: ${totalDuration.toFixed(2)}秒`);
+      }
+      
+      // 找到最长的 GIF 时长（这将是输出GIF的总时长）
+      const maxDuration = Math.max(...gifInfoArray.map(g => g.totalDuration));
+      
+      // 使用最小延迟作为输出延迟（确保能捕捉最快GIF的所有帧）
+      // 这样可以保证所有GIF都按原速播放
+      const allDelays = gifInfoArray.map(g => g.delay);
+      const outputDelay = Math.min(...allDelays);
+      
+      // 计算需要生成的总帧数（基于最长时长和输出延迟）
+      const totalOutputFrames = Math.ceil((maxDuration * 100) / outputDelay);
+      
+      console.log(`   所有 GIF 信息:`);
+      gifInfoArray.forEach((gif, idx) => {
+        console.log(`      GIF ${idx + 1}: 帧数=${gif.frameCount}, 延迟=${gif.delay}/100s, 时长=${gif.totalDuration.toFixed(2)}s`);
+      });
+      console.log(`   最长时长: ${maxDuration.toFixed(2)}秒 (以此作为输出GIF的总时长)`);
+      console.log(`   输出帧延迟: ${outputDelay}/100秒 (使用最小延迟确保原速播放)`);
+      console.log(`   输出总帧数: ${totalOutputFrames}`);
+      
+      // 第二步：为每个 GIF 提取帧到单独的文件夹
+      console.log(`\n   第 2 步：提取所有 GIF 的帧...`);
+      reportProgress(10, '正在提取 GIF 原始帧...');
+      const gifFramesDirs = [];
+      
+      for (let i = 0; i < gifPaths.length; i++) {
+        checkCancelled(); // 检查是否被取消
+        const progress = 10 + Math.round((i / gifPaths.length) * 20); // 10% -> 30%
+        reportProgress(progress, `正在提取第 ${i + 1}/${gifPaths.length} 个 GIF 的帧...`);
+
+        const gifInfo = gifPaths[i];
+        const offsetX = Math.round(gifInfo.bounds.x);
+        const offsetY = Math.round(gifInfo.bounds.y);
+        const gifW = Math.round(gifInfo.bounds.width);
+        const gifH = Math.round(gifInfo.bounds.height);
+        const gifData = gifInfoArray[i];
+        
+        console.log(`\n      提取 GIF ${i + 1}/${gifPaths.length}`);
+        console.log(`         文件: ${path.basename(gifInfo.path)}`);
+        console.log(`         帧数: ${gifData.frameCount}`);
+        console.log(`         尺寸: ${gifW}x${gifH}, 位置: (${offsetX}, ${offsetY})`);
+        
+        const framesDir = path.join(tempDir, `gif${i}_frames`);
+        if (!fs.existsSync(framesDir)) {
+          fs.mkdirSync(framesDir, { recursive: true });
+        }
+        
+        // 提取并处理每一帧（使用 PNG32 确保完整颜色和 alpha 通道）
+        const extractCmd = `convert "${gifInfo.path}" -coalesce -resize ${gifW}x${gifH}! -background none -splice ${offsetX}x0 -splice 0x${offsetY} -extent ${frameW}x${frameH} -define png:color-type=6 "${framesDir}/frame_%04d.png"`;
+        
+        await execAsync(extractCmd, { maxBuffer: 100 * 1024 * 1024 });
+        
+        gifFramesDirs.push({ 
+          dir: framesDir, 
+          frameCount: gifData.frameCount,
+          delay: gifData.delay,
+          totalDuration: gifData.totalDuration
+        });
+        console.log(`         ✅ 已提取 ${gifData.frameCount} 帧`);
+      }
+      
+      // 第三步：逐帧合成（根据时间轴正确采样）
+      console.log(`\n   第 3 步：逐帧合成 ${totalOutputFrames} 帧...`);
+      reportProgress(30, '正在合成动态帧...');
+      const compositeFramesDir = path.join(tempDir, 'composite_frames');
+      if (!fs.existsSync(compositeFramesDir)) {
+        fs.mkdirSync(compositeFramesDir, { recursive: true });
+      }
+      
+      // 调试：打印前几帧的采样信息
+      const debugFrameCount = 5;
+      
+      for (let frameIdx = 0; frameIdx < totalOutputFrames; frameIdx++) {
+        checkCancelled(); // 检查是否被取消（每10帧检查一次以减少开销）
+        
+        // 更新进度 (30% -> 60%)
+        if (frameIdx % 5 === 0) {
+           const progress = 30 + Math.round((frameIdx / totalOutputFrames) * 30);
+           reportProgress(progress, `正在合成帧 ${frameIdx + 1}/${totalOutputFrames}`);
+        }
+
+        const outputFrame = path.join(compositeFramesDir, `frame_${String(frameIdx).padStart(4, '0')}.png`);
+        
+        // 计算当前时间点（秒）
+        const currentTime = (frameIdx * outputDelay) / 100;
+        
+        if (frameIdx < debugFrameCount) {
+          console.log(`\n      [调试] 输出帧 ${frameIdx}，时间: ${currentTime.toFixed(3)}s`);
+        }
+        
+        // 获取第一个 GIF 在当前时间点应该显示的帧
+        const firstGifInfo = gifFramesDirs[0];
+        // 循环播放：取模总时长
+        const firstGifTime = currentTime % firstGifInfo.totalDuration;
+        // 计算对应的帧索引（基于该GIF自己的原始延迟）
+        const firstFrameIdx = Math.floor(firstGifTime / (firstGifInfo.delay / 100));
+        const actualFirstFrameIdx = Math.min(firstFrameIdx, firstGifInfo.frameCount - 1);
+        const firstFramePath = path.join(firstGifInfo.dir, `frame_${String(actualFirstFrameIdx).padStart(4, '0')}.png`);
+        
+        if (frameIdx < debugFrameCount) {
+          console.log(`         GIF 1: 采样帧 ${actualFirstFrameIdx} (原始延迟: ${firstGifInfo.delay}/100s)`);
+        }
+        
+        // 如果只有一个 GIF，直接复制
+        if (gifFramesDirs.length === 1) {
+          fs.copyFileSync(firstFramePath, outputFrame);
+        } else {
+          // 多个 GIF：逐层叠加
+          let currentFrame = firstFramePath;
+          
+          for (let gifIdx = 1; gifIdx < gifFramesDirs.length; gifIdx++) {
+            const gifFramesInfo = gifFramesDirs[gifIdx];
+            
+            // 计算当前 GIF 在当前时间点应该显示的帧（基于该GIF自己的原始延迟）
+            const gifTime = currentTime % gifFramesInfo.totalDuration;
+            const gifFrameIdx = Math.floor(gifTime / (gifFramesInfo.delay / 100));
+            const actualGifFrameIdx = Math.min(gifFrameIdx, gifFramesInfo.frameCount - 1);
+            const framePath = path.join(gifFramesInfo.dir, `frame_${String(actualGifFrameIdx).padStart(4, '0')}.png`);
+            
+            if (frameIdx < debugFrameCount) {
+              console.log(`         GIF ${gifIdx + 1}: 采样帧 ${actualGifFrameIdx} (原始延迟: ${gifFramesInfo.delay}/100s)`);
+            }
+            
+            const isLastGif = (gifIdx === gifFramesDirs.length - 1);
+            const tempOutput = isLastGif ? outputFrame : path.join(compositeFramesDir, `temp_${frameIdx}_${gifIdx}.png`);
+            
+            // 使用 composite 叠加
+            const composeCmd = `composite -compose over "${framePath}" "${currentFrame}" "${tempOutput}"`;
+            await execAsync(composeCmd, { maxBuffer: 100 * 1024 * 1024 });
+            
+            // 如果不是第一帧且不是最终输出，删除临时文件
+            if (currentFrame !== firstFramePath && fs.existsSync(currentFrame)) {
+              fs.unlinkSync(currentFrame);
+            }
+            
+            currentFrame = tempOutput;
+          }
+        }
+        
+        if ((frameIdx + 1) % 10 === 0 || frameIdx === totalOutputFrames - 1) {
+          console.log(`      合成进度: ${frameIdx + 1}/${totalOutputFrames} (时间: ${currentTime.toFixed(2)}s)`);
+        }
+      }
+      
+      console.log(`   ✅ 所有帧已合成`);
+      
+      // 第四步：叠加标注层到每一帧
+      console.log(`\n   第 4 步：叠加标注层到每一帧...`);
+      reportProgress(60, '正在叠加标注层...');
+      const annotatedFramesDir = path.join(tempDir, 'annotated_frames');
+      if (!fs.existsSync(annotatedFramesDir)) {
+        fs.mkdirSync(annotatedFramesDir, { recursive: true });
+      }
+      
+      const compositeFrames = fs.readdirSync(compositeFramesDir)
+        .filter(f => f.startsWith('frame_') && f.endsWith('.png'))
+        .sort();
+      
+      for (let i = 0; i < compositeFrames.length; i++) {
+        checkCancelled(); // 检查是否被取消
+        
+        // 更新进度 (60% -> 80%)
+        if (i % 5 === 0) {
+           const progress = 60 + Math.round((i / compositeFrames.length) * 20);
+           reportProgress(progress, `正在叠加标注 ${i + 1}/${compositeFrames.length}`);
+        }
+
+        const frameFile = compositeFrames[i];
+        const framePath = path.join(compositeFramesDir, frameFile);
+        const outputFramePath = path.join(annotatedFramesDir, frameFile);
+        
+        // 使用 composite 叠加标注层
+        const annotateCmd = `composite -compose over "${annotationPath}" "${framePath}" "${outputFramePath}"`;
+        await execAsync(annotateCmd, { maxBuffer: 100 * 1024 * 1024 });
+        
+        if ((i + 1) % 10 === 0 || i === compositeFrames.length - 1) {
+          console.log(`      标注进度: ${i + 1}/${compositeFrames.length}`);
+        }
+      }
+      
+      console.log(`   ✅ 标注已叠加`);
+      
+      // 第五步：重组为 GIF
+      console.log(`\n   第 5 步：重组为 GIF...`);
+      reportProgress(80, '正在生成最终 GIF...');
+      console.log(`      输出延迟: ${outputDelay}/100秒 (${(outputDelay / 100).toFixed(3)}秒/帧)`);
+      console.log(`      输出帧数: ${totalOutputFrames} 帧`);
+      console.log(`      输出时长: ${maxDuration.toFixed(2)}秒`);
+      console.log(`      理论帧率: ${(100 / outputDelay).toFixed(1)} fps`);
+      
+      // 改进颜色保持：使用 Floyd-Steinberg 抖动和完整 256 色调色板
+      const recomposeCmd = `convert -delay ${outputDelay} -loop 0 "${annotatedFramesDir}/frame_*.png" -dither Floyd-Steinberg -colors 256 "${outputPath}"`;
+      
+      await execAsync(recomposeCmd, { maxBuffer: 200 * 1024 * 1024, timeout: 120000 });
+      
+      console.log(`   ✅ GIF 已生成`);
+      
+      // 第六步：轻量优化 GIF（不损失颜色信息）
+      console.log(`\n   第 6 步：优化 GIF...`);
+      reportProgress(90, '正在优化 GIF 大小...');
+      const tempOptimized = path.join(tempDir, 'optimized.gif');
+      // 使用 -fuzz 1% 进行轻度优化，保持颜色质量
+      const optimizeCmd = `convert "${outputPath}" -fuzz 1% -layers OptimizeTransparency "${tempOptimized}"`;
+      
+      try {
+        await execAsync(optimizeCmd, { maxBuffer: 200 * 1024 * 1024, timeout: 120000 });
+        // 用优化后的替换原文件
+        fs.copyFileSync(tempOptimized, outputPath);
+        fs.unlinkSync(tempOptimized);
+        console.log(`   ✅ GIF 已优化（保持颜色质量）`);
+      } catch (e) {
+        console.log(`   ⚠️  优化失败（使用未优化版本）: ${e.message}`);
+      }
+      
+      // 清理所有临时文件
+      reportProgress(98, '正在清理临时文件...');
+      console.log(`\n   清理临时文件...`);
+      
+      // 清理原始 GIF 帧
+      for (const gifFramesInfo of gifFramesDirs) {
+        if (fs.existsSync(gifFramesInfo.dir)) {
+          removeDirRecursive(gifFramesInfo.dir);
+        }
+      }
+      
+      // 清理合成帧
+      if (fs.existsSync(compositeFramesDir)) {
+        removeDirRecursive(compositeFramesDir);
+      }
+      
+      // 清理标注帧
+      if (fs.existsSync(annotatedFramesDir)) {
+        removeDirRecursive(annotatedFramesDir);
+      }
+      
+      console.log(`   ✅ 多 GIF 合成完成！`);
+    }
+    
+    console.log(`✅ 合成成功！`);
+    console.log(`📁 输出路径: ${outputPath}`);
+    
+    // 5. 清理临时文件
+    try {
+      if (fs.existsSync(tempDir)) {
+        removeDirRecursive(tempDir);
+        console.log(`\n🧹 临时文件已清理`);
+      }
+    } catch (e) {
+      console.log(`⚠️  清理临时文件失败（可忽略）: ${e.message}`);
+    }
+    
+    // 6. 检查输出文件
+    const stats = fs.statSync(outputPath);
+    console.log(`📊 输出文件大小: ${(stats.size / 1024 / 1024).toFixed(2)} MB`);
+    
+    console.log('\n✅ GIF 标注合成完成！\n');
+    
+    return {
+      outputPath,
+      filename: outputFilename,
+      size: stats.size
+    };
+    
+  } catch (error) {
+    // 清理临时文件
+    try {
+      if (fs.existsSync(tempDir)) {
+        removeDirRecursive(tempDir);
+      }
+    } catch (e) {
+      // 忽略清理错误
+    }
+    
+    // 检查是否是因为缺少 ImageMagick
+    // 只有当明确是命令未找到时，才提示安装
+    const isCommandNotFound = error.code === 'ENOENT' || 
+                             error.code === 127 ||
+                             (error.message && error.message.includes('command not found'));
+
+    if (isCommandNotFound) {
+      console.error('❌ 系统无法找到 ImageMagick 命令');
+      throw new Error('未找到 ImageMagick\n\n请先安装: brew install imagemagick');
+    }
+    
+    // 如果是 ImageMagick 执行过程中的错误（比如参数不对，或者文件问题）
+    if (error.message && (error.message.includes('convert') || error.message.includes('magick'))) {
+      console.error('❌ ImageMagick 执行出错 (非缺失):', error.message);
+      // 不要吞掉原始错误，直接抛出，或者包装一下
+      throw new Error(`GIF 处理失败 (ImageMagick): ${error.message.split('\n')[0]}`);
+    }
+    
+    throw error;
+  }
+}
+
 // 如果环境变量未设置，尝试从文件读取
 if (!process.env.SYNC_MODE) {
   const fileMode = readSyncModeFromFile();
@@ -459,6 +1598,7 @@ const wss = new WebSocket.Server({
 });
 
 const connections = new Map();
+const cancelFlags = new Map(); // 跟踪每个连接的取消状态
 
 // 用户实例映射（用于单实例限制）
 // Key: connectionId, Value: { figmaWs, registeredAt }
@@ -1324,6 +2464,11 @@ app.use((err, req, res, next) => {
 
 console.log('🚀 服务器启动\n');
 
+// 启动时清理所有旧的临时文件夹
+console.log('🧹 清理旧的临时文件夹...');
+cleanupAllTempFolders();
+console.log('');
+
 // 健康检查端点（Cloud Run 需要）
 app.get('/health', (req, res) => {
   try {
@@ -1798,6 +2943,270 @@ wss.on('connection', (ws, req) => {
       return;
     }
     
+    // 打开文件夹
+    if (data.type === 'open-folder') {
+      console.log('📂 收到打开文件夹请求');
+      console.log('   连接ID:', connectionId);
+      console.log('   客户端类型:', clientType);
+      
+      const { exec } = require('child_process');
+      const os = require('os');
+      const path = require('path');
+      
+      let targetFolder;
+      
+      // 根据当前模式决定打开哪个文件夹
+      const currentMode = process.env.SYNC_MODE || 'drive';
+      if (currentMode === 'icloud') {
+        targetFolder = path.join(
+          os.homedir(),
+          'Library/Mobile Documents/com~apple~CloudDocs/ScreenSyncImg'
+        );
+        console.log('   [iCloud模式] 目标文件夹:', targetFolder);
+      } else {
+        targetFolder = userConfig.getLocalDownloadFolder();
+        console.log('   [本地模式] 目标文件夹:', targetFolder);
+      }
+      
+      if (fs.existsSync(targetFolder)) {
+        console.log('   ✓ 文件夹存在，执行打开命令');
+        exec(`open "${targetFolder}"`, (err) => {
+          if (err) {
+            console.error('   ❌ 无法打开文件夹:', err);
+          } else {
+            console.log('   ✅ 已成功打开文件夹');
+          }
+        });
+      } else {
+        console.warn('   ⚠️ 文件夹不存在，无法打开:', targetFolder);
+        // 如果是 iCloud 文件夹不存在，可能是还未同步或未创建，尝试打开父目录？
+        // 或者提示用户
+      }
+      return;
+    }
+    
+    // 处理取消 GIF 导出请求
+    if (data.type === 'cancel-gif-export') {
+      console.log('🛑 收到取消 GIF 导出请求');
+      console.log('   连接ID:', connectionId);
+      cancelFlags.set(connectionId, true);
+      
+      // 发送取消确认消息到 Figma
+      const targetGroup = connections.get(connectionId);
+      if (targetGroup && targetGroup.figma && targetGroup.figma.readyState === WebSocket.OPEN) {
+        targetGroup.figma.send(JSON.stringify({
+          type: 'gif-compose-cancelled',
+          message: '导出已取消'
+        }));
+        console.log('   ✅ 已发送取消确认到 Figma');
+      }
+      return;
+    }
+    
+    // 处理保存手动拖入的视频/GIF到缓存的请求
+    if (data.type === 'cache-manual-video') {
+      console.log('\n📥 收到保存手动拖入文件到缓存的请求');
+      console.log('   文件名:', data.filename);
+      console.log('   文件大小:', data.bytes ? `${(data.bytes.length / 1024 / 1024).toFixed(2)} MB` : '未知');
+      
+      try {
+        if (!data.filename || !data.bytes) {
+          throw new Error('缺少文件名或文件数据');
+        }
+        
+        // 将 Array 转换为 Buffer
+        const fileBuffer = Buffer.from(data.bytes);
+        
+        // 保存到缓存
+        const cacheResult = userConfig.saveGifToCache(fileBuffer, data.filename, null);
+        
+        if (cacheResult && cacheResult.cacheId) {
+          console.log(`   ✅ 文件已保存到缓存`);
+          console.log(`   缓存ID: ${cacheResult.cacheId}`);
+          console.log(`   缓存路径: ${cacheResult.cachePath}`);
+          
+          // 返回缓存ID给Figma插件
+          ws.send(JSON.stringify({
+            type: 'cache-manual-video-success',
+            filename: data.filename,
+            cacheId: cacheResult.cacheId,
+            cachePath: cacheResult.cachePath
+          }));
+        } else {
+          throw new Error('保存到缓存失败');
+        }
+      } catch (error) {
+        console.error('   ❌ 保存文件到缓存失败:', error.message);
+        ws.send(JSON.stringify({
+          type: 'cache-manual-video-error',
+          filename: data.filename,
+          error: error.message
+        }));
+      }
+      return;
+    }
+    
+    // 处理带标注的 GIF 合成请求
+    if (data.type === 'compose-annotated-gif') {
+      // 重置取消标志
+      cancelFlags.set(connectionId, false);
+      
+      console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log('🎬 收到 GIF 标注合成请求');
+      console.log('   连接ID:', connectionId);
+      console.log('   Frame名称:', data.frameName);
+      console.log('   GIF数量:', data.gifInfos ? data.gifInfos.length : 0);
+      
+      // 详细检查 gifInfos 结构
+      if (data.gifInfos) {
+        console.log('\n   📊 详细 gifInfos 数据:');
+        data.gifInfos.forEach((gif, idx) => {
+          console.log(`\n      GIF ${idx + 1}:`);
+          console.log(`         文件名: ${gif?.filename || 'undefined'}`);
+          console.log(`         缓存ID: ${gif?.cacheId || 'undefined'}`);
+          console.log(`         bounds 对象:`, gif?.bounds);
+          if (gif?.bounds) {
+            console.log(`            - x: ${gif.bounds.x} (type: ${typeof gif.bounds.x})`);
+            console.log(`            - y: ${gif.bounds.y} (type: ${typeof gif.bounds.y})`);
+            console.log(`            - width: ${gif.bounds.width} (type: ${typeof gif.bounds.width})`);
+            console.log(`            - height: ${gif.bounds.height} (type: ${typeof gif.bounds.height})`);
+          } else {
+            console.log(`            ❌ bounds 为 undefined 或 null!`);
+          }
+        });
+      } else {
+        console.log('   ❌ gifInfos 为空或 undefined!');
+      }
+      
+      console.log('\n   批次:', `${data.batchIndex + 1}/${data.batchTotal}`);
+      console.log('   Frame尺寸:', `${data.frameBounds?.width}x${data.frameBounds?.height}`);
+      console.log('   标注数据大小:', data.annotationBytes ? data.annotationBytes.length : 0, 'bytes');
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+      
+      // 检查并补全缺失的 cacheId（从映射文件）
+      if (data.gifInfos) {
+        const mappingFile = path.join(userConfig.getLocalDownloadFolder(), '.cache-mapping.json');
+        let mapping = {};
+        
+        if (fs.existsSync(mappingFile)) {
+          try {
+            mapping = JSON.parse(fs.readFileSync(mappingFile, 'utf8'));
+            console.log(`   📖 [映射] 已加载缓存映射文件，包含 ${Object.keys(mapping).length} 个条目`);
+          } catch (e) {
+            console.warn(`   ⚠️  [映射] 读取映射文件失败:`, e.message);
+          }
+        }
+        
+        // 补全缺失的 cacheId
+        data.gifInfos.forEach((gif, idx) => {
+          if (!gif.cacheId && gif.filename) {
+            const cachedId = mapping[gif.filename];
+            if (cachedId) {
+              gif.cacheId = cachedId;
+              console.log(`   🔄 [映射] GIF ${idx + 1} 从映射文件获取 cacheId: ${gif.filename} -> ${cachedId}`);
+            } else {
+              console.warn(`   ⚠️  [映射] GIF ${idx + 1} 未找到缓存: ${gif.filename}`);
+            }
+          }
+        });
+      }
+      
+      try {
+        const result = await composeAnnotatedGif({
+          frameName: data.frameName,
+          annotationBytes: data.annotationBytes,
+          frameBounds: data.frameBounds,
+          gifInfos: data.gifInfos,
+          connectionId: connectionId,
+          shouldCancel: () => cancelFlags.get(connectionId) === true,
+          onProgress: (percent, message) => {
+            if (targetGroup.figma && targetGroup.figma.readyState === WebSocket.OPEN) {
+              targetGroup.figma.send(JSON.stringify({
+                type: 'gif-compose-progress',
+                progress: percent,
+                message: message,
+                batchIndex: data.batchIndex,
+                batchTotal: data.batchTotal
+              }));
+            }
+          }
+        });
+        
+        if (result.skipped) {
+          console.log('⏭️  GIF 已存在，跳过导出:', result.outputPath);
+        } else {
+          console.log('✅ GIF 合成成功:', result.outputPath);
+        }
+        
+        if (targetGroup.figma && targetGroup.figma.readyState === WebSocket.OPEN) {
+          const successMsg = {
+            type: 'gif-compose-success',
+            message: result.skipped 
+              ? `⏭️  文件已存在: ${result.outputPath}` 
+              : `✅ 已导出到: ${result.outputPath}`,
+            outputPath: result.outputPath,
+            filename: data.frameName || data.originalFilename,
+            skipped: result.skipped || false
+          };
+          console.log(result.skipped ? '   📤 发送跳过消息到 Figma' : '   📤 发送成功消息到 Figma');
+          targetGroup.figma.send(JSON.stringify(successMsg));
+        } else {
+          console.warn('   ⚠️ 无法发送成功消息：Figma WebSocket未连接');
+        }
+      } catch (error) {
+        // 检查是否是取消操作
+        if (error.message === 'GIF_EXPORT_CANCELLED') {
+          console.log('\n🛑 GIF 导出已取消');
+          console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+          
+          // 发送取消消息到 Figma
+          if (targetGroup.figma && targetGroup.figma.readyState === WebSocket.OPEN) {
+            targetGroup.figma.send(JSON.stringify({
+              type: 'gif-compose-cancelled',
+              message: '导出已取消'
+            }));
+          }
+          
+          // 清理临时文件
+          try {
+            const tempDirPattern = path.join(__dirname, `.temp-gif-compose-${connectionId}_*`);
+            const glob = require('glob');
+            const tempDirs = glob.sync(tempDirPattern);
+            for (const dir of tempDirs) {
+              if (fs.existsSync(dir)) {
+                removeDirRecursive(dir);
+                console.log(`   🗑️  已清理取消的临时文件夹: ${path.basename(dir)}`);
+              }
+            }
+          } catch (cleanupError) {
+            console.error(`   ⚠️  清理临时文件失败:`, cleanupError.message);
+          }
+          
+          return;
+        }
+        
+        console.error('\n❌❌❌ GIF 合成失败 ❌❌❌');
+        console.error('   错误类型:', error.name);
+        console.error('   错误消息:', error.message);
+        console.error('   错误堆栈:', error.stack);
+        console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+        
+        if (targetGroup.figma && targetGroup.figma.readyState === WebSocket.OPEN) {
+          const errorMsg = {
+            type: 'gif-compose-error',
+            message: error.message || '未知错误',
+            error: error.message || '未知错误', // 兼容旧代码
+            details: error.stack
+          };
+          console.log('   📤 发送错误消息到 Figma');
+          targetGroup.figma.send(JSON.stringify(errorMsg));
+        } else {
+          console.warn('   ⚠️ 无法发送错误消息：Figma WebSocket未连接');
+        }
+      }
+      return;
+    }
+    
     // 同步模式切换消息处理
     if (data.type === 'switch-sync-mode' || data.type === 'get-sync-mode' || data.type === 'get-user-id' || data.type === 'get-server-info') {
       if (data.type === 'get-server-info') {
@@ -2222,6 +3631,8 @@ wss.on('connection', (ws, req) => {
       delete group[clientType];
       if (!group.figma && !group.mac) {
         connections.delete(connectionId);
+        // 清理取消标志
+        cancelFlags.delete(connectionId);
       }
     }
   });
@@ -2522,7 +3933,7 @@ async function handlePluginUpdate(targetGroup, connectionId) {
     
     // 下载文件
     await downloadFileWithRedirect(downloadUrl, tempFile);
-    console.log(`   ✅ 下载完成: ${tempFile}`);
+          console.log(`   ✅ 下载完成: ${tempFile}`);
     
     // 通知用户正在安装
     targetGroup.figma.send(JSON.stringify({
@@ -2690,7 +4101,7 @@ async function handleServerUpdate(targetGroup, connectionId) {
     
     // 下载文件
     await downloadFileWithRedirect(downloadUrl, tempFile);
-    console.log(`   ✅ 下载完成: ${tempFile}`);
+          console.log(`   ✅ 下载完成: ${tempFile}`);
     
     // 通知用户正在安装
     targetGroup.figma.send(JSON.stringify({

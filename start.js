@@ -152,7 +152,7 @@ function checkEnvironment() {
     } catch (error) {
       console.error('❌ 自动安装依赖失败:', error.message);
       console.error('   请手动运行: npm install');
-      return false;
+    return false;
     }
   }
 
@@ -180,7 +180,7 @@ function checkEnvironment() {
         console.log(`✅ 依赖 "${dep}" 已安装`);
       } catch (error) {
         console.error(`❌ 安装依赖 "${dep}" 失败:`, error.message);
-        return false;
+      return false;
       }
     }
   }
@@ -303,8 +303,8 @@ if (!checkEnvironmentWithRetry()) {
 
 // 环境检查通过，继续启动
 function continueStartup() {
-  // 启动服务器
-  startServer();
+// 启动服务器
+startServer();
   
   // 延迟启动监听器，避免重复启动
   setTimeout(() => {

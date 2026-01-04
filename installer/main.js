@@ -95,7 +95,7 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   // 安装器在窗口关闭后应立即退出，即使在 macOS 上也是如此
-  app.quit();
+    app.quit();
 });
 
 // IPC 处理函数
@@ -333,6 +333,48 @@ ipcMain.handle('check-node', async () => {
   });
 });
 
+ipcMain.handle('check-imagemagick', async () => {
+  return new Promise((resolve) => {
+    const convertPath = findExecutable('convert');
+    
+    if (convertPath) {
+      exec('convert -version', (error, output) => {
+        if (!error && output.includes('ImageMagick')) {
+          // 提取版本号
+          const versionMatch = output.match(/Version: ImageMagick ([\d.]+)/);
+          const version = versionMatch ? versionMatch[1] : 'unknown';
+          resolve({ installed: true, version: version });
+        } else {
+          resolve({ installed: false });
+        }
+      });
+    } else {
+      resolve({ installed: false });
+    }
+  });
+});
+
+ipcMain.handle('check-ffmpeg', async () => {
+  return new Promise((resolve) => {
+    const ffmpegPath = findExecutable('ffmpeg');
+    
+    if (ffmpegPath) {
+      exec('ffmpeg -version', (error, output) => {
+        if (!error && output.includes('ffmpeg version')) {
+          // 提取版本号
+          const versionMatch = output.match(/ffmpeg version ([\d.]+)/);
+          const version = versionMatch ? versionMatch[1] : 'unknown';
+          resolve({ installed: true, version: version });
+        } else {
+          resolve({ installed: false });
+        }
+      });
+    } else {
+      resolve({ installed: false });
+    }
+  });
+});
+
 ipcMain.handle('check-icloud-space', async () => {
   const icloudPath = path.join(
     os.homedir(),
@@ -407,7 +449,7 @@ function runAppleScript(script) {
         // 只有当 error 存在且不是用户取消时才 reject
         if (!error.message.includes('User canceled')) {
           console.error('AppleScript error:', error);
-          reject(error);
+        reject(error);
         } else {
            // 用户取消当作成功但不执行
            resolve('User canceled');
@@ -479,6 +521,66 @@ ipcMain.handle('install-node', async () => {
       resolve({ 
         success: false, 
         error: `无法打开终端: ${error.message}\n\n请手动在终端中运行:\nbrew install node`
+      });
+    }
+  });
+});
+
+ipcMain.handle('install-imagemagick', async () => {
+  return new Promise(async (resolve) => {
+    const installCommand = 'brew install imagemagick';
+    const appleScript = `
+      tell application "Terminal"
+        activate
+        do script "${installCommand}"
+      end tell
+    `;
+    
+    console.log('Opening Terminal to install ImageMagick...');
+    
+    try {
+      await runAppleScript(appleScript);
+      console.log('Terminal opened successfully');
+      resolve({ 
+        success: true, 
+        message: '终端已打开，正在安装 ImageMagick。通常需要 2-3 分钟。完成后请点击"重新检测"按钮。',
+        needsRestart: true
+      });
+    } catch (error) {
+      console.error('Failed to run AppleScript:', error);
+      resolve({ 
+        success: false, 
+        error: `无法打开终端: ${error.message}\n\n请手动在终端中运行:\nbrew install imagemagick`
+      });
+    }
+  });
+});
+
+ipcMain.handle('install-ffmpeg', async () => {
+  return new Promise(async (resolve) => {
+    const installCommand = 'brew install ffmpeg';
+    const appleScript = `
+      tell application "Terminal"
+        activate
+        do script "${installCommand}"
+      end tell
+    `;
+    
+    console.log('Opening Terminal to install FFmpeg...');
+    
+    try {
+      await runAppleScript(appleScript);
+      console.log('Terminal opened successfully');
+      resolve({ 
+        success: true, 
+        message: '终端已打开，正在安装 FFmpeg。通常需要 2-3 分钟。完成后请点击"重新检测"按钮。',
+        needsRestart: true
+      });
+    } catch (error) {
+      console.error('Failed to run AppleScript:', error);
+      resolve({ 
+        success: false, 
+        error: `无法打开终端: ${error.message}\n\n请手动在终端中运行:\nbrew install ffmpeg`
       });
     }
   });
@@ -869,11 +971,11 @@ ipcMain.handle('setup-autostart', async (event, installPath) => {
       // 避免出现"依赖是用 Node A 安装的，但 LaunchAgent 用 Node B 启动"导致的原生模块(sharp)崩溃
       const nodePath = findExecutable('node') || 
         (process.platform === 'darwin' 
-          ? (process.arch === 'arm64' ? '/opt/homebrew/bin/node' : '/usr/local/bin/node')
+        ? (process.arch === 'arm64' ? '/opt/homebrew/bin/node' : '/usr/local/bin/node')
           : 'node');
       
       console.log('🚀 配置自启动，使用 Node 路径:', nodePath);
-
+      
       const homeDir = require('os').homedir();
       const launchAgentsDir = path.join(homeDir, 'Library', 'LaunchAgents');
       const plistName = 'com.screensync.server.plist';
@@ -901,9 +1003,9 @@ ipcMain.handle('setup-autostart', async (event, installPath) => {
         // 等待 1 秒确保卸载完成
         setTimeout(() => {
           // 加载新服务（RunAtLoad 为 true，会自动启动）
-          exec(`launchctl load "${plistPath}"`, (loadError, stdout, stderr) => {
+        exec(`launchctl load "${plistPath}"`, (loadError, stdout, stderr) => {
             // 检查是否加载成功
-            if (loadError && !stderr.includes('already loaded')) {
+          if (loadError && !stderr.includes('already loaded')) {
               console.error('❌ Launchctl load 失败:', loadError.message);
               console.error('   stderr:', stderr);
               resolve({ 
@@ -922,18 +1024,18 @@ ipcMain.handle('setup-autostart', async (event, installPath) => {
               if (isRunning) {
                 console.log('✅ 服务器运行验证成功');
                 console.log('   服务已配置为开机自动启动');
-                resolve({ 
+                  resolve({ 
                   success: true, 
                   message: '服务器已配置为开机自动启动' 
-                });
-              } else {
+                  });
+                } else {
                 console.warn('⚠️  LaunchAgent 已配置，但服务未运行');
                 console.warn('   开机后将自动启动');
-                resolve({ 
-                  success: true, 
+                  resolve({ 
+                    success: true, 
                   message: '服务器已配置为开机自动启动（当前未运行，开机后自动启动）' 
-                });
-              }
+                  });
+                }
             }, 5000);
           });
         }, 1000);

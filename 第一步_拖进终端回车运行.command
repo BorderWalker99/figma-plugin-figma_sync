@@ -14,6 +14,162 @@ echo ""
 echo "📂 工作目录: $SCRIPT_DIR"
 echo ""
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 步骤 1: 检查并安装 ImageMagick
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  第一步：检查 ImageMagick 依赖"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "📝 ImageMagick 是 GIF 导出功能的必需依赖"
+echo ""
+
+# 检查 ImageMagick 是否已安装
+if command -v convert >/dev/null 2>&1 && command -v identify >/dev/null 2>&1 && command -v composite >/dev/null 2>&1; then
+    echo "✅ ImageMagick 已安装"
+    VERSION=$(convert --version 2>&1 | head -1)
+    echo "   版本: $VERSION"
+    echo ""
+else
+    echo "⚠️  ImageMagick 未安装"
+    echo ""
+    
+    # 检查 Homebrew 是否已安装
+    if command -v brew >/dev/null 2>&1; then
+        echo "✅ 检测到 Homebrew 包管理器"
+        echo ""
+        echo "🔄 正在安装 ImageMagick..."
+        echo "   （这可能需要几分钟时间，请耐心等待）"
+        echo ""
+        
+        # 安装 ImageMagick
+        if brew install imagemagick; then
+            echo ""
+            echo "✅ ImageMagick 安装成功！"
+            VERSION=$(convert --version 2>&1 | head -1)
+            echo "   版本: $VERSION"
+            echo ""
+        else
+            echo ""
+            echo "❌ ImageMagick 自动安装失败"
+            echo ""
+            echo "📋 请手动安装："
+            echo "   打开终端，运行以下命令："
+            echo "   brew install imagemagick"
+            echo ""
+            echo "⚠️  如果没有安装 Homebrew，请先安装："
+            echo "   访问 https://brew.sh"
+            echo "   或运行："
+            echo "   /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+            echo ""
+            read -p "按回车键继续安装（GIF 导出功能将不可用）..."
+        fi
+    else
+        echo "❌ 未检测到 Homebrew 包管理器"
+        echo ""
+        echo "📋 ImageMagick 需要 Homebrew 来安装"
+        echo ""
+        echo "请按照以下步骤操作："
+        echo ""
+        echo "1️⃣ 安装 Homebrew（如果尚未安装）："
+        echo "   访问: https://brew.sh"
+        echo "   或在终端运行:"
+        echo "   /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+        echo ""
+        echo "2️⃣ 安装 ImageMagick:"
+        echo "   brew install imagemagick"
+        echo ""
+        echo "⚠️  跳过 ImageMagick 安装将导致 GIF 导出功能不可用"
+        echo ""
+        read -p "按回车键继续安装（GIF 导出功能将不可用）..."
+    fi
+fi
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 步骤 1.5: 检查并安装 FFmpeg
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  第一点五步：检查 FFmpeg 依赖"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "📝 FFmpeg 是视频导出为 GIF 功能的必需依赖"
+echo ""
+
+# 检查 FFmpeg 是否已安装
+if command -v ffmpeg >/dev/null 2>&1; then
+    echo "✅ FFmpeg 已安装"
+    VERSION=$(ffmpeg -version 2>&1 | head -1)
+    echo "   版本: $VERSION"
+    echo ""
+else
+    echo "⚠️  FFmpeg 未安装"
+    echo ""
+    
+    # 检查 Homebrew 是否已安装
+    if command -v brew >/dev/null 2>&1; then
+        echo "✅ 检测到 Homebrew 包管理器"
+        echo ""
+        echo "🔄 正在安装 FFmpeg..."
+        echo "   （这可能需要几分钟时间，请耐心等待）"
+        echo ""
+        
+        # 安装 FFmpeg
+        if brew install ffmpeg; then
+            echo ""
+            echo "✅ FFmpeg 安装成功！"
+            VERSION=$(ffmpeg -version 2>&1 | head -1)
+            echo "   版本: $VERSION"
+            echo ""
+        else
+            echo ""
+            echo "❌ FFmpeg 自动安装失败"
+            echo ""
+            echo "📋 请手动安装："
+            echo "   打开终端，运行以下命令："
+            echo "   brew install ffmpeg"
+            echo ""
+            echo "⚠️  如果没有安装 Homebrew，请先安装："
+            echo "   访问 https://brew.sh"
+            echo "   或运行："
+            echo "   /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+            echo ""
+            read -p "按回车键继续安装（视频导出功能将不可用）..."
+        fi
+    else
+        echo "❌ 未检测到 Homebrew 包管理器"
+        echo ""
+        echo "📋 FFmpeg 需要 Homebrew 来安装"
+        echo ""
+        echo "请按照以下步骤操作："
+        echo ""
+        echo "1️⃣ 安装 Homebrew（如果尚未安装）："
+        echo "   访问: https://brew.sh"
+        echo "   或在终端运行:"
+        echo "   /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+        echo ""
+        echo "2️⃣ 安装 FFmpeg:"
+        echo "   brew install ffmpeg"
+        echo ""
+        echo "⚠️  跳过 FFmpeg 安装将导致视频导出功能不可用"
+        echo ""
+        read -p "按回车键继续安装（视频导出功能将不可用）..."
+    fi
+fi
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 步骤 2: 清除安装器的隔离属性
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  第二步：准备安装器"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
 # 查找安装器（DMG 或 .app）
 INSTALLER_PATH=""
 INSTALLER_NAME=""
@@ -119,6 +275,18 @@ else
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo "  ✅ 准备完成！"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "✅ 依赖检查完成"
+    if command -v convert >/dev/null 2>&1; then
+        echo "   • ImageMagick: 已安装 ✓"
+    else
+        echo "   • ImageMagick: 未安装 ⚠️ (GIF导出功能将不可用)"
+    fi
+    if command -v ffmpeg >/dev/null 2>&1; then
+        echo "   • FFmpeg: 已安装 ✓"
+    else
+        echo "   • FFmpeg: 未安装 ⚠️ (视频导出功能将不可用)"
+    fi
     echo ""
     echo "📋 下一步："
     echo "   1. 关闭此终端窗口"

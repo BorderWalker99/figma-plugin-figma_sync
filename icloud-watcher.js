@@ -38,6 +38,62 @@ let watcher = null;
 // 待删除文件队列：{filename: filePath}
 const pendingDeletes = new Map();
 
+// 已处理文件缓存：防止重复同步
+// 格式：{ fingerprint: timestamp }
+// fingerprint = filename + fileSize + mtime
+const processedFilesCache = new Map();
+const CACHE_EXPIRY_MS = 30000; // 30秒后过期
+
+// 定期清理过期的缓存
+setInterval(() => {
+  const now = Date.now();
+  let cleanedCount = 0;
+  for (const [fingerprint, timestamp] of processedFilesCache.entries()) {
+    if (now - timestamp > CACHE_EXPIRY_MS) {
+      processedFilesCache.delete(fingerprint);
+      cleanedCount++;
+    }
+  }
+  if (cleanedCount > 0) {
+    console.log(`🧹 [缓存清理] 已清理 ${cleanedCount} 个过期的文件记录`);
+  }
+}, CACHE_EXPIRY_MS); // 每30秒清理一次
+
+// 生成文件指纹
+function getFileFingerprint(filePath) {
+  try {
+    const stats = fs.statSync(filePath);
+    const filename = path.basename(filePath);
+    // 文件指纹 = 文件名 + 大小 + 修改时间（毫秒）
+    return `${filename}_${stats.size}_${stats.mtimeMs}`;
+  } catch (error) {
+    return null;
+  }
+}
+
+// 检查文件是否已处理
+function isFileProcessed(filePath) {
+  const fingerprint = getFileFingerprint(filePath);
+  if (!fingerprint) return false;
+  
+  if (processedFilesCache.has(fingerprint)) {
+    const timestamp = processedFilesCache.get(fingerprint);
+    const ageMs = Date.now() - timestamp;
+    console.log(`   🔍 [重复检测] 文件已在 ${(ageMs / 1000).toFixed(1)}秒 前处理过，跳过`);
+    return true;
+  }
+  return false;
+}
+
+// 标记文件为已处理
+function markFileAsProcessed(filePath) {
+  const fingerprint = getFileFingerprint(filePath);
+  if (fingerprint) {
+    processedFilesCache.set(fingerprint, Date.now());
+    console.log(`   ✅ [缓存] 已标记文件为已处理: ${path.basename(filePath)}`);
+  }
+}
+
 
 // ============= WebSocket连接 =============
 function connectWebSocket() {
@@ -195,15 +251,59 @@ function startWatching() {
   watcher = chokidar.watch(CONFIG.icloudPath, {
     persistent: true,
     ignoreInitial: true,
+    ignored: [
+      '**/.temp-*/**',      // 忽略临时文件夹
+      '**/.*',              // 忽略隐藏文件（以点开头）
+      '**/.DS_Store',       // 忽略 macOS 系统文件
+      '**/Thumbs.db'        // 忽略 Windows 系统文件
+    ],
     awaitWriteFinish: {
-      stabilityThreshold: 2000,
+      stabilityThreshold: 3500,  // 增加到 3.5 秒，确保大文件写入完成
       pollInterval: 100
     }
   });
   
   const handleFileEvent = (filePath) => {
+    const filename = path.basename(filePath);
+    console.log(`🔍 [iCloud Watcher] 检测到文件变更: ${filename}`); // 调试日志
+
+    // 忽略 _exported 结尾的文件（这是服务器自己生成的导出 GIF）
+    // 使用 toLowerCase() 确保忽略大小写差异
+    // 移除末尾的点检查，以兼容 "xxx_exported 2.gif" 这种冲突重命名的情况
+    if (filename.toLowerCase().includes('_exported')) {
+        console.log(`🙈 [iCloud] 忽略已导出的 GIF: ${filename}`);
+        return;
+    }
+    
+    // 忽略 ImageMagick 的临时文件
+    const lowerFilename = filename.toLowerCase();
+    if (lowerFilename.startsWith('magick-') || 
+        lowerFilename.endsWith('.miff') || 
+        lowerFilename.endsWith('.cache') ||
+        lowerFilename.includes('.tmp')) {
+        console.log(`🙈 [iCloud] 忽略临时文件: ${filename}`);
+        return;
+    }
+
     if (!isRealTimeMode) {
       console.log(`⏸️  实时模式已关闭，忽略文件: ${path.basename(filePath)}`);
+      return;
+    }
+    
+    // 额外检查：确保文件已完全写入（文件大小 > 0 且稳定）
+    try {
+      const stats = fs.statSync(filePath);
+      if (stats.size === 0) {
+        console.log(`⏭️  [iCloud] 跳过空文件（可能还在写入）: ${filename}`);
+        return;
+      }
+      // 对于 GIF，如果文件太小（< 500 字节），可能是不完整的
+      if (filename.toLowerCase().endsWith('.gif') && stats.size < 500) {
+        console.log(`⏭️  [iCloud] 跳过不完整的 GIF（${stats.size} bytes）: ${filename}`);
+        return;
+      }
+    } catch (statError) {
+      console.warn(`⚠️  [iCloud] 无法读取文件状态，跳过: ${filename}`);
       return;
     }
     
@@ -212,6 +312,12 @@ function startWatching() {
       const filename = path.basename(filePath);
       const isGif = ext === '.gif';
       const isVideo = ext === '.mp4' || ext === '.mov';
+      
+      // 🔍 检查是否重复处理
+      if (isFileProcessed(filePath)) {
+        console.log(`\n⏭️  [实时模式] 跳过重复文件: ${filename}`);
+        return;
+      }
       
       // 处理重名文件：如果是视频或 GIF，检查是否有同名文件，如果有则删除旧文件
       if (isVideo || isGif) {
@@ -265,6 +371,20 @@ function startWatching() {
         // 视频文件需要手动拖入，不调用 syncScreenshot
         console.log(`\n🎥 [实时模式] 检测到视频文件: ${filename}`);
         console.log(`   ⚠️  视频文件需要手动拖入 Figma`);
+        
+        // 自动缓存视频文件（用于导出带标注的 GIF 功能）
+        try {
+          const fileBuffer = fs.readFileSync(filePath);
+          const userConfig = require('./userConfig');
+          const cacheResult = userConfig.saveGifToCache(fileBuffer, filename, null);
+          if (cacheResult && cacheResult.cacheId) {
+            console.log(`   💾 [GIF Cache] 视频已自动缓存 (ID: ${cacheResult.cacheId})`);
+            console.log(`   💡 导出时可以直接从缓存读取`);
+          }
+        } catch (cacheError) {
+          console.error(`   ⚠️  [GIF Cache] 缓存失败:`, cacheError.message);
+        }
+        
         // 发送 file-skipped 消息
         if (ws && ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({
@@ -285,6 +405,20 @@ function startWatching() {
             // GIF 过大，需要手动拖入，不调用 syncScreenshot
             console.log(`\n🎬 [实时模式] 检测到 GIF 文件: ${filename}`);
             console.log(`   ⚠️  GIF 文件过大 (${(fileSize / 1024 / 1024).toFixed(2)}MB)，需要手动拖入`);
+            
+            // 自动缓存大 GIF 文件（用于导出带标注的 GIF 功能）
+            try {
+              const fileBuffer = fs.readFileSync(filePath);
+              const userConfig = require('./userConfig');
+              const cacheResult = userConfig.saveGifToCache(fileBuffer, filename, null);
+              if (cacheResult && cacheResult.cacheId) {
+                console.log(`   💾 [GIF Cache] 大GIF已自动缓存 (ID: ${cacheResult.cacheId})`);
+                console.log(`   💡 导出时可以直接从缓存读取`);
+              }
+            } catch (cacheError) {
+              console.error(`   ⚠️  [GIF Cache] 缓存失败:`, cacheError.message);
+            }
+            
             // 发送 file-skipped 消息
             if (ws && ws.readyState === WebSocket.OPEN) {
               ws.send(JSON.stringify({
@@ -378,6 +512,13 @@ async function performManualSync() {
   const files = fs.readdirSync(CONFIG.icloudPath);
   const imageFiles = files.filter(file => {
     const ext = path.extname(file).toLowerCase();
+    
+    // 忽略 _exported 结尾的文件（这是服务器自己生成的导出 GIF）
+    if (file.toLowerCase().includes('_exported')) {
+      console.log(`🙈 [手动同步] 忽略已导出的 GIF: ${file}`);
+      return false;
+    }
+    
     return CONFIG.supportedFormats.includes(ext);
   });
   
@@ -388,8 +529,8 @@ async function performManualSync() {
       ws.send(JSON.stringify({
         type: 'manual-sync-complete',
         count: 0,
-        total: 0,
-        message: '没有截图需要同步'
+        total: 0
+        // 不设置 message，表示同步成功但没有文件
       }));
     }
     return;
@@ -464,6 +605,19 @@ async function performManualSync() {
           if (fileSize > maxGifSize) {
             // GIF 过大，需要手动拖入，不算成功
             console.log(`   ⚠️  GIF 文件过大，需要手动拖入: ${file}`);
+            
+            // 自动缓存大 GIF 文件（用于导出带标注的 GIF 功能）
+            try {
+              const fileBuffer = fs.readFileSync(filePath);
+              const userConfig = require('./userConfig');
+              const cacheResult = userConfig.saveGifToCache(fileBuffer, file, null);
+              if (cacheResult && cacheResult.cacheId) {
+                console.log(`   💾 [GIF Cache] 大GIF已自动缓存 (ID: ${cacheResult.cacheId})`);
+              }
+            } catch (cacheError) {
+              console.error(`   ⚠️  [GIF Cache] 缓存失败:`, cacheError.message);
+            }
+            
             // 发送 file-skipped 消息（syncScreenshot 中也会发送，但这里提前发送确保消息顺序）
             if (ws && ws.readyState === WebSocket.OPEN) {
               ws.send(JSON.stringify({
@@ -484,6 +638,19 @@ async function performManualSync() {
       // 如果是视频文件，需要手动拖入，不算成功
       if (isVideo) {
         console.log(`   ⚠️  视频文件需要手动拖入: ${file}`);
+        
+        // 自动缓存视频文件（用于导出带标注的 GIF 功能）
+        try {
+          const fileBuffer = fs.readFileSync(filePath);
+          const userConfig = require('./userConfig');
+          const cacheResult = userConfig.saveGifToCache(fileBuffer, file, null);
+          if (cacheResult && cacheResult.cacheId) {
+            console.log(`   💾 [GIF Cache] 视频已自动缓存 (ID: ${cacheResult.cacheId})`);
+          }
+        } catch (cacheError) {
+          console.error(`   ⚠️  [GIF Cache] 缓存失败:`, cacheError.message);
+        }
+        
         // 发送 file-skipped 消息
         if (ws && ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({
@@ -528,6 +695,12 @@ async function performManualSync() {
 async function syncScreenshot(filePath, deleteAfterSync = false) {
   const startTime = Date.now();
   const filename = path.basename(filePath);
+  
+  // 🔍 第一步：检查是否重复处理
+  if (isFileProcessed(filePath)) {
+    console.log(`   ⏭️  跳过重复文件: ${filename}`);
+    return;
+  }
   
   try {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -733,6 +906,9 @@ async function syncScreenshot(filePath, deleteAfterSync = false) {
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
     console.log(`   ✅ 同步完成 (${duration}秒)`);
     console.log(`   📊 已同步: ${syncCount} 张`);
+    
+    // ✅ 标记文件为已处理，防止重复同步
+    markFileAsProcessed(filePath);
     
     if (deleteAfterSync) {
       // 如果是 GIF 且开启了保留设置，不删除源文件

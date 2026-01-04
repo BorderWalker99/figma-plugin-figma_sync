@@ -350,10 +350,10 @@ async function listFolderFiles({ folderId, pageSize = 50, orderBy = 'createdTime
         console.log(`✅ [Google Drive] listFolderFiles 重试成功 (第${attempt}次尝试)`);
       }
 
-      return {
-        files: response.data.files || [],
-        nextPageToken: response.data.nextPageToken || null
-      };
+  return {
+    files: response.data.files || [],
+    nextPageToken: response.data.nextPageToken || null
+  };
     } catch (error) {
       lastError = error;
       const errorMsg = error.message || String(error);

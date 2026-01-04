@@ -115,11 +115,11 @@ if [ -n "$DMG_FILE" ] && [ -f "$DMG_FILE" ]; then
 else
     # 回退到 .app 目录（如果存在）
     if [ -d "$INSTALLER_APP" ]; then
-        cp -r "$INSTALLER_APP" "$TEMP_DIR/" 2>/dev/null || {
-            echo -e "${RED}❌ 复制 GUI 安装器失败${NC}"
-            exit 1
-        }
-        echo "   ✅ GUI 安装器已包含（首层目录）"
+cp -r "$INSTALLER_APP" "$TEMP_DIR/" 2>/dev/null || {
+    echo -e "${RED}❌ 复制 GUI 安装器失败${NC}"
+    exit 1
+}
+echo "   ✅ GUI 安装器已包含（首层目录）"
     else
         echo -e "${RED}❌ 未找到 DMG 文件或 .app 目录${NC}"
         exit 1

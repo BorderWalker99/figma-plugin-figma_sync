@@ -396,11 +396,159 @@ async function checkSystemRequirements() {
     nodeCheck.appendChild(installBtn);
   }
   
+  // 检查 ImageMagick
+  const imageMagickCheck = checks.children[2];
+  const imageMagickResult = await ipcRenderer.invoke('check-imagemagick');
+  
+  if (imageMagickResult.installed) {
+    imageMagickCheck.className = 'status-item success';
+    imageMagickCheck.innerHTML = `
+      <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
+      <div class="status-content">
+        <div class="status-label">ImageMagick</div>
+        <div class="status-detail">${imageMagickResult.version}</div>
+      </div>
+    `;
+  } else {
+    imageMagickCheck.className = 'status-item error';
+    imageMagickCheck.innerHTML = `
+      <div class="status-icon"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
+      <div class="status-content">
+        <div class="status-label">ImageMagick</div>
+        <div class="status-detail">未安装</div>
+      </div>
+    `;
+    // 添加安装按钮
+    const installBtn = document.createElement('button');
+    installBtn.className = 'btn btn-secondary';
+    installBtn.textContent = '安装 ImageMagick';
+    installBtn.style.marginLeft = '12px';
+    installBtn.onclick = async () => {
+      installBtn.disabled = true;
+      installBtn.textContent = '正在打开终端';
+      const result = await ipcRenderer.invoke('install-imagemagick');
+      if (result.success) {
+        if (result.needsRestart) {
+          showAlert(result.message || '终端已打开，请等待 ImageMagick 安装完成', '正在安装 ImageMagick');
+          
+          installBtn.textContent = '重新检测';
+          installBtn.disabled = false;
+          installBtn.onclick = async () => {
+            const checkResult = await ipcRenderer.invoke('check-imagemagick');
+            if (checkResult.installed) {
+              imageMagickCheck.className = 'status-item success';
+              imageMagickCheck.innerHTML = `
+                <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
+                <div class="status-content">
+                  <div class="status-label">ImageMagick</div>
+                  <div class="status-detail">已安装 ${checkResult.version || ''}</div>
+                </div>
+              `;
+              showToast('ImageMagick 安装成功', 'success');
+              checkSystemRequirements(); // 重新检查所有依赖
+            } else {
+              showToast('ImageMagick 尚未安装，请在终端中完成安装后再检测', 'error');
+            }
+          };
+        } else {
+          imageMagickCheck.className = 'status-item success';
+          imageMagickCheck.innerHTML = `
+            <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
+            <div class="status-content">
+              <div class="status-label">ImageMagick</div>
+              <div class="status-detail">已安装</div>
+            </div>
+          `;
+          checkSystemRequirements(); // 重新检查
+        }
+      } else {
+        showToast(result.error || '无法打开终端安装 ImageMagick', 'error');
+        installBtn.disabled = false;
+        installBtn.textContent = '安装 ImageMagick';
+      }
+    };
+    imageMagickCheck.appendChild(installBtn);
+  }
+  
+  // 检查 FFmpeg
+  const ffmpegCheck = checks.children[3];
+  const ffmpegResult = await ipcRenderer.invoke('check-ffmpeg');
+  
+  if (ffmpegResult.installed) {
+    ffmpegCheck.className = 'status-item success';
+    ffmpegCheck.innerHTML = `
+      <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
+      <div class="status-content">
+        <div class="status-label">FFmpeg</div>
+        <div class="status-detail">${ffmpegResult.version}</div>
+      </div>
+    `;
+  } else {
+    ffmpegCheck.className = 'status-item error';
+    ffmpegCheck.innerHTML = `
+      <div class="status-icon"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
+      <div class="status-content">
+        <div class="status-label">FFmpeg</div>
+        <div class="status-detail">未安装</div>
+      </div>
+    `;
+    // 添加安装按钮
+    const installBtn = document.createElement('button');
+    installBtn.className = 'btn btn-secondary';
+    installBtn.textContent = '安装 FFmpeg';
+    installBtn.style.marginLeft = '12px';
+    installBtn.onclick = async () => {
+      installBtn.disabled = true;
+      installBtn.textContent = '正在打开终端';
+      const result = await ipcRenderer.invoke('install-ffmpeg');
+      if (result.success) {
+        if (result.needsRestart) {
+          showAlert(result.message || '终端已打开，请等待 FFmpeg 安装完成', '正在安装 FFmpeg');
+          
+          installBtn.textContent = '重新检测';
+          installBtn.disabled = false;
+          installBtn.onclick = async () => {
+            const checkResult = await ipcRenderer.invoke('check-ffmpeg');
+            if (checkResult.installed) {
+              ffmpegCheck.className = 'status-item success';
+              ffmpegCheck.innerHTML = `
+                <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
+                <div class="status-content">
+                  <div class="status-label">FFmpeg</div>
+                  <div class="status-detail">已安装 ${checkResult.version || ''}</div>
+                </div>
+              `;
+              showToast('FFmpeg 安装成功', 'success');
+              checkSystemRequirements(); // 重新检查所有依赖
+            } else {
+              showToast('FFmpeg 尚未安装，请在终端中完成安装后再检测', 'error');
+            }
+          };
+        } else {
+          ffmpegCheck.className = 'status-item success';
+          ffmpegCheck.innerHTML = `
+            <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
+            <div class="status-content">
+              <div class="status-label">FFmpeg</div>
+              <div class="status-detail">已安装</div>
+            </div>
+          `;
+          checkSystemRequirements(); // 重新检查
+        }
+      } else {
+        showToast(result.error || '无法打开终端安装 FFmpeg', 'error');
+        installBtn.disabled = false;
+        installBtn.textContent = '安装 FFmpeg';
+      }
+    };
+    ffmpegCheck.appendChild(installBtn);
+  }
+  
   // 显示下一步按钮
   document.getElementById('step2Buttons').style.display = 'flex';
 
   // 如果有任何一个环境检查未通过，禁用下一步按钮
-  const allInstalled = homebrewResult.installed && nodeResult.installed;
+  const allInstalled = homebrewResult.installed && nodeResult.installed && imageMagickResult.installed && ffmpegResult.installed;
   const step2NextBtn = document.getElementById('step2Next');
   if (step2NextBtn) {
     step2NextBtn.disabled = !allInstalled;
@@ -436,7 +584,7 @@ async function installDependencies() {
       statusLabel.textContent = message;
     }
   };
-
+  
   // 监听安装输出
   ipcRenderer.on('install-output', (event, data) => {
     logOutput += data.data;
@@ -608,7 +756,7 @@ window.finishInstallation = async function() {
       showToast('服务器已启动，但自动启动配置失败', 'warning');
       
       // 仍然关闭安装器，因为服务器已经在运行
-      setTimeout(() => {
+        setTimeout(() => {
         ipcRenderer.invoke('quit-app');
       }, 2000);
     }

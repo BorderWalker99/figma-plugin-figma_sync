@@ -84,6 +84,27 @@
       }
     }
 
+    /* CSS Refactoring: Settings Content */
+    .settings-section {
+        margin-bottom: 20px;
+        padding: 0;
+    }
+
+    /* Add extra space for the first section to avoid clipping hover effects */
+    .tab-content > .settings-section:first-child {
+        padding-top: 4px;
+    }
+
+    .settings-section:last-child {
+        margin-bottom: 0;
+    }
+
+    .settings-section h3 {
+        font-size: 13px;
+        margin: 0 0 12px 0;
+        /* font-weight: 600; */ 
+    }
+
     * {
       box-sizing: border-box;
       -webkit-font-smoothing: antialiased;
@@ -282,9 +303,9 @@
     }
 
     .icon-btn {
-      width: 28px;
-      height: 28px;
-      border-radius: 6px;
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
       border: none;
       background: transparent;
       color: var(--text-primary);
@@ -294,6 +315,7 @@
       cursor: pointer;
       transition: all 0.2s ease;
       opacity: 0.6;
+      position: relative; /* 为 tooltip 定位 */
     }
 
     .icon-btn:hover {
@@ -305,6 +327,54 @@
         .icon-btn:hover {
             background: rgba(255,255,255,0.1);
         }
+    }
+    
+    /* Tooltip 样式 */
+    .icon-btn[data-tooltip]:not(.no-tooltip)::after {
+      content: attr(data-tooltip);
+      position: absolute;
+      top: calc(100% + 7px);
+      left: 50%;
+      transform: translateX(-50%) scale(0.9);
+      background: var(--bg-card);
+      color: var(--text-primary);
+      padding: 5px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      white-space: nowrap;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.2s ease 0s, transform 0.2s ease 0s;
+      z-index: 1000;
+      font-weight: 400;
+      letter-spacing: 0.01em;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.08);
+    }
+    
+    /* Tooltip 小尖角 */
+    .icon-btn[data-tooltip]:not(.no-tooltip)::before {
+      content: '';
+      position: absolute;
+      top: calc(100% + 3px);
+      left: 50%;
+      transform: translateX(-50%) scale(0.9);
+      width: 0;
+      height: 0;
+      border-left: 5px solid transparent;
+      border-right: 5px solid transparent;
+      border-bottom: 4px solid var(--bg-card);
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.2s ease 0s, transform 0.2s ease 0s;
+      z-index: 1001;
+      filter: drop-shadow(0 -1px 1px rgba(0, 0, 0, 0.06));
+    }
+    
+    .icon-btn[data-tooltip]:not(.no-tooltip):hover::after,
+    .icon-btn[data-tooltip]:not(.no-tooltip):hover::before {
+      opacity: 1;
+      transform: translateX(-50%) scale(1);
+      transition-delay: 0.5s;
     }
 
     /* Update Banner */
@@ -893,7 +963,8 @@
       transform: scale(0.92) translateY(20px);
       opacity: 0;
       transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1),
-                  opacity 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+                  opacity 0.35s cubic-bezier(0.34, 1.56, 0.64, 1),
+                  max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1);
       max-height: 85vh;
       display: flex;
       flex-direction: column;
@@ -906,13 +977,15 @@
     }
 
     .modal-content {
-        padding: 20px 20px 20px 20px; /* Move padding here */
+        padding: 24px; /* Increased padding to prevent clipping of hover effects */
         overflow-y: auto; /* Scroll content only */
         flex: 1;
         opacity: 0;
         transform: translateY(10px);
         transition: opacity 0.4s cubic-bezier(0.33, 1, 0.68, 1) 0.1s,
-                    transform 0.4s cubic-bezier(0.33, 1, 0.68, 1) 0.1s;
+                    transform 0.4s cubic-bezier(0.33, 1, 0.68, 1) 0.1s,
+                    max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1),
+                    min-height 0.4s cubic-bezier(0.4, 0, 0.2, 1);
     }
 
     .modal-overlay:not(.hidden) .modal-content {
@@ -927,7 +1000,7 @@
       justify-content: space-between;
       align-items: center;
       /* margin: 0 0 15px 0; */
-      padding: 14px 20px 14px 20px; 
+      padding: 14px 20px 8px 20px; 
       border-bottom: 1px solid var(--divider);
       background: var(--bg-card);
       z-index: 10;
@@ -948,6 +1021,108 @@
       font-weight: 700;
     }
     
+    /* Modal Tabs */
+    .modal-tabs {
+        display: flex;
+        gap: 20px;
+        align-items: center;
+    }
+
+    .tab-btn {
+        background: transparent;
+        border: none;
+        padding:  0;
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--text-tertiary);
+        cursor: pointer;
+        position: relative;
+        transition: color 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    
+    .tab-btn::after {
+        content: '';
+        position: absolute;
+        bottom: -9px; /* Adjust based on header padding */
+        left: 50%;
+        right: 50%;
+        height: 2px;
+        background: var(--text-primary);
+        border-radius: 2px;
+        opacity: 0;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .tab-btn:hover {
+        color: var(--text-secondary);
+    }
+
+    .tab-btn.active {
+        color: var(--text-primary);
+    }
+    
+    .tab-btn.active::after {
+        left: 0;
+        right: 0;
+        opacity: 1;
+    }
+    
+    /* Tab Content Animation */
+    .tab-content {
+        opacity: 0;
+        transform: translateX(-20px);
+        transition: opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1), 
+                    transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                    height 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        display: none;
+        overflow: hidden; /* Smooth height transition */
+    }
+    
+    .tab-content.active {
+        opacity: 1;
+        transform: translateX(0);
+    }
+    
+    .tab-content.slide-out-left {
+        opacity: 0;
+        transform: translateX(-20px);
+    }
+    
+    .tab-content.slide-out-right {
+        opacity: 0;
+        transform: translateX(20px);
+    }
+    
+    .tab-content.slide-in-left {
+        animation: slideInLeft 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+    }
+    
+    .tab-content.slide-in-right {
+        animation: slideInRight 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+    }
+    
+    @keyframes slideInLeft {
+        from {
+            opacity: 0;
+            transform: translateX(-20px);
+        }
+        to {
+            opacity: 1;
+            transform: translateX(0);
+        }
+    }
+    
+    @keyframes slideInRight {
+        from {
+            opacity: 0;
+            transform: translateX(20px);
+        }
+        to {
+            opacity: 1;
+            transform: translateX(0);
+        }
+    }
+
     /* Modal buttons - smaller height */
     .modal .btn {
       padding: 8px 12px;
@@ -1113,6 +1288,18 @@
     .toast.loading .toast-icon svg {
       stroke: currentColor;
     }
+    
+    .toast-action {
+      cursor: pointer;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+      margin-left: 6px;
+      transition: opacity 0.2s ease;
+    }
+    
+    .toast-action:hover {
+      opacity: 0.8;
+    }
 
     /* Utilities */
     .hidden { display: none !important; }
@@ -1173,11 +1360,20 @@
       justify-content: center;
         cursor: pointer;
         color: var(--text-secondary);
+        opacity: 0.7; /* Match .icon-btn opacity */
+        transition: all 0.2s ease;
     }
     
     .minimized-btn:hover {
-        background: var(--bg-app);
+        background: rgba(0,0,0,0.05);
+        opacity: 1;
         color: var(--text-primary);
+    }
+    
+    @media (prefers-color-scheme: dark) {
+        .minimized-btn:hover {
+            background: rgba(255,255,255,0.1);
+        }
     }
     
     .app.minimized .header {
@@ -1191,8 +1387,8 @@
 
     /* SVG Icons */
     .svg-icon {
-        width: 18px;
-        height: 18px;
+        width: 16px;
+        height: 16px;
         stroke-width: 2;
         stroke: currentColor;
         fill: none;
@@ -1258,6 +1454,162 @@
         background-color: #39393D;
       }
     }
+
+    /* Export GIF Button & Animations */
+    /* Export GIF Button & Animations */
+    #exportGifBtn {
+        position: relative;
+        overflow: visible; 
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.4s cubic-bezier(0.33, 1, 0.68, 1); /* Apple easeOut */
+        color: var(--text-primary); /* Match other .icon-btn */
+        padding: 0; /* Remove padding to center content exactly */
+    }
+    
+    #exportGifBtn:hover {
+        background: rgba(0,0,0,0.05);
+    }
+    
+    /* 导出中的悬停状态 - 显示停止按钮 */
+    #exportGifBtn.exporting:hover {
+        background: rgba(239, 68, 68, 0.15); /* 浅红色背景 */
+        color: #ef4444; /* 红色 */
+    }
+    
+    @media (prefers-color-scheme: dark) {
+        #exportGifBtn:hover {
+            background: rgba(255,255,255,0.1);
+        }
+        
+        #exportGifBtn.exporting:hover {
+            background: rgba(239, 68, 68, 0.2); /* 深色模式下稍深一点 */
+            color: #f87171; /* 稍浅的红色 */
+        }
+    }
+
+    /* Progress Ring */
+    .progress-ring {
+        position: absolute;
+        /* Center 34px ring on 30px button */
+        /* (34 - 30) / 2 = 2px offset */
+        top: -2px;
+        left: -2px;
+        width: 34px;
+        height: 34px;
+        pointer-events: none;
+        transform: rotate(-90deg);
+        opacity: 0;
+        transition: opacity 0.3s;
+    }
+    
+    /* 确保非导出状态下进度环完全隐藏 */
+    #exportGifBtn:not(.exporting) .progress-ring {
+        opacity: 0 !important;
+    }
+    
+    .progress-ring__circle {
+        fill: transparent;
+        stroke: var(--success);
+        stroke-width: 3; /* Slightly thicker for better visibility */
+        stroke-linecap: round;
+        stroke-dasharray: 100 100;
+        stroke-dashoffset: 100;
+        transition: stroke-dashoffset 0.2s linear, stroke 0.3s ease; /* Linear for progress, smooth for color */
+    }
+    
+    /* 悬停时进度条变红色 */
+    #exportGifBtn.exporting:hover .progress-ring__circle {
+        stroke: #ef4444; /* 红色，与按钮悬停颜色一致 */
+    }
+
+    /* Success State */
+    #exportGifBtn.success {
+        background-color: var(--success) !important;
+        color: white !important;
+        transform: scale(1.05); /* Subtle pulse */
+        opacity: 1 !important; /* Force opacity to 100% in success state */
+    }
+    
+    #exportGifBtn.success:hover {
+        opacity: 1 !important; /* Maintain 100% opacity on hover in success state */
+    }
+    
+    #exportGifBtn.success .progress-ring {
+        opacity: 0;
+    }
+
+    /* Icon Morphing */
+    .icon-wrapper {
+        position: relative;
+        width: 16px;
+        height: 16px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .icon-gif, .icon-stop, .icon-folder {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        transition: all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1); /* Bouncy spring */
+        pointer-events: none;
+        transform-origin: center center;
+    }
+
+    .icon-stop {
+        opacity: 0;
+        transform: scale(0.55) rotate(45deg);
+        stroke-width: 2.5 !important; /* 更明显的加粗效果 */
+    }
+    
+    /* 导出中且悬停时显示停止图标 */
+    #exportGifBtn.exporting:hover .icon-gif {
+        opacity: 0;
+        transform: scale(0.6) rotate(-45deg);
+    }
+    
+    #exportGifBtn.exporting:hover .icon-stop {
+        opacity: 1;
+        transform: scale(0.91) rotate(0deg);
+    }
+
+    .icon-folder {
+        opacity: 0;
+        transform: scale(0.4) rotate(45deg);
+    }
+    
+    #exportGifBtn.success .icon-gif {
+        opacity: 0;
+        transform: scale(0.4) rotate(-45deg);
+    }
+    
+    #exportGifBtn.success .icon-folder {
+        opacity: 1;
+        transform: scale(1) rotate(0deg);
+    }
+
+    /* Splash Effect */
+    .splash-particle {
+        position: absolute;
+        width: 3px; /* Smaller particles */
+        height: 3px;
+        background: var(--success);
+        border-radius: 50%;
+        pointer-events: none;
+        opacity: 0;
+        z-index: 100;
+    }
+    
+    @keyframes splash-anim {
+        0% { transform: translate(0, 0) scale(1); opacity: 0.8; }
+        50% { opacity: 1; }
+        100% { transform: translate(var(--tx), var(--ty)) scale(0); opacity: 0; }
+    }
   </style>
   <script>
     // GitHub 图片资源基础 URL
@@ -1290,19 +1642,45 @@
         </div>
       </div>
       <div class="header-actions">
-        <button id="viewUseCases" class="icon-btn" title="手机端配置">
+        <button id="viewUseCases" class="icon-btn" title="手机端配置" style="display: none;">
            <svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
              <rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect>
              <line x1="12" y1="18" x2="12.01" y2="18"></line>
            </svg>
         </button>
-        <button id="openSettings" class="icon-btn" title="设置">
+        <button id="exportGifBtn" class="icon-btn" data-tooltip="导出 GIF">
+           <svg class="progress-ring" viewBox="0 0 34 34">
+             <circle class="progress-ring__circle" r="15" cx="17" cy="17"/>
+           </svg>
+           <div class="icon-wrapper">
+               <!-- GIF Icon (Film Strip) -->
+               <svg class="icon-gif svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                   <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                   <line x1="7.5" y1="3" x2="7.5" y2="21"></line>
+                   <line x1="16.5" y1="3" x2="16.5" y2="21"></line>
+                   <line x1="3" y1="12" x2="21" y2="12"></line>
+                   <line x1="3" y1="7.5" x2="7.5" y2="7.5"></line>
+                   <line x1="3" y1="16.5" x2="7.5" y2="16.5"></line>
+                   <line x1="16.5" y1="16.5" x2="21" y2="16.5"></line>
+                   <line x1="16.5" y1="7.5" x2="21" y2="7.5"></line>
+               </svg>
+               <!-- Stop Icon (Cancel) -->
+               <svg class="icon-stop svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                   <rect x="4.75" y="4.75" width="14.5" height="14.5" rx="2" ry="2"></rect>
+               </svg>
+               <!-- Folder Icon (Hidden by default) -->
+               <svg class="icon-folder svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                   <path d="M21 18a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18V6a1.5 1.5 0 0 1 1.5-1.5h4.5l1.5 2.25h9A1.5 1.5 0 0 1 21 8.25z"></path>
+               </svg>
+           </div>
+        </button>
+        <button id="openSettings" class="icon-btn" data-tooltip="插件与手机端设置">
            <svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
              <circle cx="12" cy="12" r="3"></circle>
              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
            </svg>
         </button>
-        <button id="toggleMinimize" class="icon-btn" title="最小化">
+        <button id="toggleMinimize" class="icon-btn" data-tooltip="最小化窗口">
             <!-- Icon will be updated by JS, but default is minimize -->
             <svg id="minimizeIcon" class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <polyline points="4 14 10 14 10 20"></polyline>
@@ -1437,72 +1815,23 @@
     </div>
   </div>
 
-  <!-- Use Case Modal -->
-  <div id="useCaseOverlay" class="modal-overlay">
-    <div class="modal">
-      <div class="modal-header">
-        <div class="modal-title">手机端配置</div>
-        <button id="useCaseClose" class="close-btn">✕</button>
-      </div>
-      <div class="modal-content" id="useCaseContent">
-         <div style="display: flex; flex-direction: column; gap: 16px;">
-
-          <div id="shortcutGuideSection"  style="display: flex; flex-direction: column; gap: 8px;">
-             <div id="shortcutGuideTitle" style="font-weight: 600; margin-bottom: 8px; font-size: 13px;">1. 配置快捷指令</div>
-             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;" id="qrCodesContainer">
-                <div style="display: flex; flex-direction: column; align-items: center; gap: 6px;" id="qrGoogleScreenshotContainer">
-                  <img id="qrGoogleScreenshot" style="width: 80px; height: 80px;">
-                  <div style="font-size: 12px; color: var(--text-secondary); text-align: center;">直接截图</div>
-            </div>
-                <div style="display: flex; flex-direction: column; align-items: center; gap: 6px;" id="qrGoogleAlbumContainer">
-                  <img id="qrGoogleAlbum" style="width: 80px; height: 80px;">
-                  <div style="font-size: 12px; color: var(--text-secondary); text-align: center;">相册选择</div>
-              </div>
-                <div style="display: flex; flex-direction: column; align-items: center; gap: 6px;" id="qrIcloudScreenshotContainer">
-                  <img id="qrIcloudScreenshot" style="width: 80px; height: 80px;">
-                  <div style="font-size: 12px; color: var(--text-secondary); text-align: center;">直接截图</div>
-              </div>
-                <div style="display: flex; flex-direction: column; align-items: center; gap: 6px;" id="qrIcloudAlbumContainer">
-                  <img id="qrIcloudAlbum" style="width: 80px; height: 80px;">
-                  <div style="font-size: 12px; color: var(--text-secondary); text-align: center;">相册选择</div>
-              </div>
-              </div>
-             <div id="noModeMessage" style="font-size: 12px; color: var(--text-secondary); line-height: 1.6; display: none;">
-                请在"设置"中选择储存方式
-          </div>
-        </div>
-
-                    <!-- User ID Display -->
-                    <div id="userIdDisplaySection">
-                      <div id="userIdTitle" style="font-weight: 600; margin-bottom: 8px; font-size: 13px;">2. 您的 User ID</div>
-                      <div id="userIdSubtitle" style="font-size: 12px; color: var(--text-secondary); margin-top: 6px;">
-                        请在快捷指令的文本框中填入此 ID:
-          </div>
-                      <div style="background: var(--bg-app); padding: 8px 12px 8px 12px; border-radius: var(--radius-s); margin: 6px 0; display: flex; align-items: center; justify-content: space-between;">
-                        <div style="font-family: 'SF Mono', monospace; font-size: 12px; overflow-x: auto; white-space: nowrap; margin-right: 8px; -webkit-overflow-scrolling: touch; scrollbar-width: none; color: var(--text-secondary); user-select: text;">
-                          <span id="displayUserId">正在获取...</span>
-            </div>
-                        <button id="copyUserIdBtn" class="icon-btn" style="width: 24px; height: 24px; flex-shrink: 0;" title="复制 User ID">
-                          <svg class="svg-icon" style="width: 14px; height: 14px;" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-                        </button>
-              </div>
-            </div>
-              </div>
-      </div>
-    </div>
-  </div>
 
   <!-- Settings Modal -->
   <div id="settingsOverlay" class="modal-overlay">
     <div class="modal">
       <div class="modal-header">
-        <div class="modal-title">设置</div>
+        <div class="modal-tabs">
+            <button class="tab-btn active" id="tabDesktop">插件端</button>
+            <button class="tab-btn" id="tabMobile">手机端</button>
+        </div>
         <button id="settingsClose" class="close-btn">✕</button>
       </div>
       <div class="modal-content" id="settingsContent">
         
+        <!-- Tab Content: Desktop -->
+        <div id="contentDesktop" class="tab-content active">
         <!-- Cloud Provider Selection -->
-        <div style="margin-bottom:15px;">
+        <div class="settings-section">
             <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
                 <div class="feature-card mode-card" id="switchToDrive" style="padding: 12px; flex-direction: column; height: 100%;">
                     <div class="checkmark">
@@ -1544,8 +1873,8 @@
         </div>
 
         <!-- Size Settings -->
-        <div style="padding-top:15px; margin-bottom:15px;">
-            <h3 style="font-size:13px; margin:0 0 12px 0;">截图尺寸</h3>
+        <div class="settings-section">
+            <h3>截图尺寸</h3>
              <div style="display: flex; gap: 8px;">
                 <div class="input-wrapper" style="flex: 1;">
                   <span class="input-prefix">宽</span>
@@ -1556,29 +1885,21 @@
                   <input type="number" id="imageHeightInput" placeholder="自适应">
             </div>
           </div>
-             <div style="display: flex; gap: 6px; margin-top:12px;">
-                <button id="saveSizeSettings" class="btn btn-primary" style="flex:1;">保存</button>
-                <button id="clearSizeSettings" class="btn btn-secondary" style="flex:1;">重置</button>
-          </div>
         </div>
 
         <!-- Layout Settings -->
-        <div style="padding-top: 15px;">
-            <h3 style="font-size:13px; margin:0 0 12px 0;">画板布局</h3>
-            <div style="margin-bottom:12px;">
+        <div class="settings-section">
+            <h3>画板布局</h3>
+            <div>
                 <div class="input-wrapper">
                     <span class="input-prefix">每行</span>
                     <input type="number" id="frameColumnsInput" placeholder="一直横排">
           </div>
           </div>
-             <div style="display: flex; gap: 6px;">
-                <button id="saveLayoutSettings" class="btn btn-primary" style="flex:1;">保存</button>
-                <button id="clearLayoutSettings" class="btn btn-secondary" style="flex:1;">重置</button>
-            </div>
         </div>
 
                 <!-- GIF Backup Setting (Google Drive Only) -->
-                <div id="gifBackupSection" style="display:none; padding-top:30px;">
+                <div id="gifBackupSection" class="settings-section" style="display:none;">
                   <div style="display: flex; justify-content: space-between; align-items: center;">
                       <div>
                           <div style="font-size:13px; font-weight: 600;">GIF 保存到本地</div>
@@ -1591,7 +1912,7 @@
               </div>
 
                 <!-- Keep GIF in iCloud Setting (iCloud Only) -->
-                <div id="keepGifInIcloudSection" style="display:none; padding-top:30px;">
+                <div id="keepGifInIcloudSection" class="settings-section" style="display:none;">
                   <div style="display: flex; justify-content: space-between; align-items: center;">
                       <div>
                           <div style="font-size:13px; font-weight: 600;">GIF 保留在文件夹</div>
@@ -1603,8 +1924,57 @@
                   </div>
               </div>
 
-                <!-- 更新提示已移至顶部 Banner，设置页面不再显示 -->
+                <!-- Global Save Button -->
+                <div style="margin-top: 20px; margin-bottom: 10px;">
+                    <button id="globalSaveBtn" class="btn btn-primary" style="width: 100%;" disabled>保存设置</button>
+                </div>
+        </div>
 
+        <!-- Tab Content: Mobile -->
+        <div id="contentMobile" class="tab-content" style="display:none;">
+             <div style="display: flex; flex-direction: column; gap: 16px;">
+              <div id="shortcutGuideSection"  style="display: flex; flex-direction: column; gap: 8px;">
+                 <div id="shortcutGuideTitle" style="font-weight: 600; margin-bottom: 8px; font-size: 13px;">01 配置快捷指令</div>
+                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;" id="qrCodesContainer">
+                    <div style="display: flex; flex-direction: column; align-items: center; gap: 6px;" id="qrGoogleScreenshotContainer">
+                      <img id="qrGoogleScreenshot" style="width: 80px; height: 80px;">
+                      <div style="font-size: 12px; color: var(--text-secondary); text-align: center;">直接截图</div>
+                </div>
+                    <div style="display: flex; flex-direction: column; align-items: center; gap: 6px;" id="qrGoogleAlbumContainer">
+                      <img id="qrGoogleAlbum" style="width: 80px; height: 80px;">
+                      <div style="font-size: 12px; color: var(--text-secondary); text-align: center;">相册选择</div>
+                  </div>
+                    <div style="display: flex; flex-direction: column; align-items: center; gap: 6px;" id="qrIcloudScreenshotContainer">
+                      <img id="qrIcloudScreenshot" style="width: 80px; height: 80px;">
+                      <div style="font-size: 12px; color: var(--text-secondary); text-align: center;">直接截图</div>
+                  </div>
+                    <div style="display: flex; flex-direction: column; align-items: center; gap: 6px;" id="qrIcloudAlbumContainer">
+                      <img id="qrIcloudAlbum" style="width: 80px; height: 80px;">
+                      <div style="font-size: 12px; color: var(--text-secondary); text-align: center;">相册选择</div>
+                  </div>
+                  </div>
+                 <div id="noModeMessage" style="font-size: 12px; color: var(--text-secondary); line-height: 1.6; display: none;">
+                    请在"电脑端"中选择储存方式
+              </div>
+            </div>
+
+                        <!-- User ID Display -->
+                        <div id="userIdDisplaySection">
+                          <div id="userIdTitle" style="font-weight: 600; margin-bottom: 8px; font-size: 13px;">02 您的 User ID</div>
+                          <div id="userIdSubtitle" style="font-size: 12px; color: var(--text-secondary); margin-top: 6px;">
+                            请在快捷指令的文本框中填入此 ID:
+              </div>
+                          <div style="background: var(--bg-app); padding: 8px 12px 8px 12px; border-radius: var(--radius-s); margin: 6px 0; display: flex; align-items: center; justify-content: space-between;">
+                            <div style="font-family: 'SF Mono', monospace; font-size: 12px; overflow-x: auto; white-space: nowrap; margin-right: 8px; -webkit-overflow-scrolling: touch; scrollbar-width: none; color: var(--text-secondary); user-select: text;">
+                              <span id="displayUserId">正在获取...</span>
+                </div>
+                            <button id="copyUserIdBtn" class="icon-btn" style="width: 24px; height: 24px; flex-shrink: 0;" title="复制 User ID">
+                              <svg class="svg-icon" style="width: 14px; height: 14px;" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                            </button>
+                  </div>
+                </div>
+                  </div>
+        </div>
 
       </div>
     </div>
@@ -1883,7 +2253,8 @@
             return;
           }
           
-          // 检查是否有错误消息（如用户文件夹未初始化）
+          // 检查是否有真正的错误消息（如用户文件夹未初始化、网络错误等）
+          // 注意：如果 total === 0 且没有 message，说明是文件夹为空，这是正常情况，不是错误
           if (data.message && data.total === 0 && data.count === 0) {
             log(`❌ ${data.message}`);
             // 根据不同的错误消息给出友好提示
@@ -1904,8 +2275,8 @@
           
           // 优化后的逻辑：支持显示部分失败和具体错误详情
           if (data.total === 0) {
-            log('ℹ️  云端没有暂存文件');
-            alert('云端没有暂存文件');
+            // 没有文件，但不是错误（message 为空）
+            log('✅ 同步完成：0 张截图（文件夹为空）');
             updateStatus('connected', '同步完成');
           } else if (data.count === data.total) {
             // 全部成功
@@ -1947,10 +2318,33 @@
         } else if (data.type === 'sync-mode-changed') {
           currentSyncMode = data.mode;
           updateSyncModeDisplay();
-          if (useCaseOverlay && useCaseOverlay.classList.contains('show')) {
+          if (checkQRCodeVisibility()) {
           updateQRCodeDisplay();
           }
           log('✅ 储存方式已切换');
+        } else if (data.type === 'gif-compose-progress') {
+          // 处理服务器推送的真实进度
+          if (data.progress) {
+             updateRealProgress(data.progress, data.message);
+          }
+        } else if (data.type === 'gif-compose-success') {
+          // Update Progress
+          console.log('✅ 收到服务器成功响应');
+          console.log('   输出路径:', data.outputPath);
+          console.log('   完成数量:', completedExports + 1, '/', totalExports);
+          handleExportSuccess();
+        } else if (data.type === 'gif-compose-error') {
+          // Update Progress (count as done but failed)
+          console.error('❌ 收到服务器错误响应');
+          console.error('   错误消息:', data.message || data.error || '未知错误');
+          console.error('   完整错误详情:', data.details || '无');
+          handleExportError();
+          // 只在 toast 显示简短错误提示，详细信息在 console
+          showToast('导出失败，请查看控制台了解详情', 'error');
+        } else if (data.type === 'gif-compose-cancelled') {
+          // 处理取消确认消息
+          console.log('🛑 收到服务器取消确认');
+          // UI 已经在 cancelGifExport 中处理了重置，这里不需要额外操作
         } else if (data.type === 'sync-mode-info') {
           currentSyncMode = data.mode;
           updateSyncModeDisplay();
@@ -1959,7 +2353,7 @@
             // updateSyncModeDisplay() 已经在上面的调用中更新了，这里不需要再次调用
             // 但可以确保显示是最新的
           }
-          if (useCaseOverlay && useCaseOverlay.classList.contains('show')) {
+          if (checkQRCodeVisibility()) {
             updateQRCodeDisplay();
           }
         } else if (data.type === 'switch-sync-mode-result') {
@@ -2000,10 +2394,14 @@
         } else if (data.type === 'gif-backup-setting-info' || data.type === 'gif-backup-setting-updated') {
           if (gifBackupToggle) {
             gifBackupToggle.checked = !!data.enabled;
+            // 同时更新 originalSettings 以保持状态一致
+            originalSettings.backupGif = !!data.enabled;
           }
         } else if (data.type === 'keep-gif-in-icloud-setting-info' || data.type === 'keep-gif-in-icloud-setting-updated') {
           if (keepGifInIcloudToggle) {
             keepGifInIcloudToggle.checked = !!data.enabled;
+            // 同时更新 originalSettings 以保持状态一致
+            originalSettings.keepGifInIcloud = !!data.enabled;
           }
         } else if (data.type === 'plugin-update-info') {
           // 处理插件更新信息
@@ -2415,9 +2813,7 @@
     const themeMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
     themeMediaQuery.addEventListener('change', handleThemeChange);
 
-    const useCaseOverlay = document.getElementById('useCaseOverlay');
     const viewUseCases = document.getElementById('viewUseCases');
-    const useCaseClose = document.getElementById('useCaseClose');
 
     function updateQRCodeDisplay() {
       const qrGoogleScreenshotContainer = document.getElementById('qrGoogleScreenshotContainer');
@@ -2452,8 +2848,8 @@
         if (userIdDisplaySection) userIdDisplaySection.style.display = 'block';
         
         // Google Mode Titles
-        if (shortcutGuideTitle) shortcutGuideTitle.textContent = '1. 扫码获取快捷指令';
-        if (userIdTitle) userIdTitle.textContent = '2. 将 User ID 填入指令的文本框中';
+        if (shortcutGuideTitle) shortcutGuideTitle.textContent = '01 扫码获取快捷指令';
+        if (userIdTitle) userIdTitle.textContent = '02 将 User ID 填入指令的文本框中';
         
       } else if (currentSyncMode === 'icloud') {
         if (qrCodesContainer) qrCodesContainer.style.display = 'grid';
@@ -2468,34 +2864,112 @@
       }
     }
 
-    function openUseCases() {
-      if (isMinimized) toggleMinimize();
-      updateQRCodeDisplay();
-      if (ws && ws.readyState === 1) {
-        if (!currentSyncMode) {
-            ws.send(JSON.stringify({ type: 'get-sync-mode' }));
+    // Tab Switching Logic
+    const tabDesktop = document.getElementById('tabDesktop');
+    const tabMobile = document.getElementById('tabMobile');
+    const contentDesktop = document.getElementById('contentDesktop');
+    const contentMobile = document.getElementById('contentMobile');
+
+    let currentTab = 'desktop';
+    
+    function switchTab(tab) {
+        if (tab === currentTab) return; // 如果已经是当前tab，不执行切换
+        
+        const isGoingRight = (currentTab === 'desktop' && tab === 'mobile');
+        const oldContent = currentTab === 'desktop' ? contentDesktop : contentMobile;
+        const newContent = tab === 'desktop' ? contentDesktop : contentMobile;
+        
+        // 更新tab按钮状态
+        if (tab === 'desktop') {
+            tabDesktop.classList.add('active');
+            tabMobile.classList.remove('active');
+        } else {
+            tabDesktop.classList.remove('active');
+            tabMobile.classList.add('active');
         }
-        ws.send(JSON.stringify({ type: 'get-user-id' }));
-      }
-      useCaseOverlay.classList.add('show');
-      // Check scroll state after modal opens
-      // setTimeout(checkCommandScroll, 400);
+        
+        // 旧内容滑出
+        oldContent.classList.add(isGoingRight ? 'slide-out-left' : 'slide-out-right');
+        oldContent.classList.remove('active');
+        
+        // 等待旧内容滑出后，显示新内容
+        setTimeout(() => {
+            oldContent.style.display = 'none';
+            oldContent.classList.remove('slide-out-left', 'slide-out-right');
+            
+            // 显示新内容
+            newContent.style.display = 'block';
+            newContent.classList.add(isGoingRight ? 'slide-in-right' : 'slide-in-left');
+            
+            // 在动画结束后清理动画类
+            setTimeout(() => {
+                newContent.classList.remove('slide-in-left', 'slide-in-right');
+                newContent.classList.add('active');
+            }, 300);
+        }, 150); // 滑出动画的一半时间，实现交叉淡入淡出
+        
+        currentTab = tab;
+        
+        // Trigger QR updates when mobile tab is active
+        if (tab === 'mobile') {
+            updateQRCodeDisplay();
+            if (ws && ws.readyState === 1) {
+                if (!currentSyncMode) {
+                    ws.send(JSON.stringify({ type: 'get-sync-mode' }));
+                }
+                ws.send(JSON.stringify({ type: 'get-user-id' }));
+            }
+        }
     }
 
-    function closeUseCases() {
-      useCaseOverlay.classList.remove('show');
+    if (tabDesktop) tabDesktop.onclick = function() { switchTab('desktop'); };
+    if (tabMobile) tabMobile.onclick = function() { switchTab('mobile'); };
+
+    function openSettings(defaultTab = 'desktop') {
+      if (isMinimized) toggleMinimize();
+      
+      // Request info
+      if (ws && ws.readyState === 1) {
+           ws.send(JSON.stringify({ type: 'get-sync-mode' }));
+           ws.send(JSON.stringify({ type: 'get-user-id' }));
+           // 请求 GIF 备份设置
+           ws.send(JSON.stringify({ type: 'get-gif-backup-setting' }));
+           ws.send(JSON.stringify({ type: 'get-keep-gif-in-icloud-setting' }));
+      }
+      parent.postMessage({ pluginMessage: { type: 'get-plugin-version' } }, '*');
+      
+      updateSyncModeDisplay();
+      loadSizeSettings();
+      loadLayoutSettings();
+      
+      // 初始化tab状态（无动画）
+      currentTab = defaultTab;
+      if (defaultTab === 'desktop') {
+          tabDesktop.classList.add('active');
+          tabMobile.classList.remove('active');
+          contentDesktop.style.display = 'block';
+          contentDesktop.classList.add('active');
+          contentMobile.style.display = 'none';
+          contentMobile.classList.remove('active');
+      } else {
+          tabDesktop.classList.remove('active');
+          tabMobile.classList.add('active');
+          contentDesktop.style.display = 'none';
+          contentDesktop.classList.remove('active');
+          contentMobile.style.display = 'block';
+          contentMobile.classList.add('active');
+          updateQRCodeDisplay();
+      }
+      
+      settingsOverlay.classList.add('show');
     }
 
-    viewUseCases.onclick = openUseCases;
-    useCaseClose.onclick = closeUseCases;
-    useCaseOverlay.addEventListener('click', function (e) {
-      if (e.target === useCaseOverlay) closeUseCases();
-    });
-    document.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape' && useCaseOverlay.classList.contains('show')) {
-        closeUseCases();
-      }
-    });
+    viewUseCases.onclick = function() { openSettings('mobile'); };
+
+    // Update QRCode display check to look for mobile tab
+    function checkQRCodeVisibility() {
+        return settingsOverlay.classList.contains('show') && tabMobile.classList.contains('active');
+    }
 
     const settingsOverlay = document.getElementById('settingsOverlay');
     const openSettingsBtn = document.getElementById('openSettings');
@@ -2529,35 +3003,82 @@
     const keepGifInIcloudSection = document.getElementById('keepGifInIcloudSection');
     const keepGifInIcloudToggle = document.getElementById('keepGifInIcloudToggle');
 
+    // Save button (consolidated)
+    const saveSettingsBtn = document.getElementById('globalSaveBtn');
+    
+    // Track original values to detect changes
+    let originalSettings = {
+      imageWidth: '',
+      imageHeight: '',
+      frameColumns: '',
+      backupGif: false,
+      keepGifInIcloud: false
+    };
+    
+    // Track current values
+    let currentSettings = {
+      imageWidth: '',
+      imageHeight: '',
+      frameColumns: '',
+      backupGif: false,
+      keepGifInIcloud: false
+    };
+    
+    // Check for changes and update save button state
+    function checkSettingsChanges() {
+      // Compare current inputs with original settings
+      const widthChanged = imageWidthInput ? (imageWidthInput.value != originalSettings.imageWidth) : false;
+      const heightChanged = imageHeightInput ? (imageHeightInput.value != originalSettings.imageHeight) : false;
+      const columnsChanged = frameColumnsInput ? (frameColumnsInput.value != originalSettings.frameColumns) : false;
+      
+      let gifBackupChanged = false;
+      const gifBackupToggle = document.getElementById('gifBackupToggle');
+      // 检测 GIF 备份开关变更（只要元素存在且可见就检测，不依赖 currentSyncMode）
+      if (gifBackupToggle && gifBackupToggle.offsetParent !== null) {
+        gifBackupChanged = (gifBackupToggle.checked !== originalSettings.backupGif);
+        currentSettings.backupGif = gifBackupToggle.checked;
+      }
+      
+      let keepGifChanged = false;
+      const keepGifInIcloudToggle = document.getElementById('keepGifInIcloudToggle');
+      // 检测 iCloud GIF 保留开关变更（只要元素存在且可见就检测，不依赖 currentSyncMode）
+      if (keepGifInIcloudToggle && keepGifInIcloudToggle.offsetParent !== null) {
+        keepGifChanged = (keepGifInIcloudToggle.checked !== originalSettings.keepGifInIcloud);
+        currentSettings.keepGifInIcloud = keepGifInIcloudToggle.checked;
+      }
+      
+      const hasChanges = widthChanged || heightChanged || columnsChanged || gifBackupChanged || keepGifChanged;
+      
+      if (saveSettingsBtn) {
+        if (hasChanges) {
+          saveSettingsBtn.disabled = false;
+          saveSettingsBtn.classList.remove('disabled');
+        } else {
+          saveSettingsBtn.disabled = true;
+          saveSettingsBtn.classList.add('disabled');
+        }
+      }
+      
+      // Update current settings tracking for inputs
+      if (imageWidthInput) currentSettings.imageWidth = imageWidthInput.value;
+      if (imageHeightInput) currentSettings.imageHeight = imageHeightInput.value;
+      if (frameColumnsInput) currentSettings.frameColumns = frameColumnsInput.value;
+    }
+    
+    // Add event listeners to inputs
+    if (imageWidthInput) imageWidthInput.addEventListener('input', checkSettingsChanges);
+    if (imageHeightInput) imageHeightInput.addEventListener('input', checkSettingsChanges);
+    if (frameColumnsInput) frameColumnsInput.addEventListener('input', checkSettingsChanges);
+    
     if (gifBackupToggle) {
       gifBackupToggle.onchange = function() {
-        const enabled = this.checked;
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({
-            type: 'update-gif-backup-setting',
-            enabled: enabled
-          }));
-        } else {
-          showToast('未连接服务器', 'error');
-          // Revert change
-          this.checked = !enabled;
-        }
+        checkSettingsChanges();
       };
     }
     
     if (keepGifInIcloudToggle) {
       keepGifInIcloudToggle.onchange = function() {
-        const enabled = this.checked;
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({
-            type: 'update-keep-gif-in-icloud-setting',
-            enabled: enabled
-          }));
-        } else {
-          showToast('未连接服务器', 'error');
-          // Revert change
-          this.checked = !enabled;
-        }
+        checkSettingsChanges();
       };
     }
     
@@ -2565,9 +3086,17 @@
       parent.postMessage({ pluginMessage: { type: 'get-size-settings' } }, '*');
     }
     
-    function saveSizeSettings() {
+    // Consolidated save function
+    function saveAllSettings() {
+      if (!saveSettingsBtn || saveSettingsBtn.disabled) return;
+      if (!imageWidthInput || !imageHeightInput || !frameColumnsInput) {
+        console.error('Settings inputs not initialized');
+        return;
+      }
+      
       const width = imageWidthInput.value.trim();
       const height = imageHeightInput.value.trim();
+      const columns = frameColumnsInput.value.trim();
       
       if (width && (isNaN(width) || parseInt(width) <= 0)) {
         showToast('宽度必须是大于0的数字', 'error');
@@ -2577,7 +3106,12 @@
         showToast('高度必须是大于0的数字', 'error');
         return;
       }
+      if (columns && (isNaN(columns) || parseInt(columns) <= 0)) {
+        showToast('布局每行必须是大于0的数字', 'error');
+        return;
+      }
       
+      // 1. Save Size Settings
       parent.postMessage({
         pluginMessage: {
           type: 'update-size-settings',
@@ -2586,26 +3120,61 @@
         }
       }, '*');
       
-      showToast('正在保存', 'loading');
-    }
-    
-    function clearSizeSettings() {
-      imageWidthInput.value = '';
-      imageHeightInput.value = '';
-      
+      // 2. Save Layout Settings
       parent.postMessage({
         pluginMessage: {
-          type: 'update-size-settings',
-          width: null,
-          height: null
+          type: 'update-layout-settings',
+          columns: columns ? parseInt(columns) : null
         }
       }, '*');
       
-      showToast('已重置', 'success');
+      // 3. Save GIF Backup Setting (if visible and changed)
+      if (gifBackupToggle && gifBackupToggle.offsetParent !== null) {
+        if (gifBackupToggle.checked !== originalSettings.backupGif) {
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+              type: 'update-gif-backup-setting',
+              enabled: gifBackupToggle.checked
+            }));
+          } else {
+            console.warn('⚠️ WebSocket 未连接，无法保存 GIF 备份设置');
+          }
+        }
+      }
+      
+      // 4. Save Keep GIF in iCloud Setting (if visible and changed)
+      if (keepGifInIcloudToggle && keepGifInIcloudToggle.offsetParent !== null) {
+        if (keepGifInIcloudToggle.checked !== originalSettings.keepGifInIcloud) {
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+              type: 'update-keep-gif-in-icloud-setting',
+              enabled: keepGifInIcloudToggle.checked
+            }));
+          } else {
+            console.warn('⚠️ WebSocket 未连接，无法保存 iCloud GIF 保留设置');
+          }
+        }
+      }
+      
+      // Update original settings to match current state (reset change detection)
+      originalSettings.imageWidth = width;
+      originalSettings.imageHeight = height;
+      originalSettings.frameColumns = columns;
+      if (gifBackupToggle) originalSettings.backupGif = gifBackupToggle.checked;
+      if (keepGifInIcloudToggle) originalSettings.keepGifInIcloud = keepGifInIcloudToggle.checked;
+      
+      checkSettingsChanges();
+      
+      // Show success toast and close settings
+      showToast('设置已保存', 'success');
+      setTimeout(() => {
+        closeSettings();
+      }, 300);
     }
     
-    saveSizeSettingsBtn.onclick = saveSizeSettings;
-    clearSizeSettingsBtn.onclick = clearSizeSettings;
+    if (saveSettingsBtn) {
+      saveSettingsBtn.onclick = saveAllSettings;
+    }
     
     function loadLayoutSettings() {
       parent.postMessage({ pluginMessage: { type: 'get-layout-settings' } }, '*');
@@ -2615,49 +3184,8 @@
       parent.postMessage({ pluginMessage: { type: 'get-server-path' } }, '*');
     }
     
-    function saveLayoutSettings() {
-      const columns = frameColumnsInput.value.trim();
-      if (columns && (isNaN(columns) || parseInt(columns) <= 0)) {
-        showToast('必须是大于0的数字', 'error');
-        return;
-      }
-      parent.postMessage({
-        pluginMessage: {
-          type: 'update-layout-settings',
-          columns: columns ? parseInt(columns) : null
-        }
-      }, '*');
-      
-      showToast('正在保存', 'loading');
-    }
-    
-    function clearLayoutSettings() {
-      frameColumnsInput.value = '';
-      parent.postMessage({
-        pluginMessage: {
-          type: 'update-layout-settings',
-          columns: null
-        }
-      }, '*');
-      showToast('已重置', 'success');
-    }
-    
-    saveLayoutSettingsBtn.onclick = saveLayoutSettings;
-    clearLayoutSettingsBtn.onclick = clearLayoutSettings;
-    
     openSettingsBtn.onclick = function() {
-      if (isMinimized) toggleMinimize();
-      // 先请求同步模式（如果还没有收到）
-      if (ws && ws.readyState === 1) {
-        ws.send(JSON.stringify({ type: 'get-sync-mode' }));
-      }
-      // 请求当前插件版本
-      parent.postMessage({ pluginMessage: { type: 'get-plugin-version' } }, '*');
-      // 更新显示（使用当前已知的模式，如果还没有收到响应，会在收到响应后自动更新）
-      updateSyncModeDisplay();
-      loadSizeSettings();
-      loadLayoutSettings();
-      settingsOverlay.classList.add('show');
+      openSettings('desktop');
     };
     
     // 全局变量：跟踪待更新的类型
@@ -2880,6 +3408,7 @@
       
       // Set message
       messageEl.textContent = cleanMessage;
+      messageEl.innerHTML = cleanMessage; // Allow HTML content
       
       // Set toast class
       toast.className = 'toast';
@@ -2906,7 +3435,71 @@
       }, 2000);
     }
 
+    function showToastWithAction(message, actionText, actionCallback) {
+      const toast = document.getElementById('toast');
+      if (!toast) return;
+      
+      const iconEl = toast.querySelector('.toast-icon');
+      const messageEl = toast.querySelector('.toast-message');
+      
+      if (!iconEl || !messageEl) return;
+      
+      // Validate parameters
+      if (!message || !actionText) {
+        console.error('showToastWithAction: message or actionText is missing');
+        return;
+      }
+      
+      // Set success icon
+      iconEl.innerHTML = getToastIcon('success');
+      iconEl.style.display = 'flex';
+      
+      // Create message with action link
+      messageEl.innerHTML = `${message} <span class="toast-action">${actionText}</span>`;
+      
+      // Add click handler to action link
+      const actionLink = messageEl.querySelector('.toast-action');
+      if (actionLink && actionCallback) {
+        actionLink.onclick = (e) => {
+          e.stopPropagation();
+          actionCallback();
+        };
+      }
+      
+      // Set toast class
+      toast.className = 'toast success';
+      
+      // Show toast
+      setTimeout(() => {
+        toast.classList.add('show');
+      }, 10);
+      
+      // Hide toast after 3 seconds (longer for action)
+      setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => {
+          iconEl.innerHTML = '';
+          messageEl.innerHTML = '';
+        }, 300);
+      }, 3000);
+    }
+
     function closeSettings() {
+      // Reset all inputs and toggles to original saved values
+      // This discards any unsaved changes
+      if (imageWidthInput) imageWidthInput.value = originalSettings.imageWidth || '';
+      if (imageHeightInput) imageHeightInput.value = originalSettings.imageHeight || '';
+      if (frameColumnsInput) frameColumnsInput.value = originalSettings.frameColumns || '';
+      
+      const gifBackupToggle = document.getElementById('gifBackupToggle');
+      if (gifBackupToggle) gifBackupToggle.checked = originalSettings.backupGif || false;
+      
+      const keepGifInIcloudToggle = document.getElementById('keepGifInIcloudToggle');
+      if (keepGifInIcloudToggle) keepGifInIcloudToggle.checked = originalSettings.keepGifInIcloud || false;
+      
+      // Reset change detection
+      checkSettingsChanges();
+      
       settingsOverlay.classList.remove('show');
     }
 
@@ -3026,8 +3619,7 @@
       
       if (isMinimized) {
         appRoot.classList.add('minimized');
-        settingsOverlay.classList.remove('show');
-        useCaseOverlay.classList.remove('show');
+        closeSettings(); // Use closeSettings to discard unsaved changes
         
         // 最小化时隐藏更新横幅
         // 检查 classList.contains('show') 因为这是主要的显示状态
@@ -3038,6 +3630,7 @@
         
         // Toggle icon path to Maximize (No slash)
         toggleMinimizeBtn.setAttribute('title', '恢复');
+        toggleMinimizeBtn.classList.add('no-tooltip'); // 禁用最大化按钮的 tooltip
         currentIcon.innerHTML = '<polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline>';
         
         parent.postMessage({
@@ -3059,6 +3652,7 @@
         
         // Toggle icon path to Minimize
         toggleMinimizeBtn.setAttribute('title', '最小化');
+        toggleMinimizeBtn.classList.remove('no-tooltip'); // 恢复最小化按钮的 tooltip
         currentIcon.innerHTML = '<polyline points="4 14 10 14 10 20"></polyline><polyline points="20 10 14 10 14 4"></polyline>';
         
         // 根据是否有 Banner 调整窗口高度
@@ -3121,6 +3715,74 @@
 
       if (msg.type === 'plugin-closing') {
         stopRealtimeSync();
+      } else if (msg.type === 'export-batch-start') {
+        // Start export flow
+        totalExports = msg.total || 0;
+        completedExports = 0;
+        isExporting = true;
+        
+        console.log('🎬 开始批量导出，总数:', totalExports);
+        
+        // Add exporting class to button
+        if (exportGifBtn) {
+          exportGifBtn.classList.add("exporting");
+          exportGifBtn.classList.remove("success");
+          // 修改 tooltip 为停止导出
+          exportGifBtn.setAttribute('data-tooltip', '停止导出 GIF');
+        }
+        
+        if (totalExports > 0) {
+          startSmoothProgress(); // Start smooth progress animation
+        } else {
+          console.warn('⚠️ totalExports 为 0 或 undefined');
+        }
+        
+        // Reset button state
+        const exportBtn = document.getElementById('exportGifBtn');
+        if (exportBtn) {
+            exportBtn.classList.remove('success');
+        }
+      } else if (msg.type === 'export-gif-error') {
+        showToast(msg.error, 'error');
+        // Reset button state
+        stopSmoothProgress();
+        const exportBtn = document.getElementById('exportGifBtn');
+        if (exportBtn) {
+            exportBtn.classList.remove('success');
+            const ring = exportBtn.querySelector('.progress-ring');
+            if (ring) ring.style.opacity = 0;
+        }
+        isExporting = false;
+      } else if (msg.type === 'compose-annotated-gif') {
+        // Forward message to server
+        console.log('📨 UI 收到 compose-annotated-gif 消息');
+        console.log('   Frame名称:', msg.frameName);
+        console.log('   GIF数量:', msg.gifInfos ? msg.gifInfos.length : 0);
+        if (msg.gifInfos) {
+          msg.gifInfos.forEach((gif, idx) => {
+            console.log(`      ${idx + 1}. ${gif.filename} @ (${gif.bounds.x}, ${gif.bounds.y})`);
+          });
+        }
+        console.log('   批次:', `${msg.batchIndex + 1}/${msg.batchTotal}`);
+        console.log('   WebSocket状态:', ws ? ws.readyState : 'ws is null');
+        
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          console.log('   ✅ WebSocket已连接，发送消息到服务器');
+          ws.send(JSON.stringify(msg));
+          console.log('   ✅ 消息已发送');
+        } else {
+          console.error('   ❌ WebSocket未连接，无法发送消息');
+          showToast('未连接到服务器', 'error');
+          // Reset button state
+          const exportBtn = document.getElementById('exportGifBtn');
+          if (exportBtn) {
+              exportBtn.classList.remove('success');
+              const ring = exportBtn.querySelector('.progress-ring');
+              if (ring) ring.style.opacity = 0;
+          }
+          isExporting = false;
+          stopSmoothProgress();
+        }
       } else if (msg.type === 'frame-created') {
         log('✅ 画板已创建');
       } else if (msg.type === 'frame-located') {
@@ -3230,15 +3892,13 @@
         if (msg.width) imageWidthInput.value = msg.width;
         if (msg.height) imageHeightInput.value = msg.height;
       } else if (msg.type === 'size-settings-updated') {
-        if (msg.success) {
-          showToast('已保存', 'success');
-        }
+        // Toast now handled by unified saveAllSettings function
+        // No individual toast needed to avoid duplicates
       } else if (msg.type === 'layout-settings-loaded') {
         if (msg.columns) frameColumnsInput.value = msg.columns;
       } else if (msg.type === 'layout-settings-updated') {
-        if (msg.success) {
-          showToast('已保存', 'success');
-        }
+        // Toast now handled by unified saveAllSettings function
+        // No individual toast needed to avoid duplicates
       } else if (msg.type === 'server-path-loaded') {
         if (msg.path) {
           serverInstallPath = msg.path;
@@ -3321,6 +3981,333 @@
         }
         document.body.removeChild(textArea);
       };
+    }
+      // ==========================================
+    // Export GIF Logic
+    // ==========================================
+    
+    let totalExports = 0;
+    let completedExports = 0;
+    let isExporting = false;
+    let successTimer = null;
+    let circumference = 0;
+    let progressCircle = null;
+    let progressRing = null;
+    let exportGifBtn = null;
+    let smoothProgressInterval = null;
+    let currentSmoothProgress = 0;
+    
+    // 跟踪窗口焦点状态（用于判断是否显示 toast）
+    let windowHasFocus = !document.hidden;
+    
+    // 监听窗口焦点和可见性变化
+    window.addEventListener('focus', () => {
+      windowHasFocus = true;
+      console.log('🔍 窗口获得焦点');
+    });
+    
+    window.addEventListener('blur', () => {
+      windowHasFocus = false;
+      console.log('🔍 窗口失去焦点');
+    });
+    
+    document.addEventListener('visibilitychange', () => {
+      windowHasFocus = !document.hidden;
+      console.log('🔍 窗口可见性变化:', document.hidden ? '隐藏' : '可见');
+    });
+
+    // Initialize after DOM is ready
+    document.addEventListener('DOMContentLoaded', function() {
+        exportGifBtn = document.getElementById("exportGifBtn");
+        progressRing = exportGifBtn ? exportGifBtn.querySelector(".progress-ring") : null;
+        progressCircle = exportGifBtn ? exportGifBtn.querySelector(".progress-ring__circle") : null;
+        
+        // Initialize Progress Ring
+        if (progressCircle) {
+            const radius = progressCircle.r.baseVal.value;
+            circumference = radius * 2 * Math.PI;
+            progressCircle.style.strokeDasharray = `${circumference} ${circumference}`;
+            progressCircle.style.strokeDashoffset = circumference;
+        }
+
+        if (exportGifBtn) {
+            exportGifBtn.onclick = () => {
+                if (isExporting) {
+                    // Cancel Export
+                    console.log('🛑 用户取消导出');
+                    cancelExport();
+                } else {
+                    // Start Export
+                    parent.postMessage({ pluginMessage: { type: "export-annotated-gif" } }, "*");
+                }
+            };
+        }
+    });
+
+    function setExportProgress(percent) {
+        // Re-check elements if null (just in case)
+        if (!progressCircle || !progressRing) {
+             exportGifBtn = document.getElementById("exportGifBtn");
+             progressRing = exportGifBtn ? exportGifBtn.querySelector(".progress-ring") : null;
+             progressCircle = exportGifBtn ? exportGifBtn.querySelector(".progress-ring__circle") : null;
+             if (progressCircle && circumference === 0) {
+                 const radius = progressCircle.r.baseVal.value;
+                 circumference = radius * 2 * Math.PI;
+                 progressCircle.style.strokeDasharray = `${circumference} ${circumference}`;
+             }
+        }
+        
+        if (!progressCircle || !progressRing) return;
+        
+        const offset = circumference - (percent / 100) * circumference;
+        progressCircle.style.strokeDashoffset = offset;
+        progressRing.style.opacity = 1;
+    }
+
+    // 更新真实进度
+    function updateRealProgress(percent, message) {
+        // 如果有消息，可以更新状态文本（如果有状态显示区域的话）
+        if (message) {
+            console.log(`📊 进度 ${percent}%: ${message}`);
+            // 可选：更新按钮文字显示当前状态
+            if (exportGifBtn && !exportGifBtn.classList.contains('success')) {
+               const btnText = exportGifBtn.querySelector('span');
+               if (btnText) btnText.textContent = `导出中 ${percent}%`;
+            }
+        }
+
+        // 基于当前批次进度的计算
+        // 假设每个 GIF 的处理进度是独立的，这里我们主要关注当前的 percent
+        // 但为了防止进度条倒退（当处理下一个 GIF 时），我们需要综合考虑
+        
+        // 简单策略：直接使用服务器返回的百分比作为当前目标
+        // 但为了平滑，我们不直接 set，而是更新 target，让 smooth interval 去追赶
+        
+        // 实际上，服务器现在的进度是针对单个请求的。
+        // 如果是批量导出，我们需要结合 completedExports 和 totalExports 来计算总进度
+        // 总进度 = (已完成数量 * 100 + 当前正在处理的百分比) / 总数量
+        
+        let batchProgress = percent;
+        if (totalExports > 1) {
+            batchProgress = ((completedExports * 100) + percent) / totalExports;
+        }
+        
+        // 确保进度不倒退
+        if (batchProgress > currentSmoothProgress) {
+             currentSmoothProgress = batchProgress;
+             setExportProgress(currentSmoothProgress);
+        }
+    }
+
+    // Smooth progress simulation for better UX
+    // 现在主要作为"心跳"动画，防止用户以为卡死
+    function startSmoothProgress() {
+        if (smoothProgressInterval) clearInterval(smoothProgressInterval);
+        
+        // 初始进度
+        currentSmoothProgress = 2;
+        setExportProgress(currentSmoothProgress);
+        
+        if (exportGifBtn) {
+           const btnText = exportGifBtn.querySelector('span');
+           if (btnText) btnText.textContent = '准备中...';
+        }
+        
+        smoothProgressInterval = setInterval(() => {
+            // 仅仅做极缓慢的增加，作为"我还在运行"的信号
+            // 如果真实进度来了，currentSmoothProgress 会被 updateRealProgress 大幅更新
+            
+            // 如果卡在某个进度太久，最多自动爬升 5%
+            // 比如当前是 30%，最多自动爬到 35%，然后等待服务器消息
+            
+            // 这里我们只做非常微小的蠕动，每 100ms 增加 0.05%
+            // 这样 1秒增加 0.5%，1分钟增加 30%
+            // 并在 95% 处封顶
+            
+            if (currentSmoothProgress < 95) {
+                currentSmoothProgress += 0.05;
+                setExportProgress(currentSmoothProgress);
+            }
+            
+        }, 100); 
+    }
+
+    function stopSmoothProgress() {
+        if (smoothProgressInterval) {
+            clearInterval(smoothProgressInterval);
+            smoothProgressInterval = null;
+        }
+    }
+
+    function createSplashParticles(rect) {
+        const particleCount = 12;
+        const colors = ["#34C759", "#32D74B", "#248A3D"]; // Shades of green
+        
+        for (let i = 0; i < particleCount; i++) {
+            const particle = document.createElement("div");
+            particle.classList.add("splash-particle");
+            document.body.appendChild(particle);
+            
+            // Random position around center
+            const angle = (i / particleCount) * 360 + (Math.random() * 30 - 15);
+            const distance = 20 + Math.random() * 15;
+            
+            // Start at button center
+            const startX = rect.left + rect.width / 2;
+            const startY = rect.top + rect.height / 2;
+            
+            particle.style.left = `${startX}px`;
+            particle.style.top = `${startY}px`;
+            particle.style.background = colors[Math.floor(Math.random() * colors.length)];
+            
+            // Calculate destination
+            const rad = angle * Math.PI / 180;
+            const tx = Math.cos(rad) * distance;
+            const ty = Math.sin(rad) * distance;
+            
+            particle.style.setProperty("--tx", `${tx}px`);
+            particle.style.setProperty("--ty", `${ty}px`);
+            
+            particle.style.animation = `splash-anim 0.6s cubic-bezier(0.165, 0.84, 0.44, 1) forwards`;
+            
+            // Cleanup
+            setTimeout(() => {
+                if (particle.parentNode) document.body.removeChild(particle);
+            }, 600);
+        }
+    }
+
+    function cancelExport() {
+        console.log('🛑 用户点击取消导出');
+        
+        // 立即停止平滑进度动画
+        stopSmoothProgress();
+        
+        // 完全重置所有状态
+        isExporting = false;
+        totalExports = 0;
+        completedExports = 0;
+        currentSmoothProgress = 0;
+        
+        // 重置 UI 到初始状态
+        if (exportGifBtn) {
+            exportGifBtn.classList.remove("exporting");
+            exportGifBtn.classList.remove("success");
+            // 恢复原始 tooltip
+            exportGifBtn.setAttribute('data-tooltip', '导出 GIF');
+        }
+        
+        // 立即隐藏进度环（无过渡效果，确保立即消失）
+        if (progressRing) {
+            progressRing.style.transition = 'none';
+            progressRing.style.opacity = '0';
+            // 短暂延迟后恢复过渡效果，用于下次导出
+            setTimeout(() => {
+                if (progressRing) progressRing.style.transition = 'opacity 0.3s ease';
+            }, 50);
+        }
+        
+        // 重置进度到 0
+        if (progressCircle) {
+            progressCircle.style.transition = 'none';
+            progressCircle.style.strokeDashoffset = circumference;
+            setTimeout(() => {
+                if (progressCircle) progressCircle.style.transition = 'stroke-dashoffset 0.2s linear';
+            }, 50);
+        }
+        
+        // 通知 code.js 取消
+        parent.postMessage({ pluginMessage: { type: "cancel-gif-export" } }, "*");
+        
+        // 通知服务器取消所有进行中的处理
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: "cancel-gif-export" }));
+            console.log('   📤 已发送取消请求到服务器');
+        }
+        
+        // 显示取消提示
+        showToast('已取消导出', 'info');
+        
+        console.log('   ✅ 所有状态已重置，可以重新开始导出');
+    }
+
+    function handleExportSuccess() {
+        completedExports++;
+        
+        console.log(`✅ 导出成功 ${completedExports}/${totalExports}`);
+        
+        // On final completion, stop smooth progress and show toast
+        if (completedExports >= totalExports && totalExports > 0) {
+            console.log('🎉 所有导出完成！');
+            
+            stopSmoothProgress();
+            setExportProgress(100);
+            
+            setTimeout(() => {
+                isExporting = false;
+                
+                // Remove exporting class
+                if (exportGifBtn) {
+                    exportGifBtn.classList.remove("exporting");
+                    // 恢复原始 tooltip
+                    exportGifBtn.setAttribute('data-tooltip', '导出 GIF');
+                }
+                
+                // Hide progress ring
+                if (progressRing) progressRing.style.opacity = 0;
+                if (progressCircle) progressCircle.style.strokeDashoffset = circumference;
+                
+                // Show success toast with "查看" link (only if window is visible and has focus)
+                const count = totalExports || completedExports || 1;
+                
+                // 检查窗口是否有焦点（不是最小化或隐藏状态）
+                console.log('🔍 检查窗口状态:');
+                console.log('   windowHasFocus:', windowHasFocus);
+                console.log('   document.hidden:', document.hidden);
+                console.log('   document.hasFocus():', document.hasFocus());
+                
+                // 使用多个条件确保窗口真的可见
+                const isWindowVisible = windowHasFocus && !document.hidden && document.hasFocus();
+                
+                if (isWindowVisible) {
+                    console.log('✅ 窗口可见，显示成功 Toast，数量:', count);
+                    showToastWithAction(`已导出 ${count} 段 GIF`, '查看', () => {
+                        if (ws && ws.readyState === WebSocket.OPEN) {
+                            ws.send(JSON.stringify({ type: "open-folder" }));
+                        }
+                    });
+                } else {
+                    console.log('❌ 窗口已最小化/隐藏，跳过显示 Toast');
+                }
+            }, 300);
+        }
+    }
+
+    function handleExportError() {
+        completedExports++;
+        
+        // On final completion (even with errors), stop smooth progress
+        if (totalExports > 0 && completedExports >= totalExports) {
+            stopSmoothProgress();
+            setExportProgress(100);
+            
+            setTimeout(() => {
+                isExporting = false;
+                
+                // Remove exporting class
+                if (exportGifBtn) {
+                    exportGifBtn.classList.remove("exporting");
+                    // 恢复原始 tooltip
+                    exportGifBtn.setAttribute('data-tooltip', '导出 GIF');
+                }
+                
+                // Hide progress ring
+                if (progressRing) progressRing.style.opacity = 0;
+                if (progressCircle) progressCircle.style.strokeDashoffset = circumference;
+                
+                // Error toast is already shown by individual error handlers
+            }, 300);
+        }
     }
   </script>
 </body>

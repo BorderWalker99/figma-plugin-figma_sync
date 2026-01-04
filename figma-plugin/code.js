@@ -15,6 +15,7 @@ let currentFrame = null;
 let screenshotCount = 0;
 let screenshotIndex = 0; // 截屏图片计数器
 let screenRecordingIndex = 0; // 录屏计数器
+let cancelGifExport = false; // GIF导出取消标志
 
 // 从画板中已有的元素初始化计数器
 function initializeCounters() {
@@ -329,6 +330,272 @@ figma.ui.onmessage = async (msg) => {
   if (msg.type === 'close-plugin') {
     console.log('🔒 收到关闭插件请求（检测到其他实例）');
     figma.closePlugin();
+    return;
+  }
+
+  // 处理取消GIF导出
+  if (msg.type === 'cancel-gif-export') {
+    console.log('🛑 收到取消GIF导出请求');
+    cancelGifExport = true;
+    return;
+  }
+
+  // 处理导出带标注的 GIF
+  if (msg.type === 'export-annotated-gif') {
+    console.log('🎬 开始导出带标注的 GIF');
+    
+    // 重置取消标志
+    cancelGifExport = false;
+    
+    try {
+      const selection = figma.currentPage.selection;
+      console.log('   选中的节点数量:', selection ? selection.length : 'selection is null/undefined');
+      
+      // 检查是否选中了节点
+      if (!selection || selection.length === 0) {
+        figma.ui.postMessage({
+          type: 'export-gif-error',
+          error: '请先选择包含 GIF 的 Frame'
+        });
+        return;
+      }
+      
+      // 递归查找 Frame 中的所有 GIF 图层（支持嵌套结构）
+      function findAllGifLayers(node, results = []) {
+        // 检查当前节点
+        let filename = node.getPluginData('originalFilename');
+        let isManualDrag = false;
+        
+        // 如果没有 originalFilename，检查是否是手动拖入的视频/GIF
+        if (!filename) {
+          // 检查填充类型是否是 VIDEO 或 IMAGE
+          if (node.type === 'RECTANGLE' && node.fills && node.fills.length > 0) {
+            const fill = node.fills[0];
+            
+            // 方法 1：检查 VIDEO 填充
+            if (fill.type === 'VIDEO') {
+              // 手动拖入的视频
+              filename = node.name;
+              isManualDrag = true;
+              
+              // 尝试从图层名称推断扩展名
+              if (!filename.toLowerCase().endsWith('.mp4') && !filename.toLowerCase().endsWith('.mov')) {
+                // 如果图层名称没有扩展名，添加 .mov（视频默认格式）
+                filename = filename + '.mov';
+              }
+              
+              console.log(`   📹 检测到手动拖入的视频图层: ${node.name} (推断文件名: ${filename})`);
+            }
+            // 方法 2：检查 IMAGE 填充（可能是 GIF）
+            else if (fill.type === 'IMAGE') {
+              // 检查图层名称是否包含 GIF 相关关键词
+              const nameLower = node.name.toLowerCase();
+              if (nameLower.includes('gif') || 
+                  nameLower.includes('recording') || 
+                  nameLower.endsWith('.gif') ||
+                  nameLower.includes('screen')) {
+                filename = node.name;
+                isManualDrag = true;
+                
+                // 确保文件名有 .gif 扩展名
+                if (!filename.toLowerCase().endsWith('.gif')) {
+                  filename = filename + '.gif';
+                }
+                
+                console.log(`   🎬 检测到可能是手动拖入的 GIF 图层: ${node.name} (推断文件名: ${filename})`);
+              }
+            }
+          }
+        }
+        
+        if (filename) {
+          // 检查 1：文件扩展名
+          const hasValidExtension = filename.toLowerCase().endsWith('.gif') || 
+                                   filename.toLowerCase().endsWith('.mov') || 
+                                   filename.toLowerCase().endsWith('.mp4');
+          
+          // 检查 2：图层名称（兼容没有扩展名的情况）
+          const isScreenRecordingLayer = node.name && node.name.startsWith('ScreenRecording_');
+          
+          // 检查 3：文件名包含 ScreenRecording（兼容没有扩展名的情况）
+          const filenameIndicatesRecording = filename.includes('ScreenRecording');
+          
+          if (hasValidExtension || isScreenRecordingLayer || filenameIndicatesRecording) {
+            // 如果是手动拖入的，保存文件名到 pluginData（以便下次识别）
+            if (isManualDrag && !node.getPluginData('originalFilename')) {
+              node.setPluginData('originalFilename', filename);
+              console.log(`   💾 已保存文件名到 pluginData: ${filename}`);
+            }
+            
+            results.push({ layer: node, filename: filename });
+          }
+        }
+        
+        // 递归检查子节点
+        if ('children' in node) {
+          for (const child of node.children) {
+            findAllGifLayers(child, results);
+          }
+        }
+        
+        return results;
+      }
+
+      // 1. 筛选出有效的 GIF Frame
+      const validTasks = [];
+      const invalidNodes = [];
+
+      for (const node of selection) {
+        if (node.type !== 'FRAME') {
+          invalidNodes.push(node);
+          continue;
+        }
+
+        const gifLayers = findAllGifLayers(node);
+        if (gifLayers.length > 0) {
+          validTasks.push({
+            frame: node,
+            gifLayers: gifLayers // 所有 GIF 图层
+          });
+        } else {
+          invalidNodes.push(node);
+        }
+      }
+
+      // 2. 检查是否有可导出的内容
+      if (validTasks.length === 0) {
+        figma.ui.postMessage({
+          type: 'export-gif-error',
+          error: '没有可导出的 GIF'
+        });
+        return;
+      }
+
+      console.log(`✅ 找到 ${validTasks.length} 个可导出的 GIF 任务`);
+
+      // 3. 通知 UI 开始批量导出
+      figma.ui.postMessage({
+        type: 'export-batch-start',
+        total: validTasks.length
+      });
+
+      // 4. 依次处理每个任务
+      for (let i = 0; i < validTasks.length; i++) {
+        // 检查是否被取消
+        if (cancelGifExport) {
+          console.log('🛑 检测到取消信号，停止导出');
+          figma.ui.postMessage({
+            type: 'export-gif-cancelled'
+          });
+          return;
+        }
+        
+        const task = validTasks[i];
+        const { frame, gifLayers } = task;
+        
+        console.log(`\n🚀 处理第 ${i + 1}/${validTasks.length} 个任务`);
+        console.log(`   Frame: ${frame.name}`);
+        console.log(`   包含 ${gifLayers.length} 个 GIF 图层:`);
+        gifLayers.forEach((gif, idx) => {
+          console.log(`      ${idx + 1}. ${gif.layer.name} (${gif.filename})`);
+        });
+
+        // 计算图层相对于顶层 Frame 的绝对坐标
+        function getAbsolutePosition(node, targetFrame) {
+          let absX = 0;
+          let absY = 0;
+          let current = node;
+          
+          while (current && current !== targetFrame) {
+            absX += current.x;
+            absY += current.y;
+            current = current.parent;
+          }
+          
+          return { x: absX, y: absY };
+        }
+        
+        // 收集所有 GIF 图层的信息
+        const gifInfos = gifLayers.map((gif, idx) => {
+          const layer = gif.layer;
+          
+          // 计算绝对位置
+          const absolutePos = getAbsolutePosition(layer, frame);
+          const bounds = {
+            x: absolutePos.x,
+            y: absolutePos.y,
+            width: layer.width,
+            height: layer.height
+          };
+          
+          console.log(`   收集 GIF ${idx + 1} 信息:`);
+          console.log(`      图层名: ${layer.name}`);
+          console.log(`      文件名: ${gif.filename}`);
+          console.log(`      相对位置: (${layer.x}, ${layer.y})`);
+          console.log(`      绝对位置: (${bounds.x}, ${bounds.y})`);
+          console.log(`      尺寸: ${bounds.width}x${bounds.height}`);
+          
+          // 验证数据完整性
+          if (bounds.x === undefined || bounds.y === undefined) {
+            console.error(`      ⚠️ 警告：位置数据缺失！`);
+          }
+          if (!bounds.width || !bounds.height) {
+            console.error(`      ⚠️ 警告：尺寸数据无效！`);
+          }
+          
+          return {
+            filename: gif.filename,
+            cacheId: layer.getPluginData('gifCacheId'),
+            bounds: bounds
+          };
+        });
+        
+        // 临时隐藏所有 GIF 图层，导出纯标注层
+        const originalVisibility = gifLayers.map(gif => gif.layer.visible);
+        gifLayers.forEach(gif => { gif.layer.visible = false; });
+        
+        console.log('   ✅ 已隐藏所有 GIF 图层，开始导出纯标注层...');
+        
+        // 导出整个 Frame 为 PNG（透明背景，只有标注）
+        const annotationBytes = await frame.exportAsync({
+          format: 'PNG',
+          constraint: { type: 'SCALE', value: 1 }
+        });
+        
+        console.log(`   ✅ 标注层已导出 (${(annotationBytes.length / 1024).toFixed(2)} KB)`);
+        
+        // 恢复所有 GIF 图层的可见性
+        gifLayers.forEach((gif, idx) => {
+          gif.layer.visible = originalVisibility[idx];
+        });
+        
+        // 发送到服务器进行合成
+        const payload = {
+          type: 'compose-annotated-gif',
+          frameName: frame.name,
+          annotationBytes: Array.from(annotationBytes),
+          frameBounds: {
+            width: frame.width,
+            height: frame.height
+          },
+          gifInfos: gifInfos, // 所有 GIF 的信息
+          batchIndex: i,
+          batchTotal: validTasks.length
+        };
+        
+        console.log(`   ✅ Payload ready (${gifInfos.length} GIFs), sending to UI`);
+        figma.ui.postMessage(payload);
+      }
+      
+    } catch (error) {
+      console.error('❌ 导出失败:', error);
+      const errorMessage = error && error.message ? error.message : String(error || '未知错误');
+      figma.ui.postMessage({
+        type: 'export-gif-error',
+        error: '导出失败: ' + errorMessage
+      });
+    }
+    
     return;
   }
   
@@ -765,6 +1032,41 @@ figma.ui.onmessage = async (msg) => {
       }
       rect.name = rectName;
       console.log('      命名:', rectName);
+      
+      // 保存文件名到 pluginData，用于后续识别
+      if (msg.filename) {
+        rect.setPluginData('originalFilename', msg.filename);
+        
+        // 只有当文件名包含 ScreenRecording 或 .gif/.mov/.mp4 时才认为是 GIF 录屏
+        const filenameLower = msg.filename.toLowerCase();
+        const isGifOrVideo = filenameLower.endsWith('.gif') || 
+                             filenameLower.endsWith('.mov') || 
+                             filenameLower.endsWith('.mp4');
+        const filenameIndicatesRecording = msg.filename.includes('ScreenRecording');
+        
+        // 额外的判断：如果是 GIF 或视频，保存更详细的信息
+        if (isGifOrVideo || filenameIndicatesRecording) {
+          console.log('      🎥 检测到 GIF/视频文件，保存元数据...');
+          
+          // 保存文件ID，用于回溯源文件（如果存在）
+          if (msg.driveFileId) {
+            rect.setPluginData('driveFileId', msg.driveFileId);
+            console.log('      ✅ 已保存 driveFileId:', msg.driveFileId);
+          }
+          if (msg.ossFileId) {
+            rect.setPluginData('ossFileId', msg.ossFileId);
+            console.log('      ✅ 已保存 ossFileId:', msg.ossFileId);
+          }
+          
+          // 保存 gifCacheId (MD5 Hash)，用于在本地缓存查找
+          // 这个 ID 应该由 drive-watcher.js 在处理文件时生成并传递过来
+          if (msg.gifCacheId) {
+            rect.setPluginData('gifCacheId', msg.gifCacheId);
+            console.log('      ✅ 已保存 gifCacheId:', msg.gifCacheId);
+            console.log('      💡 导出时会自动从缓存读取原始 GIF（无需本地文件）');
+          }
+        }
+      }
       
       console.log('   4️⃣ 查找最佳位置...');
       

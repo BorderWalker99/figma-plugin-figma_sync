@@ -803,6 +803,12 @@ async function performManualSync() {
       const mimeType = file.mimeType || '';
       const name = file.name || '';
       
+      // 忽略 _exported 结尾的文件（这是服务器自己生成的导出 GIF）
+      if (name.toLowerCase().includes('_exported')) {
+        // console.log(`🙈 [手动同步] 忽略已导出的 GIF: ${name}`);
+        return false;
+      }
+      
       // 根据 MIME 类型判断（最可靠）
       const isImageByMime = mimeType.startsWith('image/');
       const isVideoByMime = mimeType.startsWith('video/');
@@ -831,8 +837,8 @@ async function performManualSync() {
         ws.send(JSON.stringify({
           type: 'manual-sync-complete',
           count: 0,
-          total: 0,
-          message: '文件夹中没有图片文件'
+          total: 0
+          // 不设置 message，表示同步成功但没有文件
         }));
       }
       return;
