@@ -75,7 +75,7 @@
         
         --accent: #007AFF;
         --accent-soft: rgba(0, 122, 255, 0.1);
-
+        
         --divider: rgba(255, 255, 255, 0.08);
         --border: rgba(255, 255, 255, 0.12);
         
@@ -801,7 +801,7 @@
       background: var(--accent);
       color: #FFFFFF;
     }
-
+    
     .btn-primary:hover {
       filter: brightness(1.1);
       box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
@@ -1136,7 +1136,7 @@
             transform: translateX(0);
         }
     }
-
+    
     /* Modal buttons - smaller height */
     .modal .btn {
       padding: 8px 12px;
@@ -1909,7 +1909,7 @@
                     <span class="input-prefix">每行</span>
                     <input type="number" id="frameColumnsInput" placeholder="一直横排">
           </div>
-          </div>
+            </div>
         </div>
 
                 <!-- GIF Backup Setting (Google Drive Only) -->
@@ -1941,8 +1941,8 @@
                 <!-- Global Save Button -->
                 <div style="margin-top: 20px; margin-bottom: 10px;">
                     <button id="globalSaveBtn" class="btn btn-primary" style="width: 100%;" disabled>保存设置</button>
-                </div>
-        </div>
+                      </div>
+                    </div>
 
         <!-- Tab Content: Mobile -->
         <div id="contentMobile" class="tab-content" style="display:none;">
@@ -1969,26 +1969,26 @@
                   </div>
                  <div id="noModeMessage" style="font-size: 12px; color: var(--text-secondary); line-height: 1.6; display: none;">
                     请在"电脑端"中选择储存方式
-              </div>
-            </div>
+                  </div>
+                </div>
 
                         <!-- User ID Display -->
                         <div id="userIdDisplaySection">
                           <div id="userIdTitle" style="font-weight: 600; margin-bottom: 8px; font-size: 13px;">02 您的 User ID</div>
                           <div id="userIdSubtitle" style="font-size: 12px; color: var(--text-secondary); margin-top: 6px;">
                             请在快捷指令的文本框中填入此 ID:
-              </div>
+                      </div>
                           <div style="background: var(--bg-app); padding: 8px 12px 8px 12px; border-radius: var(--radius-s); margin: 6px 0; display: flex; align-items: center; justify-content: space-between;">
                             <div style="font-family: 'SF Mono', monospace; font-size: 12px; overflow-x: auto; white-space: nowrap; margin-right: 8px; -webkit-overflow-scrolling: touch; scrollbar-width: none; color: var(--text-secondary); user-select: text;">
                               <span id="displayUserId">正在获取...</span>
-                </div>
+                    </div>
                             <button id="copyUserIdBtn" class="icon-btn" style="width: 24px; height: 24px; flex-shrink: 0;" title="复制 User ID">
                               <svg class="svg-icon" style="width: 14px; height: 14px;" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-                            </button>
+                    </button>
                   </div>
                 </div>
                   </div>
-        </div>
+                </div>
 
       </div>
     </div>
@@ -2031,9 +2031,15 @@
     let pendingPluginUpdateInfo = null; // 暂存的插件更新信息（等待版本信息到达后处理）
     
     // 从 localStorage 读取已安装的服务器版本（防止更新后 banner 再次弹出）
-    let installedServerVersion = localStorage.getItem('currentServerVersion') || null;
-    if (installedServerVersion) {
-      console.log(`📌 从 localStorage 读取已安装版本: v${installedServerVersion}`);
+    // 注意：Figma 插件环境可能不支持 localStorage，需要 try-catch 保护
+    let installedServerVersion = null;
+    try {
+      installedServerVersion = localStorage.getItem('currentServerVersion') || null;
+      if (installedServerVersion) {
+        console.log(`📌 从 localStorage 读取已安装版本: v${installedServerVersion}`);
+      }
+    } catch (error) {
+      console.log('⚠️ localStorage 不可用（可能在 data: URL 环境下）:', error.message);
     }
     
     // 配置：定期检查更新的间隔（毫秒）
@@ -2046,7 +2052,7 @@
     function log(msg) {
       // 只在开发模式下输出到控制台，减少 Datadog 数据量
       if (ENABLE_CONSOLE_LOG) {
-        console.log(msg);
+      console.log(msg);
       }
       const logEl = document.getElementById('log');
       const time = new Date().toLocaleTimeString();
@@ -2314,7 +2320,7 @@
           if (!skippedFilesSet.has(data.filename)) {
             skippedFilesSet.add(data.filename);
             manualDragCount++;
-            log(`⚠️  ${data.filename} 需手动导入（${reasonText}）`);
+          log(`⚠️  ${data.filename} 需手动导入（${reasonText}）`);
           }
           
           // 即使重复，也尝试发送确认消息以确保后台状态同步（可选，但为了保险起见）
@@ -2384,7 +2390,7 @@
             if (gifBackupCount > 0) {
               updateStatus('connected', '');
             } else {
-              updateStatus('connected', '同步完成');
+            updateStatus('connected', '同步完成');
             }
           } else {
             // 部分或全部失败
@@ -2620,7 +2626,7 @@
       statusEl.style.cursor = 'default';
       statusEl.onclick = null;
       statusEl.style.display = ''; // Reset display style (flex/block etc handled by class usually, but disconnected sets explicit flex)
-      
+
       // 1. Highest Priority: Disconnected
       // 特殊处理：disconnected 状态显示为可点击的"重新连接"按钮
       if (type === 'disconnected') {
@@ -3012,13 +3018,13 @@
         
         // Trigger QR updates when mobile tab is active
         if (tab === 'mobile') {
-            updateQRCodeDisplay();
-            if (ws && ws.readyState === 1) {
-                if (!currentSyncMode) {
-                    ws.send(JSON.stringify({ type: 'get-sync-mode' }));
-                }
-                ws.send(JSON.stringify({ type: 'get-user-id' }));
-            }
+      updateQRCodeDisplay();
+      if (ws && ws.readyState === 1) {
+        if (!currentSyncMode) {
+            ws.send(JSON.stringify({ type: 'get-sync-mode' }));
+        }
+        ws.send(JSON.stringify({ type: 'get-user-id' }));
+      }
         }
     }
 
@@ -3337,7 +3343,7 @@
         
         if (shouldShow) {
           // 如果已经有插件更新待处理，服务器更新优先
-          pendingUpdateType = 'server';
+            pendingUpdateType = 'server';
           pendingUpdateData = data;
           showUpdateBanner('server', data.currentVersion, data.latestVersion);
           console.log(`📢 发现新版本: v${data.currentVersion} → v${data.latestVersion}`);
@@ -3449,8 +3455,12 @@
         // 保存当前版本号到 localStorage，防止 banner 再次弹出
         if (data.latestVersion) {
           installedServerVersion = data.latestVersion.replace(/^v/, '');
-          localStorage.setItem('currentServerVersion', installedServerVersion);
-          console.log(`💾 已保存当前版本: ${installedServerVersion}`);
+          try {
+            localStorage.setItem('currentServerVersion', installedServerVersion);
+            console.log(`💾 已保存当前版本: ${installedServerVersion}`);
+          } catch (error) {
+            console.log('⚠️ 无法保存到 localStorage:', error.message);
+          }
         }
         
         // 隐藏更新通知条
@@ -3491,7 +3501,7 @@
     function handleServerUpdateProgress(data) {
       handleUpdateProgress(data);
     }
-    
+
     // SVG Icons for Toast
     function getToastIcon(type) {
       if (type === 'success') {
@@ -3818,7 +3828,7 @@
         updateBannerNowBtn.textContent = '更新中...';
         
         // 统一全量更新（插件 + 服务器所有代码）
-        if (ws && ws.readyState === 1) {
+          if (ws && ws.readyState === 1) {
           // 发送统一更新请求
           ws.send(JSON.stringify({ type: 'update-full' }));
           console.log('📤 发送全量更新请求（插件 + 服务器）');
@@ -3938,8 +3948,8 @@
                 ws.send(JSON.stringify(confirmMessage));
                 
                 if (!msg.driveFileId && !msg.ossFileId) {
-                    currentFileId = null;
-                    currentFileIdType = null;
+                currentFileId = null;
+                currentFileIdType = null;
                 }
               } catch (error) {
                 console.error('❌ 发送确认失败:', error);
@@ -3973,8 +3983,8 @@
                   
                   // Reset
                   if (!msg.driveFileId && !msg.ossFileId) {
-                      currentFileId = null;
-                      currentFileIdType = null;
+                  currentFileId = null;
+                  currentFileIdType = null;
                   }
                   currentFileBackedUp = false;
                 } catch (error) {
@@ -4007,8 +4017,8 @@
             ws.send(JSON.stringify(failMessage));
             
             if (!msg.driveFileId && !msg.ossFileId) {
-                currentFileId = null;
-                currentFileIdType = null;
+            currentFileId = null;
+            currentFileIdType = null;
             }
           } catch (error) {
             console.error('发送失败消息失败:', error);

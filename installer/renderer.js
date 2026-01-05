@@ -733,7 +733,7 @@ window.finishInstallation = async function() {
       button.textContent = originalText;
       showToast('服务器启动失败', 'error');
       console.error('服务器启动失败:', startResult.error);
-      return; // 提前返回，不配置自动启动
+      return; // 提前返回，不配置自启动
     }
     
     // 步骤 2：如果是 iCloud 模式，配置文件夹为"始终保留下载"
@@ -751,8 +751,8 @@ window.finishInstallation = async function() {
       }
     }
     
-    // 步骤 3：服务器启动成功后，配置自动启动
-    button.textContent = '正在配置自动启动';
+    // 步骤 3：服务器启动成功后，配置自启动
+    button.textContent = '正在配置自启动';
     const autostartResult = await ipcRenderer.invoke('setup-autostart', installPath);
     
     if (autostartResult.success) {
@@ -765,8 +765,8 @@ window.finishInstallation = async function() {
         ipcRenderer.invoke('quit-app');
       }, 1500);
     } else {
-      // 配置自动启动失败，但服务器已启动
-      console.warn('自动启动配置失败:', autostartResult.error);
+      // 配置自启动失败，但服务器已启动
+      console.warn('自启动配置失败:', autostartResult.error);
       button.textContent = '启动成功（自启失败）';
       showToast('服务器已启动', 'warning');
       
@@ -780,7 +780,7 @@ window.finishInstallation = async function() {
     button.disabled = false;
     button.textContent = originalText;
     showToast('配置失败', 'error');
-    console.error('配置自动启动失败:', err);
+    console.error('配置自启动失败:', err);
   }
 }
 
