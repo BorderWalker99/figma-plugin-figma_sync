@@ -28,9 +28,7 @@ const {
   getOrCreateUserConfig,
   updateDriveFolderId,
   getDriveFolderId,
-  getLocalDownloadFolder,
-  getBackupGif,
-  updateBackupGif
+  getLocalDownloadFolder
 } = require('./userConfig');
 
 /**
@@ -223,18 +221,8 @@ const CONFIG = {
   quality: Number(process.env.DRIVE_IMAGE_QUALITY || 85),
   processExisting: process.env.DRIVE_PROCESS_EXISTING === '1',
   autoDelete: process.env.DRIVE_AUTO_DELETE !== '0',
-  backupGif: getBackupGif()
+  backupGif: true // 默认始终保存 GIF 到本地
 };
-
-// 监听 GIF 备份设置更新
-const { getBackupGif: getBackupGifFromConfig } = require('./userConfig');
-setInterval(() => {
-  const currentBackupGif = getBackupGifFromConfig();
-  if (CONFIG.backupGif !== currentBackupGif) {
-    CONFIG.backupGif = currentBackupGif;
-    console.log(`🔄 [Config] GIF 备份设置已更新为: ${CONFIG.backupGif}`);
-  }
-}, 2000);
 
 // 更严格的验证：检查是否为空字符串或无效值
 if (!CONFIG.sharedDriveFolderId || CONFIG.sharedDriveFolderId.trim() === '' || CONFIG.sharedDriveFolderId === '.') {
@@ -1359,19 +1347,6 @@ function connectWebSocket() {
         return;
       }
 
-      if (message.type === 'update-gif-backup-setting') {
-        CONFIG.backupGif = !!message.enabled;
-        updateBackupGif(CONFIG.backupGif);
-        console.log(`📝 [Drive] GIF 自动备份已${CONFIG.backupGif ? '启用' : '禁用'}`);
-        
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({
-            type: 'gif-backup-setting-updated',
-            enabled: CONFIG.backupGif
-          }));
-        }
-        return;
-      }
 
       if (message.type === 'screenshot-failed') {
         // 文件导入失败，如果标记了 keepFile，则保留源文件

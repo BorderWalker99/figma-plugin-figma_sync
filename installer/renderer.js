@@ -234,13 +234,32 @@ async function checkIcloudSpace() {
   }
 }
 
-// Step 1: 系统检查（自动开始）
+// 存储依赖检查结果
+let dependencyStatus = {
+  homebrew: null,
+  node: null,
+  imagemagick: null,
+  ffmpeg: null
+};
+
+// Step 2: 统一的系统检查（自动开始）
 async function checkSystemRequirements() {
   const checks = document.getElementById('systemChecks');
+  const installAllSection = document.getElementById('installAllSection');
+  const step2Buttons = document.getElementById('step2Buttons');
+  
+  // 重置状态
+  dependencyStatus = {
+    homebrew: null,
+    node: null,
+    imagemagick: null,
+    ffmpeg: null
+  };
   
   // 检查 Homebrew
   const homebrewCheck = checks.children[0];
   const homebrewResult = await ipcRenderer.invoke('check-homebrew');
+  dependencyStatus.homebrew = homebrewResult.installed;
   
   if (homebrewResult.installed) {
     homebrewCheck.className = 'status-item success';
@@ -260,68 +279,12 @@ async function checkSystemRequirements() {
         <div class="status-detail">未安装</div>
       </div>
     `;
-    // 添加安装按钮
-    const installBtn = document.createElement('button');
-    installBtn.className = 'btn btn-secondary';
-    installBtn.textContent = '安装 Homebrew';
-    installBtn.style.marginLeft = '12px';
-    installBtn.onclick = async () => {
-      installBtn.disabled = true;
-      installBtn.textContent = '正在打开终端';
-      const result = await ipcRenderer.invoke('install-homebrew');
-      if (result.success) {
-        if (result.needsRestart) {
-          // 终端已打开，用户需要完成安装
-          showAlert(result.message || '终端已打开，请按照提示完成安装', '正在安装 Homebrew');
-          
-          // 更新按钮文本
-          installBtn.textContent = '重新检测';
-          installBtn.disabled = false;
-          installBtn.onclick = async () => {
-            // 重新检查 Homebrew
-            const checkResult = await ipcRenderer.invoke('check-homebrew');
-            if (checkResult.installed) {
-              homebrewCheck.className = 'status-item success';
-              homebrewCheck.innerHTML = `
-                <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
-                <div class="status-content">
-                  <div class="status-label">Homebrew</div>
-                  <div class="status-detail">已安装</div>
-                </div>
-              `;
-              showToast('Homebrew 安装成功', 'success');
-              checkSystemRequirements(); // 重新检查所有依赖
-            } else {
-              showToast('Homebrew 尚未安装', 'error');
-            }
-          };
-        } else {
-          homebrewCheck.className = 'status-item success';
-          homebrewCheck.innerHTML = `
-            <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
-            <div class="status-content">
-              <div class="status-label">Homebrew</div>
-              <div class="status-detail">已安装</div>
-            </div>
-          `;
-          checkSystemRequirements(); // 重新检查
-        }
-      } else {
-        showToast(result.error || '无法安装 Homebrew', 'error');
-        if (result.manualCommand) {
-          // 显示手动安装命令
-          showToast('请手动安装 Homebrew', 'error');
-        }
-        installBtn.disabled = false;
-        installBtn.textContent = '安装 Homebrew';
-      }
-    };
-    homebrewCheck.appendChild(installBtn);
   }
   
   // 检查 Node.js
   const nodeCheck = checks.children[1];
   const nodeResult = await ipcRenderer.invoke('check-node');
+  dependencyStatus.node = nodeResult.installed;
   
   if (nodeResult.installed) {
     nodeCheck.className = 'status-item success';
@@ -341,64 +304,12 @@ async function checkSystemRequirements() {
         <div class="status-detail">未安装</div>
       </div>
     `;
-    // 添加安装按钮
-    const installBtn = document.createElement('button');
-    installBtn.className = 'btn btn-secondary';
-    installBtn.textContent = '安装 Node.js';
-    installBtn.style.marginLeft = '12px';
-    installBtn.onclick = async () => {
-      installBtn.disabled = true;
-      installBtn.textContent = '正在打开终端';
-      const result = await ipcRenderer.invoke('install-node');
-      if (result.success) {
-        if (result.needsRestart) {
-          // 终端已打开，用户需要等待安装完成
-          showAlert(result.message || '终端已打开，请等待 Node.js 安装完成', '正在安装 Node.js');
-          
-          // 更新按钮文本
-          installBtn.textContent = '重新检测';
-          installBtn.disabled = false;
-          installBtn.onclick = async () => {
-            // 重新检查 Node.js
-            const checkResult = await ipcRenderer.invoke('check-node');
-            if (checkResult.installed) {
-              nodeCheck.className = 'status-item success';
-              nodeCheck.innerHTML = `
-                <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
-                <div class="status-content">
-                  <div class="status-label">Node.js</div>
-                  <div class="status-detail">已安装 ${checkResult.version || ''}</div>
-                </div>
-              `;
-              showToast('Node.js 安装成功', 'success');
-              checkSystemRequirements(); // 重新检查所有依赖
-            } else {
-              showToast('Node.js 尚未安装', 'error');
-            }
-          };
-        } else {
-          nodeCheck.className = 'status-item success';
-          nodeCheck.innerHTML = `
-            <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
-            <div class="status-content">
-              <div class="status-label">Node.js</div>
-              <div class="status-detail">已安装</div>
-            </div>
-          `;
-          checkSystemRequirements(); // 重新检查
-        }
-      } else {
-        showToast(result.error || '无法安装 Node.js', 'error');
-        installBtn.disabled = false;
-        installBtn.textContent = '安装 Node.js';
-      }
-    };
-    nodeCheck.appendChild(installBtn);
   }
   
   // 检查 ImageMagick
   const imageMagickCheck = checks.children[2];
   const imageMagickResult = await ipcRenderer.invoke('check-imagemagick');
+  dependencyStatus.imagemagick = imageMagickResult.installed;
   
   if (imageMagickResult.installed) {
     imageMagickCheck.className = 'status-item success';
@@ -418,61 +329,12 @@ async function checkSystemRequirements() {
         <div class="status-detail">未安装</div>
       </div>
     `;
-    // 添加安装按钮
-    const installBtn = document.createElement('button');
-    installBtn.className = 'btn btn-secondary';
-    installBtn.textContent = '安装 ImageMagick';
-    installBtn.style.marginLeft = '12px';
-    installBtn.onclick = async () => {
-      installBtn.disabled = true;
-      installBtn.textContent = '正在打开终端';
-      const result = await ipcRenderer.invoke('install-imagemagick');
-      if (result.success) {
-        if (result.needsRestart) {
-          showAlert(result.message || '终端已打开，请等待 ImageMagick 安装完成', '正在安装 ImageMagick');
-          
-          installBtn.textContent = '重新检测';
-          installBtn.disabled = false;
-          installBtn.onclick = async () => {
-            const checkResult = await ipcRenderer.invoke('check-imagemagick');
-            if (checkResult.installed) {
-              imageMagickCheck.className = 'status-item success';
-              imageMagickCheck.innerHTML = `
-                <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
-                <div class="status-content">
-                  <div class="status-label">ImageMagick</div>
-                  <div class="status-detail">已安装 ${checkResult.version || ''}</div>
-                </div>
-              `;
-              showToast('ImageMagick 安装成功', 'success');
-              checkSystemRequirements(); // 重新检查所有依赖
-            } else {
-              showToast('ImageMagick 尚未安装', 'error');
-            }
-          };
-        } else {
-          imageMagickCheck.className = 'status-item success';
-          imageMagickCheck.innerHTML = `
-            <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
-            <div class="status-content">
-              <div class="status-label">ImageMagick</div>
-              <div class="status-detail">已安装</div>
-            </div>
-          `;
-          checkSystemRequirements(); // 重新检查
-        }
-      } else {
-        showToast(result.error || '无法安装 ImageMagick', 'error');
-        installBtn.disabled = false;
-        installBtn.textContent = '安装 ImageMagick';
-      }
-    };
-    imageMagickCheck.appendChild(installBtn);
   }
   
   // 检查 FFmpeg
   const ffmpegCheck = checks.children[3];
   const ffmpegResult = await ipcRenderer.invoke('check-ffmpeg');
+  dependencyStatus.ffmpeg = ffmpegResult.installed;
   
   if (ffmpegResult.installed) {
     ffmpegCheck.className = 'status-item success';
@@ -492,68 +354,76 @@ async function checkSystemRequirements() {
         <div class="status-detail">未安装</div>
       </div>
     `;
-    // 添加安装按钮
-    const installBtn = document.createElement('button');
-    installBtn.className = 'btn btn-secondary';
-    installBtn.textContent = '安装 FFmpeg';
-    installBtn.style.marginLeft = '12px';
-    installBtn.onclick = async () => {
-      installBtn.disabled = true;
-      installBtn.textContent = '正在打开终端';
-      const result = await ipcRenderer.invoke('install-ffmpeg');
-      if (result.success) {
-        if (result.needsRestart) {
-          showAlert(result.message || '终端已打开，请等待 FFmpeg 安装完成', '正在安装 FFmpeg');
-          
-          installBtn.textContent = '重新检测';
-          installBtn.disabled = false;
-          installBtn.onclick = async () => {
-            const checkResult = await ipcRenderer.invoke('check-ffmpeg');
-            if (checkResult.installed) {
-              ffmpegCheck.className = 'status-item success';
-              ffmpegCheck.innerHTML = `
-                <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
-                <div class="status-content">
-                  <div class="status-label">FFmpeg</div>
-                  <div class="status-detail">已安装 ${checkResult.version || ''}</div>
-                </div>
-              `;
-              showToast('FFmpeg 安装成功', 'success');
-              checkSystemRequirements(); // 重新检查所有依赖
-            } else {
-              showToast('FFmpeg 尚未安装', 'error');
-            }
-          };
-        } else {
-          ffmpegCheck.className = 'status-item success';
-          ffmpegCheck.innerHTML = `
-            <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
-            <div class="status-content">
-              <div class="status-label">FFmpeg</div>
-              <div class="status-detail">已安装</div>
-            </div>
-          `;
-          checkSystemRequirements(); // 重新检查
-        }
-      } else {
-        showToast(result.error || '无法安装 FFmpeg', 'error');
-        installBtn.disabled = false;
-        installBtn.textContent = '安装 FFmpeg';
-      }
-    };
-    ffmpegCheck.appendChild(installBtn);
   }
   
-  // 显示下一步按钮
-  document.getElementById('step2Buttons').style.display = 'flex';
-
-  // 如果有任何一个环境检查未通过，禁用下一步按钮
+  // 判断是否所有依赖都已安装
   const allInstalled = homebrewResult.installed && nodeResult.installed && imageMagickResult.installed && ffmpegResult.installed;
-  const step2NextBtn = document.getElementById('step2Next');
-  if (step2NextBtn) {
-    step2NextBtn.disabled = !allInstalled;
+  
+  if (allInstalled) {
+    // 所有依赖已安装，显示下一步按钮
+    installAllSection.style.display = 'none';
+    step2Buttons.style.display = 'flex';
+    document.getElementById('step2Next').disabled = false;
+  } else {
+    // 有依赖未安装，显示一键安装按钮
+    installAllSection.style.display = 'block';
+    step2Buttons.style.display = 'flex';
+    document.getElementById('step2Next').disabled = true;
   }
 }
+
+// 一键安装所有缺失的依赖
+window.installAllDependencies = async function() {
+  const installAllBtn = document.getElementById('installAllBtn');
+  const recheckBtn = document.getElementById('recheckBtn');
+  
+  // 禁用按钮
+  installAllBtn.disabled = true;
+  recheckBtn.disabled = true;
+  installAllBtn.innerHTML = '<svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>打开终端中...';
+  
+  try {
+    // 调用一键安装
+    const result = await ipcRenderer.invoke('install-all-dependencies', dependencyStatus);
+    
+    if (result.success) {
+      showAlert('终端已打开，请按提示完成所有依赖的安装（只需输入一次密码）', '正在安装依赖');
+      
+      // 更新按钮状态
+      installAllBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>重新检测';
+      installAllBtn.disabled = false;
+      recheckBtn.disabled = false;
+      installAllBtn.onclick = recheckDependencies;
+    } else {
+      showToast(result.error || '无法打开终端', 'error');
+      installAllBtn.disabled = false;
+      recheckBtn.disabled = false;
+      installAllBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>一键安装所有依赖';
+    }
+  } catch (error) {
+    showToast('安装失败: ' + error.message, 'error');
+    installAllBtn.disabled = false;
+    recheckBtn.disabled = false;
+    installAllBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>一键安装所有依赖';
+  }
+};
+
+// 重新检测所有依赖
+window.recheckDependencies = async function() {
+  const installAllBtn = document.getElementById('installAllBtn');
+  const recheckBtn = document.getElementById('recheckBtn');
+  
+  recheckBtn.disabled = true;
+  installAllBtn.disabled = true;
+  recheckBtn.innerHTML = '<svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>检测中...';
+  
+  await checkSystemRequirements();
+  
+  recheckBtn.disabled = false;
+  installAllBtn.disabled = false;
+  recheckBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>重新检测';
+  installAllBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>一键安装所有依赖';
+};
 
 // Step 2: 安装依赖
 async function installDependencies() {

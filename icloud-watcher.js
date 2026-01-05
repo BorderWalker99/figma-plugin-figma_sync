@@ -14,8 +14,6 @@ const { exec } = require('child_process');
 const os = require('os');
 
 // ============= 配置 =============
-const { getKeepGifInIcloud, updateKeepGifInIcloud } = require('./userConfig');
-
 const CONFIG = {
   icloudPath: path.join(
     process.env.HOME,
@@ -26,7 +24,7 @@ const CONFIG = {
   maxWidth: 1920,
   quality: 85,
   supportedFormats: ['.png', '.jpg', '.jpeg', '.heic', '.webp', '.gif', '.mp4', '.mov'],
-  keepGifInIcloud: getKeepGifInIcloud()
+  keepGifInIcloud: true // 默认始终保留 GIF 在 iCloud 文件夹
 };
 
 let ws = null;
@@ -201,20 +199,6 @@ function connectWebSocket() {
         return;
       }
       
-      // 处理 iCloud GIF 保留设置更新
-      if (message.type === 'update-keep-gif-in-icloud-setting') {
-        CONFIG.keepGifInIcloud = !!message.enabled;
-        updateKeepGifInIcloud(CONFIG.keepGifInIcloud);
-        console.log(`📝 [iCloud] GIF 保留设置已${CONFIG.keepGifInIcloud ? '启用' : '禁用'}`);
-        
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({
-            type: 'keep-gif-in-icloud-setting-updated',
-            enabled: CONFIG.keepGifInIcloud
-          }));
-        }
-        return;
-      }
     } catch (error) {
       console.error('消息解析错误:', error);
     }

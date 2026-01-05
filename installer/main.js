@@ -586,6 +586,77 @@ ipcMain.handle('install-ffmpeg', async () => {
   });
 });
 
+// 一键安装所有缺失的依赖
+ipcMain.handle('install-all-dependencies', async (event, dependencyStatus) => {
+  return new Promise(async (resolve) => {
+    console.log('📦 一键安装所有依赖，当前状态:', dependencyStatus);
+    
+    const commandsToRun = [];
+    
+    // 根据状态构建安装命令
+    if (!dependencyStatus.homebrew) {
+      // Homebrew 需要特殊处理，使用官方安装脚本
+      commandsToRun.push('/bin/bash -c \\"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\\"');
+    }
+    
+    // 构建 brew install 命令（将所有缺失的包合并到一条命令）
+    const brewPackages = [];
+    if (!dependencyStatus.node) {
+      brewPackages.push('node');
+    }
+    if (!dependencyStatus.imagemagick) {
+      brewPackages.push('imagemagick');
+    }
+    if (!dependencyStatus.ffmpeg) {
+      brewPackages.push('ffmpeg');
+    }
+    
+    if (brewPackages.length > 0) {
+      // 如果 Homebrew 需要安装，添加 && 连接符
+      if (commandsToRun.length > 0) {
+        commandsToRun.push('&&');
+      }
+      commandsToRun.push(`brew install ${brewPackages.join(' ')}`);
+    }
+    
+    if (commandsToRun.length === 0) {
+      resolve({ 
+        success: false, 
+        error: '所有依赖已安装，无需重复安装'
+      });
+      return;
+    }
+    
+    // 合并所有命令为一条终端指令
+    const finalCommand = commandsToRun.join(' ');
+    
+    const appleScript = `
+      tell application "Terminal"
+        activate
+        do script "${finalCommand}"
+      end tell
+    `;
+    
+    console.log('Opening Terminal with unified install command:', finalCommand);
+    
+    try {
+      await runAppleScript(appleScript);
+      console.log('Terminal opened successfully for unified installation');
+      resolve({ 
+        success: true, 
+        message: '终端已打开，正在安装所有缺失依赖。只需输入一次密码即可。安装完成后请点击"重新检测"按钮。',
+        needsRestart: true
+      });
+    } catch (error) {
+      console.error('Failed to run AppleScript:', error);
+      resolve({ 
+        success: false, 
+        error: `无法打开终端: ${error.message}\n\n请手动在终端中运行:\n${finalCommand.replace(/\\"/g, '"')}`
+      });
+    }
+  });
+});
+
 ipcMain.handle('install-dependencies', async (event, installPath) => {
   return new Promise((resolve) => {
     console.log('📦 开始安装依赖...');

@@ -3451,76 +3451,9 @@ wss.on('connection', (ws, req) => {
     
     // 确认消息
     if (data.type === 'screenshot-received' || 
-        data.type === 'screenshot-failed' ||
-        data.type === 'update-gif-backup-setting') {
+        data.type === 'screenshot-failed') {
       if (targetGroup.mac && targetGroup.mac.readyState === WebSocket.OPEN) {
         targetGroup.mac.send(JSON.stringify(data));
-      } else if (data.type === 'update-gif-backup-setting') {
-        // 如果 Mac 端未连接，Server 直接更新配置
-        try {
-          const userConfig = require('./userConfig');
-          userConfig.updateBackupGif(data.enabled);
-          console.log(`📝 [Server] 更新 GIF 备份设置: ${data.enabled} (Mac端未连接)`);
-          // 通知 Figma 更新成功
-          if (targetGroup.figma && targetGroup.figma.readyState === WebSocket.OPEN) {
-            targetGroup.figma.send(JSON.stringify({
-              type: 'gif-backup-setting-updated',
-              enabled: data.enabled
-            }));
-          }
-        } catch (e) {
-          console.error('❌ 更新配置失败:', e.message);
-        }
-      }
-      return;
-    }
-    
-    // 获取 GIF 备份设置
-    if (data.type === 'get-gif-backup-setting') {
-      const userConfig = require('./userConfig');
-      const enabled = userConfig.getBackupGif();
-      if (targetGroup.figma && targetGroup.figma.readyState === WebSocket.OPEN) {
-        targetGroup.figma.send(JSON.stringify({
-          type: 'gif-backup-setting-info',
-          enabled: enabled
-        }));
-      }
-      return;
-    }
-    
-    // 更新 iCloud GIF 保留设置
-    if (data.type === 'update-keep-gif-in-icloud-setting') {
-      if (targetGroup.mac && targetGroup.mac.readyState === WebSocket.OPEN) {
-        targetGroup.mac.send(JSON.stringify(data));
-      } else {
-        // 如果 Mac 端未连接，Server 直接更新配置
-        try {
-          const userConfig = require('./userConfig');
-          userConfig.updateKeepGifInIcloud(data.enabled);
-          console.log(`📝 [Server] 更新 iCloud GIF 保留设置: ${data.enabled} (Mac端未连接)`);
-          // 通知 Figma 更新成功
-          if (targetGroup.figma && targetGroup.figma.readyState === WebSocket.OPEN) {
-            targetGroup.figma.send(JSON.stringify({
-              type: 'keep-gif-in-icloud-setting-updated',
-              enabled: data.enabled
-            }));
-          }
-        } catch (e) {
-          console.error('❌ 更新配置失败:', e.message);
-        }
-      }
-      return;
-    }
-    
-    // 获取 iCloud GIF 保留设置
-    if (data.type === 'get-keep-gif-in-icloud-setting') {
-      const userConfig = require('./userConfig');
-      const enabled = userConfig.getKeepGifInIcloud();
-      if (targetGroup.figma && targetGroup.figma.readyState === WebSocket.OPEN) {
-        targetGroup.figma.send(JSON.stringify({
-          type: 'keep-gif-in-icloud-setting-info',
-          enabled: enabled
-        }));
       }
       return;
     }

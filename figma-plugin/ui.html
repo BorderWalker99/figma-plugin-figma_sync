@@ -1844,8 +1844,8 @@
         
         <!-- Tab Content: Desktop -->
         <div id="contentDesktop" class="tab-content active">
-        <!-- Cloud Provider Selection -->
-        <div class="settings-section">
+        <!-- Cloud Provider Selection (开发者模式下显示) -->
+        <div id="modeSwitchSection" class="settings-section" style="display: none;">
             <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
                 <div class="feature-card mode-card" id="switchToDrive" style="padding: 12px; flex-direction: column; height: 100%;">
                     <div class="checkmark">
@@ -1912,37 +1912,11 @@
             </div>
         </div>
 
-                <!-- GIF Backup Setting (Google Drive Only) -->
-                <div id="gifBackupSection" class="settings-section" style="display:none;">
-                  <div style="display: flex; justify-content: space-between; align-items: center;">
-                      <div>
-                          <div style="font-size:13px; font-weight: 600;">GIF 保存到本地</div>
-                      </div>
-                      <label class="switch">
-                          <input type="checkbox" id="gifBackupToggle">
-                          <span class="slider"></span>
-                      </label>
-                  </div>
-              </div>
-
-                <!-- Keep GIF in iCloud Setting (iCloud Only) -->
-                <div id="keepGifInIcloudSection" class="settings-section" style="display:none;">
-                  <div style="display: flex; justify-content: space-between; align-items: center;">
-                      <div>
-                          <div style="font-size:13px; font-weight: 600;">GIF 保留在文件夹</div>
-                      </div>
-                      <label class="switch">
-                          <input type="checkbox" id="keepGifInIcloudToggle">
-                          <span class="slider"></span>
-                      </label>
-                  </div>
-              </div>
-
                 <!-- Global Save Button -->
                 <div style="margin-top: 20px; margin-bottom: 10px;">
                     <button id="globalSaveBtn" class="btn btn-primary" style="width: 100%;" disabled>保存设置</button>
-                      </div>
-                    </div>
+                  </div>
+              </div>
 
         <!-- Tab Content: Mobile -->
         <div id="contentMobile" class="tab-content" style="display:none;">
@@ -1953,7 +1927,7 @@
                     <div style="display: flex; flex-direction: column; align-items: center; gap: 6px;" id="qrGoogleScreenshotContainer">
                       <img id="qrGoogleScreenshot" style="width: 80px; height: 80px;">
                       <div style="font-size: 12px; color: var(--text-secondary); text-align: center;">直接截图</div>
-                </div>
+                      </div>
                     <div style="display: flex; flex-direction: column; align-items: center; gap: 6px;" id="qrGoogleAlbumContainer">
                       <img id="qrGoogleAlbum" style="width: 80px; height: 80px;">
                       <div style="font-size: 12px; color: var(--text-secondary); text-align: center;">相册选择</div>
@@ -1961,12 +1935,12 @@
                     <div style="display: flex; flex-direction: column; align-items: center; gap: 6px;" id="qrIcloudScreenshotContainer">
                       <img id="qrIcloudScreenshot" style="width: 80px; height: 80px;">
                       <div style="font-size: 12px; color: var(--text-secondary); text-align: center;">直接截图</div>
-                  </div>
+              </div>
                     <div style="display: flex; flex-direction: column; align-items: center; gap: 6px;" id="qrIcloudAlbumContainer">
                       <img id="qrIcloudAlbum" style="width: 80px; height: 80px;">
                       <div style="font-size: 12px; color: var(--text-secondary); text-align: center;">相册选择</div>
-                  </div>
-                  </div>
+                      </div>
+                    </div>
                  <div id="noModeMessage" style="font-size: 12px; color: var(--text-secondary); line-height: 1.6; display: none;">
                     请在"电脑端"中选择储存方式
                   </div>
@@ -2007,6 +1981,11 @@
     // ========================================
     const ENABLE_GOOGLE_DRIVE = true;
     const ENABLE_ALIYUN = false;
+    
+    // ========================================
+    // 开发者模式（控制模式切换区域显示）
+    // ========================================
+    const DEVELOPER_MODE = false; // 设置为 true 显示模式切换，false 隐藏
     
     const SERVER_URL = 'ws://localhost:8888';
     const connectionId = 'sync-session-1';
@@ -2497,18 +2476,6 @@
         } else if (data.type === 'user-id-info') {
             const el = document.getElementById('displayUserId');
             if (el) el.textContent = data.userId || '未知';
-        } else if (data.type === 'gif-backup-setting-info' || data.type === 'gif-backup-setting-updated') {
-          if (gifBackupToggle) {
-            gifBackupToggle.checked = !!data.enabled;
-            // 同时更新 originalSettings 以保持状态一致
-            originalSettings.backupGif = !!data.enabled;
-          }
-        } else if (data.type === 'keep-gif-in-icloud-setting-info' || data.type === 'keep-gif-in-icloud-setting-updated') {
-          if (keepGifInIcloudToggle) {
-            keepGifInIcloudToggle.checked = !!data.enabled;
-            // 同时更新 originalSettings 以保持状态一致
-            originalSettings.keepGifInIcloud = !!data.enabled;
-          }
         } else if (data.type === 'plugin-update-info') {
           // 处理插件更新信息
           handlePluginUpdateInfo(data);
@@ -3104,11 +3071,6 @@
     const minimizeIcon = document.getElementById('minimizeIcon');
     const appRoot = document.querySelector('.app');
     
-    const gifBackupSection = document.getElementById('gifBackupSection');
-    const gifBackupToggle = document.getElementById('gifBackupToggle');
-    const keepGifInIcloudSection = document.getElementById('keepGifInIcloudSection');
-    const keepGifInIcloudToggle = document.getElementById('keepGifInIcloudToggle');
-
     // Save button (consolidated)
     const saveSettingsBtn = document.getElementById('globalSaveBtn');
     
@@ -3116,9 +3078,7 @@
     let originalSettings = {
       imageWidth: '',
       imageHeight: '',
-      frameColumns: '',
-      backupGif: false,
-      keepGifInIcloud: false
+      frameColumns: ''
     };
     
     // Track current values
@@ -3137,23 +3097,7 @@
       const heightChanged = imageHeightInput ? (imageHeightInput.value != originalSettings.imageHeight) : false;
       const columnsChanged = frameColumnsInput ? (frameColumnsInput.value != originalSettings.frameColumns) : false;
       
-      let gifBackupChanged = false;
-      const gifBackupToggle = document.getElementById('gifBackupToggle');
-      // 检测 GIF 备份开关变更（只要元素存在且可见就检测，不依赖 currentSyncMode）
-      if (gifBackupToggle && gifBackupToggle.offsetParent !== null) {
-        gifBackupChanged = (gifBackupToggle.checked !== originalSettings.backupGif);
-        currentSettings.backupGif = gifBackupToggle.checked;
-      }
-      
-      let keepGifChanged = false;
-      const keepGifInIcloudToggle = document.getElementById('keepGifInIcloudToggle');
-      // 检测 iCloud GIF 保留开关变更（只要元素存在且可见就检测，不依赖 currentSyncMode）
-      if (keepGifInIcloudToggle && keepGifInIcloudToggle.offsetParent !== null) {
-        keepGifChanged = (keepGifInIcloudToggle.checked !== originalSettings.keepGifInIcloud);
-        currentSettings.keepGifInIcloud = keepGifInIcloudToggle.checked;
-      }
-      
-      const hasChanges = widthChanged || heightChanged || columnsChanged || gifBackupChanged || keepGifChanged;
+      const hasChanges = widthChanged || heightChanged || columnsChanged;
       
       if (saveSettingsBtn) {
         if (hasChanges) {
@@ -3175,18 +3119,6 @@
     if (imageWidthInput) imageWidthInput.addEventListener('input', checkSettingsChanges);
     if (imageHeightInput) imageHeightInput.addEventListener('input', checkSettingsChanges);
     if (frameColumnsInput) frameColumnsInput.addEventListener('input', checkSettingsChanges);
-    
-    if (gifBackupToggle) {
-      gifBackupToggle.onchange = function() {
-        checkSettingsChanges();
-      };
-    }
-    
-    if (keepGifInIcloudToggle) {
-      keepGifInIcloudToggle.onchange = function() {
-        checkSettingsChanges();
-      };
-    }
     
     function loadSizeSettings() {
       parent.postMessage({ pluginMessage: { type: 'get-size-settings' } }, '*');
@@ -3234,40 +3166,10 @@
         }
       }, '*');
       
-      // 3. Save GIF Backup Setting (if visible and changed)
-      if (gifBackupToggle && gifBackupToggle.offsetParent !== null) {
-        if (gifBackupToggle.checked !== originalSettings.backupGif) {
-          if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({
-              type: 'update-gif-backup-setting',
-              enabled: gifBackupToggle.checked
-            }));
-          } else {
-            console.warn('⚠️ WebSocket 未连接，无法保存 GIF 备份设置');
-          }
-        }
-      }
-      
-      // 4. Save Keep GIF in iCloud Setting (if visible and changed)
-      if (keepGifInIcloudToggle && keepGifInIcloudToggle.offsetParent !== null) {
-        if (keepGifInIcloudToggle.checked !== originalSettings.keepGifInIcloud) {
-          if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({
-              type: 'update-keep-gif-in-icloud-setting',
-              enabled: keepGifInIcloudToggle.checked
-            }));
-          } else {
-            console.warn('⚠️ WebSocket 未连接，无法保存 iCloud GIF 保留设置');
-          }
-        }
-      }
-      
       // Update original settings to match current state (reset change detection)
       originalSettings.imageWidth = width;
       originalSettings.imageHeight = height;
       originalSettings.frameColumns = columns;
-      if (gifBackupToggle) originalSettings.backupGif = gifBackupToggle.checked;
-      if (keepGifInIcloudToggle) originalSettings.keepGifInIcloud = keepGifInIcloudToggle.checked;
       
       checkSettingsChanges();
       
@@ -3676,32 +3578,6 @@
           icloudBtn.style.background = (currentSyncMode === 'icloud') ? 'var(--bg-card-hover)' : 'var(--bg-card)';
           if (currentSyncMode === 'icloud') icloudBtn.classList.add('selected');
           else icloudBtn.classList.remove('selected');
-      }
-      
-      // Show/Hide GIF Backup Section (Google Drive Only)
-      if (gifBackupSection) {
-        if (currentSyncMode === 'drive' && typeof ENABLE_GOOGLE_DRIVE !== 'undefined' && ENABLE_GOOGLE_DRIVE) {
-          gifBackupSection.style.display = 'block';
-          // Request setting state when showing
-          if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: 'get-gif-backup-setting' }));
-          }
-        } else {
-          gifBackupSection.style.display = 'none';
-        }
-      }
-      
-      // Show/Hide Keep GIF in iCloud Section (iCloud Only)
-      if (keepGifInIcloudSection) {
-        if (currentSyncMode === 'icloud') {
-          keepGifInIcloudSection.style.display = 'block';
-          // Request setting state when showing
-          if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: 'get-keep-gif-in-icloud-setting' }));
-          }
-        } else {
-          keepGifInIcloudSection.style.display = 'none';
-        }
       }
     }
 
@@ -4155,6 +4031,15 @@
 
     // Initialize after DOM is ready
     document.addEventListener('DOMContentLoaded', function() {
+        // 开发者模式：显示模式切换区域
+        if (DEVELOPER_MODE) {
+          const modeSwitchSection = document.getElementById('modeSwitchSection');
+          if (modeSwitchSection) {
+            modeSwitchSection.style.display = '';
+            console.log('🔧 开发者模式已启用，模式切换区域已显示');
+          }
+        }
+        
         exportGifBtn = document.getElementById("exportGifBtn");
         progressRing = exportGifBtn ? exportGifBtn.querySelector(".progress-ring") : null;
         progressCircle = exportGifBtn ? exportGifBtn.querySelector(".progress-ring__circle") : null;

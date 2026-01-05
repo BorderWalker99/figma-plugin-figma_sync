@@ -235,43 +235,6 @@ function updateLocalDownloadFolder(folderPath) {
   return config;
 }
 
-/**
- * 更新 GIF 自动备份设置
- */
-function updateBackupGif(enabled) {
-  const config = getOrCreateUserConfig();
-  config.backupGif = !!enabled;
-  config.updatedAt = new Date().toISOString();
-  writeUserConfig(config);
-  return config;
-}
-
-/**
- * 获取 GIF 自动备份设置
- */
-function getBackupGif() {
-  const config = getOrCreateUserConfig();
-  return config.backupGif === true;
-}
-
-/**
- * 更新 iCloud GIF 保留设置
- */
-function updateKeepGifInIcloud(enabled) {
-  const config = getOrCreateUserConfig();
-  config.keepGifInIcloud = !!enabled;
-  config.updatedAt = new Date().toISOString();
-  writeUserConfig(config);
-  return config;
-}
-
-/**
- * 获取 iCloud GIF 保留设置
- */
-function getKeepGifInIcloud() {
-  const config = getOrCreateUserConfig();
-  return config.keepGifInIcloud === true;
-}
 
 // ============================================
 // GIF 缓存管理（用于导出带标注的 GIF 功能）
@@ -547,10 +510,6 @@ module.exports = {
   writeUserConfig,
   getLocalDownloadFolder,
   updateLocalDownloadFolder,
-  updateBackupGif,
-  getBackupGif,
-  updateKeepGifInIcloud,
-  getKeepGifInIcloud,
   // GIF 缓存管理
   getGifCachePath,
   saveGifToCache,
