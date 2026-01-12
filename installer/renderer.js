@@ -21,9 +21,9 @@ window.closeAlert = function() {
   }
 };
 
-let currentStep = 1;
+let currentStep = 2; // 直接从 Step 2 开始（环境检查）
 let installPath = '';
-let selectedMode = '';
+let selectedMode = 'drive'; // 默认 Google 模式
 let userId = '';
 
 // 步骤管理
@@ -56,14 +56,7 @@ function showStep(step) {
 // 暴露到全局，供 HTML onclick 调用
 window.nextStep = function() {
   console.log('nextStep called, currentStep:', currentStep, 'selectedMode:', selectedMode);
-  // 如果是 Step 1 且选择了 iCloud 模式，检查空间
-  if (currentStep === 1 && selectedMode === 'icloud') {
-    if (icloudSpaceAvailable === false) {
-      // 空间不足，弹出错误 toast
-      showToast('iCloud 空间不足', 'error');
-      return; // 阻止进入下一步
-    }
-  }
+  // iCloud 模式检查已移除，因为默认使用 Google 模式
   
   if (currentStep < 5) {
     showStep(currentStep + 1);

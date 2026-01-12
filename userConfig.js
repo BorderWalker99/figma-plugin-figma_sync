@@ -67,7 +67,8 @@ function getOrCreateUserConfig() {
       driveFolderId: null, // Google Drive 文件夹 ID
       ossFolderId: null, // 阿里云 OSS 文件夹路径
       localDownloadFolder: null, // 本地下载文件夹路径，null 表示使用默认值
-      backupGif: false, // 是否自动备份 GIF 文件到本地（Google Drive 模式）
+      backupScreenshots: false, // 是否自动备份普通截图到本地（转换为JPEG）
+      backupGif: true, // 是否自动备份 GIF 文件到本地（Google Drive 模式）- 默认开启
       keepGifInIcloud: false, // 是否保留 GIF 文件在 iCloud 文件夹中（iCloud 模式）
       createdAt: new Date().toISOString()
     };
@@ -106,6 +107,18 @@ function getOrCreateUserConfig() {
     // 确保旧配置也有 keepGifInIcloud 字段
     if (config.keepGifInIcloud === undefined) {
       config.keepGifInIcloud = false;
+      writeUserConfig(config);
+    }
+    
+    // 确保旧配置也有 backupScreenshots 字段
+    if (config.backupScreenshots === undefined) {
+      config.backupScreenshots = false;
+      writeUserConfig(config);
+    }
+    
+    // 确保旧配置也有 backupGif 字段，默认开启
+    if (config.backupGif === undefined) {
+      config.backupGif = true;
       writeUserConfig(config);
     }
   }
@@ -183,6 +196,17 @@ function getOssFolderId() {
  * 如果用户未设置，返回默认路径
  */
 function getLocalDownloadFolder() {
+  const absolutePath = path.resolve(__dirname);
+  const isProduction = !absolutePath.includes('SourceCode');
+
+  // 开发环境：强制使用 source code 文件夹内的 ScreenSyncImg，忽略可能存在的旧配置
+  if (!isProduction) {
+    const devPath = path.join(__dirname, 'ScreenSyncImg');
+    console.log(`🔧 [开发环境] 使用固定路径: ${devPath}`);
+    return devPath;
+  }
+
+  // 生产环境：优先使用用户配置
   const config = getOrCreateUserConfig();
   if (config.localDownloadFolder && config.localDownloadFolder.trim() !== '') {
     const customPath = config.localDownloadFolder.trim();
@@ -209,19 +233,10 @@ function getLocalDownloadFolder() {
  * 生产环境：用户主目录下的 ScreenSyncImg
  */
 function getDefaultDownloadFolder() {
-  // 检测是否为开发环境（通过检查是否存在 package.json 和 .git）
-  const isDevelopment = fs.existsSync(path.join(__dirname, 'package.json')) && 
-                        fs.existsSync(path.join(__dirname, '.git'));
-  
-  if (isDevelopment) {
-    // 开发环境：使用 source code 文件夹内的 ScreenSyncImg
-    const devPath = path.join(__dirname, 'ScreenSyncImg');
-    console.log(`🧪 [开发环境] 使用项目内的下载文件夹: ${devPath}`);
-    return devPath;
-  } else {
-    // 生产环境：用户主目录下的 ScreenSyncImg
-    return path.join(os.homedir(), 'ScreenSyncImg');
-  }
+  // 无论开发还是生产环境，都使用当前包内的 ScreenSyncImg 文件夹
+  // 开发环境：source code/ScreenSyncImg
+  // 生产环境：User-package/ScreenSyncImg
+  return path.join(__dirname, 'ScreenSyncImg');
 }
 
 /**
@@ -230,6 +245,74 @@ function getDefaultDownloadFolder() {
 function updateLocalDownloadFolder(folderPath) {
   const config = getOrCreateUserConfig();
   config.localDownloadFolder = folderPath;
+  config.updatedAt = new Date().toISOString();
+  writeUserConfig(config);
+  return config;
+}
+
+/**
+ * 获取备份模式
+ * @returns {string} 'none' | 'gif_only' | 'all'
+ */
+function getBackupMode() {
+  const config = getOrCreateUserConfig();
+  if (config.backupMode) {
+    return config.backupMode;
+  }
+  // 向后兼容：如果启用了截图备份，则默认为'all'；否则为'none'
+  if (config.backupScreenshots) {
+    return 'all';
+  }
+  return 'none';
+}
+
+/**
+ * 更新备份模式
+ * @param {string} mode 'none' | 'gif_only' | 'all'
+ */
+function updateBackupMode(mode) {
+  const config = getOrCreateUserConfig();
+  if (['none', 'gif_only', 'all'].includes(mode)) {
+    config.backupMode = mode;
+    // 更新旧字段以保持向后兼容
+    config.backupScreenshots = (mode === 'all');
+    config.updatedAt = new Date().toISOString();
+    writeUserConfig(config);
+  }
+  return config;
+}
+
+/**
+ * 获取截图备份设置
+ */
+function getBackupScreenshots() {
+  // 截图仅在 'all' 模式下备份
+  return getBackupMode() === 'all';
+}
+
+/**
+ * 更新截图备份设置（兼容旧接口）
+ */
+function updateBackupScreenshots(enabled) {
+  return updateBackupMode(enabled ? 'all' : 'none');
+}
+
+/**
+ * 获取 GIF 备份设置
+ */
+function getBackupGif() {
+  // GIF 在 'gif_only' 或 'all' 模式下备份
+  const mode = getBackupMode();
+  return mode === 'gif_only' || mode === 'all';
+}
+
+
+/**
+ * 更新 GIF 备份设置
+ */
+function updateBackupGif(enabled) {
+  const config = getOrCreateUserConfig();
+  config.backupGif = !!enabled;
   config.updatedAt = new Date().toISOString();
   writeUserConfig(config);
   return config;
@@ -510,6 +593,13 @@ module.exports = {
   writeUserConfig,
   getLocalDownloadFolder,
   updateLocalDownloadFolder,
+  // 备份设置
+  getBackupScreenshots,
+  updateBackupScreenshots,
+  getBackupGif,
+  updateBackupGif,
+  getBackupMode,
+  updateBackupMode,
   // GIF 缓存管理
   getGifCachePath,
   saveGifToCache,

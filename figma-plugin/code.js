@@ -2,8 +2,9 @@
 
 const PLUGIN_VERSION = '1.0.1'; // 插件版本号
 
-console.log('🚀 Figma插件启动');
+console.log('🚀🚀🚀 Figma插件启动 - 纯净载荷版本！🚀🚀🚀');
 console.log('📦 插件版本:', PLUGIN_VERSION);
+console.log('🔍 将输出详细的 imageTransform 检查日志');
 
 figma.showUI(__html__, { 
   width: 360, 
@@ -16,6 +17,12 @@ let screenshotCount = 0;
 let screenshotIndex = 0; // 截屏图片计数器
 let screenRecordingIndex = 0; // 录屏计数器
 let cancelGifExport = false; // GIF导出取消标志
+let serverCheckTimer = null; // Server 缓存检查超时计时器
+
+// 缓存最近同步的文件信息（用于 Video 手动拖入后的自动关联）
+// Map<文件名, 文件元数据>
+// 注意：重启插件会清空此缓存，只能匹配当前会话同步的文件
+const recentSyncedFiles = new Map();
 
 // 从画板中已有的元素初始化计数器
 function initializeCounters() {
@@ -326,6 +333,68 @@ function adjustFrameSize() {
 figma.ui.onmessage = async (msg) => {
   console.log('📬 收到UI消息:', msg.type);
   
+  // ✅ 处理UI返回的跳过文件缓存数据
+  if (msg.type === 'skipped-file-cache-response') {
+    console.log('📥 收到UI缓存响应:', msg.filename);
+    if (msg.cacheData) {
+      console.log('   gifCacheId:', msg.cacheData.gifCacheId || '无');
+      console.log('   driveFileId:', msg.cacheData.driveFileId || '无');
+      console.log('   ossFileId:', msg.cacheData.ossFileId || '无');
+      
+      // 将缓存数据添加到 recentSyncedFiles，以便导出时使用
+      recentSyncedFiles.set(msg.filename, {
+        originalFilename: msg.filename,
+        gifCacheId: msg.cacheData.gifCacheId || null,
+        driveFileId: msg.cacheData.driveFileId || null,
+        ossFileId: msg.cacheData.ossFileId || null,
+        timestamp: msg.cacheData.timestamp
+      });
+      
+      console.log('   ✅ 已添加到 recentSyncedFiles 缓存');
+      
+      // 如果有nodeId，说明是从documentchange监听器触发的，需要自动关联到节点
+      if (msg.nodeId) {
+        console.log('   🔗 自动关联缓存数据到节点:', msg.nodeId);
+        
+        try {
+          const node = figma.getNodeById(msg.nodeId);
+          
+          if (node && node.type === 'RECTANGLE') {
+            // 保存文件名
+            node.setPluginData('originalFilename', msg.filename);
+            console.log('      ✅ 已保存 originalFilename:', msg.filename);
+            
+            // 保存driveFileId
+            if (msg.cacheData.driveFileId) {
+              node.setPluginData('driveFileId', msg.cacheData.driveFileId);
+              console.log('      ✅ 已保存 driveFileId:', msg.cacheData.driveFileId);
+            }
+            
+            // 保存ossFileId
+            if (msg.cacheData.ossFileId) {
+              node.setPluginData('ossFileId', msg.cacheData.ossFileId);
+              console.log('      ✅ 已保存 ossFileId:', msg.cacheData.ossFileId);
+            }
+            
+            // 保存gifCacheId（最重要！用于导出时查找原始文件）
+            if (msg.cacheData.gifCacheId) {
+              node.setPluginData('gifCacheId', msg.cacheData.gifCacheId);
+              console.log('      ✅ 已保存 gifCacheId:', msg.cacheData.gifCacheId);
+              console.log('      💡 导出时会自动从缓存读取原始Video（无需手动上传）');
+            }
+            
+            console.log('   🎉 自动关联完成！此Video导出时无需手动上传');
+          } else {
+            console.warn('   ⚠️  节点不存在或类型不是RECTANGLE');
+          }
+        } catch (error) {
+          console.error('   ❌ 自动关联失败:', error);
+        }
+      }
+    }
+    return;
+  }
+  
   // 处理强制关闭插件（单实例限制）
   if (msg.type === 'close-plugin') {
     console.log('🔒 收到关闭插件请求（检测到其他实例）');
@@ -337,6 +406,40 @@ figma.ui.onmessage = async (msg) => {
   if (msg.type === 'cancel-gif-export') {
     console.log('🛑 收到取消GIF导出请求');
     cancelGifExport = true;
+    return;
+  }
+
+  // ✅ 处理 Server 缓存检查结果
+  if (msg.type === 'server-cache-check-result') {
+    // ✅ 清除超时计时器
+    if (serverCheckTimer) {
+      clearTimeout(serverCheckTimer);
+      serverCheckTimer = null;
+    }
+    console.log(`📥 收到 Server 缓存检查结果: ${msg.results.length} 个文件`);
+    
+    let updatedCount = 0;
+    
+    for (const res of msg.results) {
+      if (res.found && res.layerId) {
+        const node = figma.getNodeById(res.layerId);
+        if (node) {
+          console.log(`   ✅ 自动关联 Server 缓存: ${node.name}`);
+          if (res.gifCacheId) node.setPluginData('gifCacheId', res.gifCacheId);
+          if (res.driveFileId) node.setPluginData('driveFileId', res.driveFileId);
+          if (res.ossFileId) node.setPluginData('ossFileId', res.ossFileId);
+          updatedCount++;
+        }
+      }
+    }
+    
+    console.log(`   🎉 已自动修复 ${updatedCount} 个图层的关联数据`);
+    
+    // 重新触发导出，但跳过检查以避免死循环（如果有剩下的确实没找到）
+    figma.ui.postMessage({
+      type: 'trigger-export-from-code',
+      skipServerCheck: true
+    });
     return;
   }
 
@@ -366,25 +469,94 @@ figma.ui.onmessage = async (msg) => {
         let filename = node.getPluginData('originalFilename');
         let isManualDrag = false;
         
+        console.log(`   🔎 正在检查节点: ${node.name} (type: ${node.type})`);
+        console.log(`      originalFilename (pluginData): ${filename || '无'}`);
+        
         // 如果没有 originalFilename，检查是否是手动拖入的视频/GIF
         if (!filename) {
+          console.log('      没有 originalFilename，检查填充类型...');
           // 检查填充类型是否是 VIDEO 或 IMAGE
           if (node.type === 'RECTANGLE' && node.fills && node.fills.length > 0) {
             const fill = node.fills[0];
+            console.log(`      填充类型: ${fill.type}`);
             
             // 方法 1：检查 VIDEO 填充
             if (fill.type === 'VIDEO') {
-              // 手动拖入的视频
+              // 可能是手动拖入的视频，也可能是手机同步的视频
+              // 先检查是否有 driveFileId 或 ossFileId（手机同步的会有）
+              const driveFileId = node.getPluginData('driveFileId');
+              const ossFileId = node.getPluginData('ossFileId');
+              
+              console.log(`      检查 driveFileId: ${driveFileId || '无'}`);
+              console.log(`      检查 ossFileId: ${ossFileId || '无'}`);
+              
+              if (driveFileId || ossFileId) {
+                // 这是手机同步的视频，不是手动拖入
+                console.log(`      ✅ 这是手机同步的视频（有 fileId）`);
+                isManualDrag = false;
+              } else {
+                // 可能是手动拖入的视频，尝试从UI缓存中查找
+                console.log(`      🔄 可能是手动拖入的视频，尝试从UI缓存查找: ${node.name}`);
+                
+                // 请求UI返回缓存数据
+                figma.ui.postMessage({
+                  type: 'request-skipped-file-cache',
+                  filename: node.name
+                });
+                
+                // 注意：这里是异步的，我们需要等待UI返回数据
+                // 为了保持同步流程，我们先尝试从 recentSyncedFiles 缓存中查找
+                console.log(`      🔄 尝试在缓存中查找: ${node.name} (当前缓存 ${recentSyncedFiles.size} 个文件)`);
+                
+                // 打印所有缓存键值（仅调试用）
+                if (recentSyncedFiles.size > 0) {
+                  console.log(`         缓存列表:`, Array.from(recentSyncedFiles.keys()));
+                }
+
+                // 1. 直接匹配
+                let cachedInfo = recentSyncedFiles.get(node.name) || recentSyncedFiles.get(filename);
+                
+                // 2. 如果没找到，尝试模糊匹配 (忽略扩展名和大小写)
+                if (!cachedInfo) {
+                  const targetName = node.name.toLowerCase().replace(/\.[^/.]+$/, ""); // 去后缀转小写
+                  
+                  for (const [key, info] of recentSyncedFiles.entries()) {
+                    const keyName = key.toLowerCase().replace(/\.[^/.]+$/, "");
+                    if (keyName === targetName) {
+                      cachedInfo = info;
+                      console.log(`         ✨ 模糊匹配成功: ${key} -> ${node.name}`);
+                      break;
+                    }
+                  }
+                }
+                
+                if (cachedInfo) {
+                  console.log(`      ✅ 匹配成功! 原始文件: ${cachedInfo.originalFilename}`);
+                  
+                  // 自动关联数据
+                  node.setPluginData('driveFileId', cachedInfo.driveFileId || '');
+                  node.setPluginData('ossFileId', cachedInfo.ossFileId || '');
+                  node.setPluginData('gifCacheId', cachedInfo.gifCacheId || '');
+                  node.setPluginData('originalFilename', cachedInfo.originalFilename);
+                  
+                  isManualDrag = false;
+                } else {
+                  // 确实是无数据的，需要手动上传
+                  console.log(`      ⚠️  未在缓存中找到匹配文件，需要手动上传`);
+                  isManualDrag = true;
+                }
+              }
+              
               filename = node.name;
-              isManualDrag = true;
               
               // 尝试从图层名称推断扩展名
               if (!filename.toLowerCase().endsWith('.mp4') && !filename.toLowerCase().endsWith('.mov')) {
                 // 如果图层名称没有扩展名，添加 .mov（视频默认格式）
                 filename = filename + '.mov';
+                console.log(`      推断文件名（添加 .mov）: ${filename}`);
+              } else {
+                console.log(`      使用图层名称作为文件名: ${filename}`);
               }
-              
-              console.log(`   📹 检测到手动拖入的视频图层: ${node.name} (推断文件名: ${filename})`);
             }
             // 方法 2：检查 IMAGE 填充（可能是 GIF）
             else if (fill.type === 'IMAGE') {
@@ -394,21 +566,35 @@ figma.ui.onmessage = async (msg) => {
                   nameLower.includes('recording') || 
                   nameLower.endsWith('.gif') ||
                   nameLower.includes('screen')) {
+                
+                // 检查是否有 driveFileId 或 ossFileId
+                const driveFileId = node.getPluginData('driveFileId');
+                const ossFileId = node.getPluginData('ossFileId');
+                
+                if (driveFileId || ossFileId) {
+                  // 这是手机同步的 GIF
+                  console.log(`   📱 检测到手机同步的 GIF 图层: ${node.name}`);
+                  isManualDrag = false;
+                } else {
+                  // 这是手动拖入的 GIF
+                  console.log(`   🎬 检测到手动拖入的 GIF 图层: ${node.name}`);
+                  isManualDrag = true;
+                }
+                
                 filename = node.name;
-                isManualDrag = true;
                 
                 // 确保文件名有 .gif 扩展名
                 if (!filename.toLowerCase().endsWith('.gif')) {
                   filename = filename + '.gif';
                 }
-                
-                console.log(`   🎬 检测到可能是手动拖入的 GIF 图层: ${node.name} (推断文件名: ${filename})`);
               }
             }
           }
         }
         
         if (filename) {
+          console.log(`      最终 filename: ${filename}`);
+          
           // 检查 1：文件扩展名
           const hasValidExtension = filename.toLowerCase().endsWith('.gif') || 
                                    filename.toLowerCase().endsWith('.mov') || 
@@ -420,15 +606,25 @@ figma.ui.onmessage = async (msg) => {
           // 检查 3：文件名包含 ScreenRecording（兼容没有扩展名的情况）
           const filenameIndicatesRecording = filename.includes('ScreenRecording');
           
+          console.log(`      hasValidExtension: ${hasValidExtension}`);
+          console.log(`      isScreenRecordingLayer: ${isScreenRecordingLayer}`);
+          console.log(`      filenameIndicatesRecording: ${filenameIndicatesRecording}`);
+          
           if (hasValidExtension || isScreenRecordingLayer || filenameIndicatesRecording) {
+            console.log(`      ✅ 图层符合条件，添加到结果列表`);
+            
             // 如果是手动拖入的，保存文件名到 pluginData（以便下次识别）
             if (isManualDrag && !node.getPluginData('originalFilename')) {
               node.setPluginData('originalFilename', filename);
-              console.log(`   💾 已保存文件名到 pluginData: ${filename}`);
+              console.log(`      💾 已保存文件名到 pluginData: ${filename}`);
             }
             
             results.push({ layer: node, filename: filename });
+          } else {
+            console.log(`      ⏭️  图层不符合条件，跳过`);
           }
+        } else {
+          console.log(`      ⏭️  无 filename，跳过此节点`);
         }
         
         // 递归检查子节点
@@ -473,13 +669,91 @@ figma.ui.onmessage = async (msg) => {
 
       console.log(`✅ 找到 ${validTasks.length} 个可导出的 GIF 任务`);
 
-      // 3. 通知 UI 开始批量导出
+      // 3. 检查是否有未同步的 GIF（缺少原始数据）
+      const unsyncedGifs = [];
+      for (const task of validTasks) {
+        for (const gifLayer of task.gifLayers) {
+          const driveFileId = gifLayer.layer.getPluginData('driveFileId');
+          const ossFileId = gifLayer.layer.getPluginData('ossFileId');
+          const gifCacheId = gifLayer.layer.getPluginData('gifCacheId');
+          const originalFilename = gifLayer.layer.getPluginData('originalFilename');
+          
+          // 🔍 详细调试信息
+          console.log('\n   🔍 检查图层: ' + gifLayer.layer.name);
+          console.log('      类型: ' + gifLayer.layer.type);
+          
+          // 安全地获取填充类型
+          let fillType = '无';
+          try {
+            if (gifLayer.layer.fills && gifLayer.layer.fills.length > 0) {
+              fillType = gifLayer.layer.fills[0].type || '无';
+            }
+          } catch (e) {
+            fillType = '错误';
+          }
+          console.log('      填充类型: ' + fillType);
+          
+          console.log('      originalFilename: ' + (originalFilename || '无'));
+          console.log('      driveFileId: ' + (driveFileId || '无'));
+          console.log('      ossFileId: ' + (ossFileId || '无'));
+          console.log('      gifCacheId: ' + (gifCacheId || '无'));
+          
+          // 如果既没有 driveFileId 也没有 ossFileId，说明这个 GIF 没有原始数据
+          if (!driveFileId && !ossFileId) {
+            console.log('   ⚠️  检测到未同步的 GIF: ' + gifLayer.layer.name + ' (文件名: ' + (originalFilename || '未知') + ')');
+            unsyncedGifs.push({
+              layerId: gifLayer.layer.id,
+              layerName: gifLayer.layer.name,
+              filename: originalFilename || gifLayer.layer.name,
+              frameId: task.frame.id,
+              frameName: task.frame.name
+            });
+          } else {
+            console.log('   ✅ 图层有完整同步数据，可以直接导出');
+          }
+        }
+      }
+      
+      // 如果有未同步的 GIF，先尝试从服务器检查缓存
+      if (unsyncedGifs.length > 0) {
+        // 如果是强制跳过检查（例如已经检查过一次了），则直接请求上传
+        if (msg.skipServerCheck) {
+          console.log(`   🔔 发现 ${unsyncedGifs.length} 个未同步的 GIF (Server已检查)，请求用户上传`);
+          figma.ui.postMessage({
+            type: 'request-upload-gifs',
+            unsyncedGifs: unsyncedGifs
+          });
+          return; // 停止导出流程，等待用户上传
+        }
+
+        console.log(`   🔍 发现 ${unsyncedGifs.length} 个未同步的 GIF，先尝试从 Server 检查缓存...`);
+        figma.ui.postMessage({
+          type: 'check-server-cache-for-unsynced',
+          unsyncedGifs: unsyncedGifs
+        });
+
+        // ✅ 设置超时保护 (5秒)
+        if (serverCheckTimer) clearTimeout(serverCheckTimer);
+        serverCheckTimer = setTimeout(() => {
+          console.warn('⚠️ Server 缓存检查超时 (5s)，自动切换到手动上传模式');
+          serverCheckTimer = null;
+          // 通知 UI 重新触发导出，并跳过 Server 检查
+          figma.ui.postMessage({
+            type: 'trigger-export-from-code',
+            skipServerCheck: true
+          });
+        }, 5000);
+
+        return; // 停止导出流程，等待异步检查结果
+      }
+
+      // 4. 通知 UI 开始批量导出
       figma.ui.postMessage({
         type: 'export-batch-start',
         total: validTasks.length
       });
 
-      // 4. 依次处理每个任务
+      // 5. 依次处理每个任务
       for (let i = 0; i < validTasks.length; i++) {
         // 检查是否被取消
         if (cancelGifExport) {
@@ -528,12 +802,126 @@ figma.ui.onmessage = async (msg) => {
             height: layer.height
           };
           
+          // 获取圆角信息 (支持所有可能有圆角的节点类型)
+          let cornerRadius = 0;
+          if (layer.cornerRadius !== undefined) {
+            // cornerRadius 可能是单个数值或者混合圆角对象
+            if (typeof layer.cornerRadius === 'number') {
+              cornerRadius = layer.cornerRadius;
+            } else if (layer.topLeftRadius !== undefined) {
+              // 混合圆角，取最大值作为统一圆角（简化处理）
+              cornerRadius = Math.max(
+                layer.topLeftRadius || 0,
+                layer.topRightRadius || 0,
+                layer.bottomLeftRadius || 0,
+                layer.bottomRightRadius || 0
+              );
+            }
+          }
+          
+          // 检测裁切：检查父容器是否开启了clipsContent
+          let clipBounds = null;
+          let clipCornerRadius = 0; // 新增：裁切容器的圆角
+          let parent = layer.parent;
+          
+          // 遍历父级，包括导出的 Frame 本身（如果 Frame 开启了 Clip content）
+          while (parent) {
+            if (parent.clipsContent === true) {
+              // 找到了裁切容器，计算裁切区域
+              const parentAbsPos = getAbsolutePosition(parent, frame);
+              clipBounds = {
+                x: parentAbsPos.x,
+                y: parentAbsPos.y,
+                width: parent.width,
+                height: parent.height
+              };
+              
+              // 获取裁切容器的圆角 (支持所有节点类型)
+              if (parent.cornerRadius !== undefined) {
+                if (typeof parent.cornerRadius === 'number') {
+                  clipCornerRadius = parent.cornerRadius;
+                } else if (parent.topLeftRadius !== undefined) {
+                   clipCornerRadius = Math.max(
+                      parent.topLeftRadius || 0,
+                      parent.topRightRadius || 0,
+                      parent.bottomLeftRadius || 0,
+                      parent.bottomRightRadius || 0
+                    );
+                }
+              }
+              
+              console.log(`      🔍 检测到裁切容器: ${parent.name}, 类型: ${parent.type}`);
+              console.log(`         裁切区域: (${clipBounds.x}, ${clipBounds.y}), ${clipBounds.width}x${clipBounds.height}`);
+              console.log(`         裁切圆角: ${clipCornerRadius}px`);
+              break; // 只取最近的裁切容器
+            }
+            
+            // 如果已经到达导出的 Frame，停止向上遍历
+            if (parent === frame) break;
+            parent = parent.parent;
+          }
+
+          // 获取 Image Fill 信息（特别是针对 Crop 模式）
+          let imageFillInfo = null;
+          if (layer.fills && layer.fills.length > 0) {
+             // 强制获取最新的 fill 信息
+             const fills = layer.fills;
+             for (const fill of fills) {
+                // ✅ 支持 IMAGE 和 VIDEO 类型（Video 图层也有 imageTransform！）
+                if ((fill.type === 'IMAGE' || fill.type === 'VIDEO') && fill.visible !== false) {
+                   // 手动转换 Transform 对象为普通数组
+                   let transformArray = null;
+                   
+                   // 详细调试日志
+                   console.log(`      🔍 检查图层 "${layer.name}" 的 ${fill.type} Fill:`);
+                   console.log(`         - scaleMode: ${fill.scaleMode}`);
+                   console.log(`         - imageTransform (原始类型): ${typeof fill.imageTransform}`);
+                   
+                   if (fill.imageTransform) {
+                      console.log(`         - imageTransform (原始值):`, fill.imageTransform);
+                      try {
+                        transformArray = [
+                           [fill.imageTransform[0][0], fill.imageTransform[0][1], fill.imageTransform[0][2]],
+                           [fill.imageTransform[1][0], fill.imageTransform[1][1], fill.imageTransform[1][2]]
+                        ];
+                        console.log(`         - imageTransform (转换成功):`, JSON.stringify(transformArray));
+                      } catch (e) {
+                        console.error(`         ❌ 转换 imageTransform 失败:`, e);
+                      }
+                   } else {
+                      console.warn(`         ⚠️ imageTransform 为空或 undefined!`);
+                      // 如果是 CROP 模式但没有 imageTransform，这很不正常
+                      if (fill.scaleMode === 'CROP' || fill.scaleMode === 'FILL') {
+                         console.warn(`         ⚠️ CROP/FILL 模式下缺少 imageTransform，尝试从 PluginData 获取...`);
+                      }
+                   }
+                   
+                   imageFillInfo = {
+                      scaleMode: fill.scaleMode, // FILL, FIT, CROP, TILE
+                      // 强制转为 JSON 字符串传输，避免 WebSocket/postMessage 序列化问题
+                      imageTransform: transformArray ? JSON.stringify(transformArray) : null,
+                      scalingFactor: fill.scalingFactor || 1,
+                      _debug_test: "TEST_VALUE_FROM_PLUGIN" // 添加一个测试字段
+                   };
+                   break;
+                }
+             }
+          }
+          
+          if (!imageFillInfo) {
+             console.error(`❌ 严重错误: GIF ${idx + 1} 没有找到 Image Fill 信息！`);
+          } else {
+             console.log(`✅ 最终 imageFillInfo (GIF ${idx + 1}):`, JSON.stringify(imageFillInfo));
+          }
+          
           console.log(`   收集 GIF ${idx + 1} 信息:`);
           console.log(`      图层名: ${layer.name}`);
           console.log(`      文件名: ${gif.filename}`);
           console.log(`      相对位置: (${layer.x}, ${layer.y})`);
           console.log(`      绝对位置: (${bounds.x}, ${bounds.y})`);
           console.log(`      尺寸: ${bounds.width}x${bounds.height}`);
+          console.log(`      圆角: ${cornerRadius}px`);
+          console.log(`      裁切: ${clipBounds ? '是' : '否'}`);
           
           // 验证数据完整性
           if (bounds.x === undefined || bounds.y === undefined) {
@@ -543,48 +931,231 @@ figma.ui.onmessage = async (msg) => {
             console.error(`      ⚠️ 警告：尺寸数据无效！`);
           }
           
+          // 获取该 GIF 在 frame.children 中的索引（z-index）
+          const zIndex = Array.from(frame.children).indexOf(layer);
+          
+          // 获取 imageHash（用于手动上传的文件查找）
+          const imageHash = layer.getPluginData('imageHash');
+          const driveFileId = layer.getPluginData('driveFileId');
+          const ossFileId = layer.getPluginData('ossFileId');
+          
+          console.log(`      imageHash: ${imageHash || '无'}`);
+          console.log(`      driveFileId: ${driveFileId || '无'}`);
+          console.log(`      ossFileId: ${ossFileId || '无'}`);
+          
           return {
             filename: gif.filename,
             cacheId: layer.getPluginData('gifCacheId'),
-            bounds: bounds
+            imageHash: imageHash, // ✅ 传递 imageHash（手动上传文件的关键标识）
+            driveFileId: driveFileId, // ✅ 传递 driveFileId
+            ossFileId: ossFileId, // ✅ 传递 ossFileId
+            bounds: bounds,
+            cornerRadius: cornerRadius,
+            clipBounds: clipBounds,
+            clipCornerRadius: clipCornerRadius, // 传递裁切容器圆角
+            imageFillInfo: imageFillInfo, // 传递 Fill 信息
+            zIndex: zIndex // ✅ 添加 z-index，用于正确的图层顺序合成
           };
         });
         
-        // 临时隐藏所有 GIF 图层，导出纯标注层
-        const originalVisibility = gifLayers.map(gif => gif.layer.visible);
-        gifLayers.forEach(gif => { gif.layer.visible = false; });
+        // 获取Frame的背景填充信息
+        let frameBackground = null;
+        if (frame.fills && frame.fills.length > 0 && frame.fills !== figma.mixed) {
+          const fill = frame.fills[0];
+          if (fill.type === 'SOLID' && fill.visible !== false) {
+            frameBackground = {
+              r: Math.round(fill.color.r * 255),
+              g: Math.round(fill.color.g * 255),
+              b: Math.round(fill.color.b * 255),
+              a: fill.opacity !== undefined ? fill.opacity : 1
+            };
+            console.log(`   📋 Frame背景色: rgba(${frameBackground.r}, ${frameBackground.g}, ${frameBackground.b}, ${frameBackground.a})`);
+          }
+        }
         
-        console.log('   ✅ 已隐藏所有 GIF 图层，开始导出纯标注层...');
+        // 临时移除Frame的背景填充，避免背景色覆盖GIF
+        const originalFills = frame.fills;
+        frame.fills = [];
         
-        // 导出整个 Frame 为 PNG（透明背景，只有标注）
+        // 找到所有 GIF 图层在 Frame.children 中的索引
+        const gifIndices = gifLayers.map(gif => {
+          const index = Array.from(frame.children).indexOf(gif.layer);
+          console.log(`   📌 GIF图层 "${gif.layer.name}" 在 Frame.children 中的索引: ${index}`);
+          return index;
+        }).filter(idx => idx !== -1);
+        
+        // 找到最底层的 GIF（索引最小）
+        const lowestGifIndex = Math.min(...gifIndices);
+        console.log(`   📌 最底层 GIF 索引: ${lowestGifIndex}`);
+        
+        // 保存所有图层的原始可见性
+        const allLayersVisibility = new Map();
+        frame.children.forEach(child => {
+          allLayersVisibility.set(child.id, child.visible);
+        });
+        
+        // ========== 1. 导出 Bottom Layer（最底层 GIF 下面的图层）==========
+        console.log('   🔽 开始导出 Bottom Layer（最底层 GIF 下面的图层）...');
+        console.log(`   📊 最底层 GIF 下面有 ${lowestGifIndex} 个图层`);
+        console.log(`   💡 提示：frame.children[0] 是最底层，frame.children[${frame.children.length - 1}] 是最顶层`);
+        
+        // 打印所有图层的顺序（便于调试）
+        console.log('   📋 Frame 的所有图层（从底到顶）:');
+        frame.children.forEach((child, index) => {
+          const isGif = gifIndices.includes(index);
+          console.log(`      [${index}] ${child.name} (${child.type})${isGif ? ' ← GIF' : ''}`);
+        });
+        
+        const highestGifIndex = Math.max(...gifIndices);
+        console.log(`   📌 GIF 索引范围: [${lowestGifIndex}, ${highestGifIndex}]`);
+        
+        if (lowestGifIndex === 0) {
+          console.log('   ⚠️  没有图层在最底层 GIF 下面');
+        }
+        
+        // 只有当 GIF 下面有图层时才导出 Bottom Layer
+        let bottomLayerBytes = null;
+        if (lowestGifIndex > 0) {
+          console.log('   ✅ 将导出以下图层作为 Bottom Layer:');
+          frame.children.forEach((child, index) => {
+            if (index < lowestGifIndex) {
+              console.log(`      - 索引${index}: "${child.name}" (${child.type})`);
+            }
+          });
+          
+          // 隐藏 >= lowestGifIndex 的所有图层（包括 GIF 和 GIF 上面的）
+          frame.children.forEach((child, index) => {
+            if (index >= lowestGifIndex) {
+              child.visible = false;
+            }
+          });
+          
+          bottomLayerBytes = await frame.exportAsync({
+            format: 'PNG',
+            constraint: { type: 'SCALE', value: 1 }
+          });
+          
+          console.log(`   ✅ Bottom Layer 已导出 (${(bottomLayerBytes.length / 1024).toFixed(2)} KB)`);
+          
+          // 恢复所有图层的可见性
+          frame.children.forEach(child => {
+            child.visible = allLayersVisibility.get(child.id);
+          });
+        } else {
+          console.log(`   ⏭️  跳过 Bottom Layer 导出（最底层 GIF 是最底层图层）`);
+        }
+        
+        // ========== 2. 导出每个非 GIF 图层（用于正确的 z-order 合成）==========
+        console.log('   🔄 开始导出非 GIF 图层（用于正确的 z-order 合成）...');
+        
+        // 收集所有非 GIF 图层的信息（包括它们的 z-index）
+        const staticLayers = [];
+        frame.children.forEach((child, index) => {
+          const isGif = gifIndices.includes(index);
+          if (!isGif && index >= lowestGifIndex && index <= highestGifIndex) {
+            staticLayers.push({
+              index: index,
+              name: child.name,
+              type: child.type
+            });
+          }
+        });
+        
+        // 导出每个静态图层
+        const staticLayerExports = [];
+        for (const layerInfo of staticLayers) {
+          console.log(`   📤 导出静态图层 [${layerInfo.index}]: "${layerInfo.name}" (${layerInfo.type})`);
+          
+          // 只显示当前图层，隐藏其他所有图层
+          frame.children.forEach((child, index) => {
+            child.visible = (index === layerInfo.index);
+          });
+          
+          const layerBytes = await frame.exportAsync({
+            format: 'PNG',
+            constraint: { type: 'SCALE', value: 1 }
+          });
+          
+          staticLayerExports.push({
+            index: layerInfo.index,
+            name: layerInfo.name,
+            bytes: Array.from(layerBytes)
+          });
+          
+          console.log(`      ✅ 已导出 (${(layerBytes.length / 1024).toFixed(2)} KB)`);
+          
+          // 恢复所有图层的可见性
+          frame.children.forEach(child => {
+            child.visible = allLayersVisibility.get(child.id);
+          });
+        }
+        
+        if (staticLayerExports.length > 0) {
+          console.log(`   ✅ 共导出 ${staticLayerExports.length} 个静态图层用于正确的 z-order 合成`);
+        } else {
+          console.log(`   ⏭️  没有需要导出的静态图层（GIF 之间没有其他图层）`);
+        }
+        
+        // ========== 3. 导出 Top Layer（最顶层 GIF 上面的图层）==========
+        console.log('   🔼 开始导出 Top Layer（最顶层 GIF 上面的图层）...');
+        
+        // 隐藏 <= 最高 GIF 索引的所有图层（包括 GIF 和 GIF 下面的）
+        frame.children.forEach((child, index) => {
+          if (index <= highestGifIndex) {
+            child.visible = false;
+          }
+        });
+        
         const annotationBytes = await frame.exportAsync({
           format: 'PNG',
           constraint: { type: 'SCALE', value: 1 }
         });
         
-        console.log(`   ✅ 标注层已导出 (${(annotationBytes.length / 1024).toFixed(2)} KB)`);
+        console.log(`   ✅ Top Layer 已导出 (${(annotationBytes.length / 1024).toFixed(2)} KB)`);
         
-        // 恢复所有 GIF 图层的可见性
-        gifLayers.forEach((gif, idx) => {
-          gif.layer.visible = originalVisibility[idx];
+        // 恢复Frame的背景填充
+        frame.fills = originalFills;
+        
+        // 恢复所有图层的可见性
+        frame.children.forEach(child => {
+          child.visible = allLayersVisibility.get(child.id);
         });
         
         // 发送到服务器进行合成
         const payload = {
           type: 'compose-annotated-gif',
           frameName: frame.name,
-          annotationBytes: Array.from(annotationBytes),
+          bottomLayerBytes: bottomLayerBytes ? Array.from(bottomLayerBytes) : null,     // 最底层 GIF 下面的图层
+          staticLayers: staticLayerExports,                                              // 静态图层（按 z-index 排序）
+          annotationBytes: Array.from(annotationBytes),                                  // 最顶层 GIF 上面的图层
           frameBounds: {
             width: frame.width,
             height: frame.height
           },
-          gifInfos: gifInfos, // 所有 GIF 的信息
+          frameBackground: frameBackground, // Frame的背景色
+          gifInfos: gifInfos, // 所有 GIF 的信息（包含每个 GIF 的 index）
           batchIndex: i,
           batchTotal: validTasks.length
         };
         
         console.log(`   ✅ Payload ready (${gifInfos.length} GIFs), sending to UI`);
-        figma.ui.postMessage(payload);
+        if (payload.bottomLayerBytes) {
+          console.log(`   🔍 Payload.bottomLayerBytes 长度: ${payload.bottomLayerBytes.length}`);
+        } else {
+          console.log(`   🔍 Payload.bottomLayerBytes: null（无底层图层）`);
+        }
+        if (payload.staticLayers && payload.staticLayers.length > 0) {
+          console.log(`   🔍 Payload.staticLayers: ${payload.staticLayers.length} 个静态图层`);
+          payload.staticLayers.forEach(layer => {
+            console.log(`      - [${layer.index}] ${layer.name}: ${layer.bytes.length} bytes`);
+          });
+        } else {
+          console.log(`   🔍 Payload.staticLayers: []（无静态图层）`);
+        }
+        
+        // 关键修复：确保 payload 是纯净的 JSON 对象，去除任何可能的 Figma 内部引用
+        const cleanPayload = JSON.parse(JSON.stringify(payload));
+        figma.ui.postMessage(cleanPayload);
       }
       
     } catch (error) {
@@ -909,7 +1480,31 @@ figma.ui.onmessage = async (msg) => {
     console.log('   时间戳:', msg.timestamp || '未提供');
     
     try {
-      const { bytes, timestamp, filename, driveFileId, ossFileId } = msg;
+      const { bytes, timestamp, filename, driveFileId, ossFileId, gifCacheId } = msg;
+      
+      // ✅ 缓存文件信息（即使后续创建失败，也要保留信息以便手动拖入后关联）
+      if (filename) {
+        // 同时缓存原始文件名和去除扩展名的文件名，增加匹配成功率
+        recentSyncedFiles.set(filename, {
+          driveFileId,
+          ossFileId,
+          gifCacheId,
+          originalFilename: filename
+        });
+        
+        // 缓存无扩展名版本（应对 Figma 图层名可能没有扩展名的情况）
+        const nameWithoutExt = filename.replace(/\.[^/.]+$/, "");
+        if (nameWithoutExt !== filename) {
+          recentSyncedFiles.set(nameWithoutExt, {
+            driveFileId,
+            ossFileId,
+            gifCacheId,
+            originalFilename: filename
+          });
+        }
+        
+        console.log(`   💾 已缓存同步文件信息: ${filename} (Cache Size: ${recentSyncedFiles.size})`);
+      }
       
       if (!bytes) {
         throw new Error('缺少 bytes 数据');
@@ -1087,6 +1682,15 @@ figma.ui.onmessage = async (msg) => {
                              filenameLower.endsWith('.mp4');
         const filenameIndicatesRecording = msg.filename.includes('ScreenRecording');
         
+        // 🔍 调试信息：显示接收到的所有数据
+        console.log('      📦 接收到的消息数据:');
+        console.log('         filename:', msg.filename);
+        console.log('         driveFileId:', msg.driveFileId || '无');
+        console.log('         ossFileId:', msg.ossFileId || '无');
+        console.log('         gifCacheId:', msg.gifCacheId || '无');
+        console.log('         isGifOrVideo:', isGifOrVideo);
+        console.log('         filenameIndicatesRecording:', filenameIndicatesRecording);
+        
         // 额外的判断：如果是 GIF 或视频，保存更详细的信息
         if (isGifOrVideo || filenameIndicatesRecording) {
           console.log('      🎥 检测到 GIF/视频文件，保存元数据...');
@@ -1095,10 +1699,14 @@ figma.ui.onmessage = async (msg) => {
           if (msg.driveFileId) {
             rect.setPluginData('driveFileId', msg.driveFileId);
             console.log('      ✅ 已保存 driveFileId:', msg.driveFileId);
+          } else {
+            console.log('      ⚠️  msg.driveFileId 为空，未保存');
           }
           if (msg.ossFileId) {
             rect.setPluginData('ossFileId', msg.ossFileId);
             console.log('      ✅ 已保存 ossFileId:', msg.ossFileId);
+          } else {
+            console.log('      ⚠️  msg.ossFileId 为空，未保存');
           }
           
           // 保存 gifCacheId (MD5 Hash)，用于在本地缓存查找
@@ -1107,6 +1715,8 @@ figma.ui.onmessage = async (msg) => {
             rect.setPluginData('gifCacheId', msg.gifCacheId);
             console.log('      ✅ 已保存 gifCacheId:', msg.gifCacheId);
             console.log('      💡 导出时会自动从缓存读取原始 GIF（无需本地文件）');
+          } else {
+            console.log('      ⚠️  msg.gifCacheId 为空，未保存');
           }
         }
       }
@@ -1271,7 +1881,182 @@ figma.ui.onmessage = async (msg) => {
     // 实际停止逻辑在服务器端，这里只是确认收到
     console.log('⏸️  收到停止实时同步请求');
   }
+  
+  // 处理上传完成后关联 GIF 数据
+  if (msg.type === 'associate-uploaded-gif') {
+    console.log('🔗 关联上传的 GIF 数据:', msg.layerId);
+    
+    try {
+      // 查找图层
+      const layer = figma.getNodeById(msg.layerId);
+      if (!layer) {
+        console.error('   ❌ 未找到图层:', msg.layerId);
+        figma.ui.postMessage({
+          type: 'associate-gif-error',
+          layerId: msg.layerId,
+          error: '未找到图层'
+        });
+        return;
+      }
+      
+      // 保存数据到 pluginData
+      if (msg.driveFileId) {
+        layer.setPluginData('driveFileId', msg.driveFileId);
+        console.log('   ✅ 已保存 driveFileId:', msg.driveFileId);
+      }
+      if (msg.ossFileId) {
+        layer.setPluginData('ossFileId', msg.ossFileId);
+        console.log('   ✅ 已保存 ossFileId:', msg.ossFileId);
+      }
+      if (msg.originalFilename) {
+        layer.setPluginData('originalFilename', msg.originalFilename);
+        console.log('   ✅ 已保存 originalFilename:', msg.originalFilename);
+      }
+      if (msg.imageHash) {
+        layer.setPluginData('imageHash', msg.imageHash);
+        console.log('   ✅ 已保存 imageHash:', msg.imageHash);
+      }
+      if (msg.gifCacheId) {
+        layer.setPluginData('gifCacheId', msg.gifCacheId);
+        console.log('   ✅ 已保存 gifCacheId:', msg.gifCacheId);
+      }
+      
+      figma.ui.postMessage({
+        type: 'associate-gif-success',
+        layerId: msg.layerId
+      });
+      
+    } catch (error) {
+      console.error('   ❌ 关联失败:', error);
+      figma.ui.postMessage({
+        type: 'associate-gif-error',
+        layerId: msg.layerId,
+        error: error.message
+      });
+    }
+  }
+  
+  // 处理文件未找到错误，清除 GIF 的 pluginData 并重新触发检测
+  if (msg.type === 'clear-gif-data-and-retry') {
+    console.log('🔄 收到清除 GIF 数据并重试的请求');
+    
+    try {
+      const selection = figma.currentPage.selection;
+      if (!selection || selection.length === 0) {
+        console.warn('   ⚠️  没有选中的节点');
+        return;
+      }
+      
+      // 递归查找所有 GIF 图层并清除它们的 pluginData
+      function clearGifPluginData(node) {
+        // 检查是否是 GIF/视频图层
+        const originalFilename = node.getPluginData('originalFilename');
+        if (originalFilename) {
+          const hasValidExtension = originalFilename.toLowerCase().endsWith('.gif') || 
+                                   originalFilename.toLowerCase().endsWith('.mov') || 
+                                   originalFilename.toLowerCase().endsWith('.mp4');
+          
+          if (hasValidExtension) {
+            // 清除与文件关联相关的 pluginData，保留 originalFilename
+            const hadDriveFileId = node.getPluginData('driveFileId');
+            const hadOssFileId = node.getPluginData('ossFileId');
+            
+            if (hadDriveFileId || hadOssFileId) {
+              node.setPluginData('driveFileId', '');
+              node.setPluginData('ossFileId', '');
+              node.setPluginData('imageHash', '');
+              console.log(`   🗑️  已清除 GIF 图层的关联数据: ${node.name} (文件: ${originalFilename})`);
+            }
+          }
+        }
+        
+        // 递归检查子节点
+        if ('children' in node) {
+          for (const child of node.children) {
+            clearGifPluginData(child);
+          }
+        }
+      }
+      
+      for (const node of selection) {
+        clearGifPluginData(node);
+      }
+      
+      console.log('   ✅ 已清除所有 GIF 图层的关联数据');
+      console.log('   🔄 重新触发导出流程...');
+      
+      // 延迟一点，然后重新触发导出（这次会检测到未同步的 GIF）
+      setTimeout(() => {
+        figma.ui.postMessage({
+          type: 'trigger-export-from-code'
+        });
+      }, 500);
+      
+    } catch (error) {
+      console.error('   ❌ 清除 GIF 数据失败:', error);
+    }
+  }
 };
 
+// ✅ 监听文档变化，自动关联手动拖入的Video/GIF的缓存元数据
+figma.on('documentchange', (event) => {
+  // 只处理节点创建事件
+  const nodeChanges = event.documentChanges.filter(change => change.type === 'CREATE');
+  
+  if (nodeChanges.length === 0) return;
+  
+  // 检查新创建的节点
+  for (const change of nodeChanges) {
+    const node = change.node;
+    
+    // 只处理矩形节点（Video/GIF通常是矩形）
+    if (node.type !== 'RECTANGLE') continue;
+    
+    // 检查是否有VIDEO或IMAGE填充
+    if (!node.fills || node.fills.length === 0) continue;
+    
+    const fill = node.fills[0];
+    
+    // 只处理VIDEO和IMAGE填充（GIF也是IMAGE类型）
+    if (fill.type !== 'VIDEO' && fill.type !== 'IMAGE') continue;
+    
+    // 检查节点名称，判断是否可能是Video/GIF
+    const nodeName = node.name || '';
+    const nameLower = nodeName.toLowerCase();
+    const isLikelyVideo = fill.type === 'VIDEO' || 
+                          nameLower.endsWith('.mov') || 
+                          nameLower.endsWith('.mp4') ||
+                          nameLower.includes('video') ||
+                          nameLower.includes('recording');
+    const isLikelyGif = fill.type === 'IMAGE' && (
+                        nameLower.endsWith('.gif') ||
+                        nameLower.includes('gif') ||
+                        nameLower.includes('recording'));
+    
+    if (!isLikelyVideo && !isLikelyGif) continue;
+    
+    console.log(`\n🔍 [自动关联] 检测到新增的Video/GIF图层: ${nodeName}`);
+    
+    // 检查是否已有关联数据
+    const hasExistingData = node.getPluginData('driveFileId') || 
+                            node.getPluginData('ossFileId') ||
+                            node.getPluginData('gifCacheId');
+    
+    if (hasExistingData) {
+      console.log(`   ✅ 已有关联数据，跳过自动关联`);
+      continue;
+    }
+    
+    // 请求UI返回缓存的元数据
+    console.log(`   📤 请求UI返回缓存数据...`);
+    figma.ui.postMessage({
+      type: 'request-skipped-file-cache-for-node',
+      filename: nodeName,
+      nodeId: node.id
+    });
+  }
+});
+
 console.log('✅ 插件初始化完成');
+console.log('📡 文档变化监听器已启动，将自动关联Video/GIF元数据');
 console.log('');

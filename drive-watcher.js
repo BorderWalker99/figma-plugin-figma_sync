@@ -116,81 +116,110 @@ function sanitizeFilename(filename, mimeType) {
 }
 
 /**
+ * 获取文件夹中的下一个序号
+ */
+function getNextSequenceNumber(folderPath, prefix, extensions) {
+  if (!fs.existsSync(folderPath)) {
+    return 1;
+  }
+  
+  const files = fs.readdirSync(folderPath);
+  let maxNumber = 0;
+  
+  files.forEach(file => {
+    const ext = path.extname(file).toLowerCase();
+    if (extensions.includes(ext)) {
+      // 匹配格式：prefix_数字.ext
+      const nameWithoutExt = path.basename(file, ext);
+      const match = nameWithoutExt.match(new RegExp(`^${prefix}_(\\d+)$`));
+      if (match) {
+        const num = parseInt(match[1], 10);
+        if (num > maxNumber) {
+          maxNumber = num;
+        }
+      }
+    }
+  });
+  
+  return maxNumber + 1;
+}
+
+/**
  * 将文件保存到本地文件夹
  */
-async function saveFileToLocalFolder(buffer, filename, mimeType) {
+async function saveFileToLocalFolder(buffer, filename, mimeType, isExportedGif = false) {
   try {
     console.log(`   💾 [Local] 准备保存文件: ${filename}, 大小: ${buffer ? buffer.length : 0} 字节`);
     
     if (!buffer || buffer.length === 0) {
       console.error(`   ❌ [Local] Buffer 为空，无法保存`);
-      return false;
+      return { success: false, isNew: false };
     }
 
     const folderPath = ensureLocalDownloadFolder();
     if (!folderPath) {
       console.error(`   ❌ [Local] 无法获取/创建本地文件夹路径`);
-      return false;
+      return { success: false, isNew: false };
     }
     console.log(`   📂 [Local] 目标文件夹: ${folderPath}`);
     
     // 清理文件名，移除不安全字符，并根据 MIME 类型添加扩展名
     const safeFilename = sanitizeFilename(filename, mimeType);
-    const filePath = path.join(folderPath, safeFilename);
-    
-    // 检查是否是视频或 GIF 文件
     const ext = path.extname(safeFilename).toLowerCase();
     const isVideo = ext === '.mp4' || ext === '.mov' || (mimeType && mimeType.startsWith('video/'));
     const isGif = ext === '.gif' || (mimeType && mimeType === 'image/gif');
     
-    // 如果是视频或 GIF 文件且已存在，直接替换；否则添加时间戳避免覆盖
-    let finalPath = filePath;
-    if (fs.existsSync(finalPath)) {
-      if (isVideo || isGif) {
-        // 视频或 GIF 文件：先删除旧文件，再写入新文件（确保直接替换）
-        console.log(`   🔄 [Local] 检测到重名 ${isVideo ? '视频' : 'GIF'} 文件，将替换: ${safeFilename}`);
-        try {
-          // 先尝试删除文件
-          fs.unlinkSync(finalPath);
-          // 等待一小段时间确保文件系统完成删除操作
-          await new Promise(resolve => setTimeout(resolve, 10));
-          // 验证文件是否已删除
-          if (fs.existsSync(finalPath)) {
-            console.warn(`   ⚠️  [Local] 文件删除后仍存在，尝试强制删除`);
-            // 如果文件仍存在，可能是文件系统延迟，再次尝试删除
-            try {
-              fs.unlinkSync(finalPath);
-            } catch (retryError) {
-              console.warn(`   ⚠️  [Local] 强制删除失败: ${retryError.message}`);
-            }
-          } else {
-            console.log(`   🗑️  [Local] 已删除旧文件: ${safeFilename}`);
-          }
-        } catch (deleteError) {
-          console.warn(`   ⚠️  [Local] 删除旧文件失败，将直接覆盖: ${deleteError.message}`);
-        }
-        finalPath = filePath; // 使用原路径
-      } else {
-        // 其他文件：添加时间戳避免覆盖
-      const nameWithoutExt = path.basename(safeFilename, ext);
-      const timestamp = Date.now();
-      finalPath = path.join(folderPath, `${nameWithoutExt}_${timestamp}${ext}`);
-      }
+    // 确定子文件夹和文件前缀
+    let subfolderName, filePrefix, extensions;
+    
+    if (isExportedGif) {
+      // 导出的GIF
+      subfolderName = 'GIF-导出';
+      filePrefix = 'ScreenRecordingGIF';  // 修改：统一命名格式
+      extensions = ['.gif'];
+    } else if (isVideo) {
+      // 视频
+      subfolderName = '视频';
+      filePrefix = 'ScreenRecordingVid';  // 修改：统一命名格式
+      extensions = ['.mp4', '.mov'];
+    } else if (isGif) {
+      // GIF
+      subfolderName = 'GIF';
+      filePrefix = 'ScreenRecordingGIF';  // 修改：统一命名格式
+      extensions = ['.gif'];
+    } else {
+      // 图片（截图）
+      subfolderName = '图片';
+      filePrefix = 'ScreenShot';  // 修改：统一命名格式
+      extensions = ['.jpg', '.jpeg', '.png'];
     }
     
-    // 确保目录存在（虽然应该已经存在，但以防万一）
+    const subfolderPath = path.join(folderPath, subfolderName);
+    if (!fs.existsSync(subfolderPath)) {
+      fs.mkdirSync(subfolderPath, { recursive: true });
+    }
+    
+    // 获取下一个序号
+    const sequenceNumber = getNextSequenceNumber(subfolderPath, filePrefix, extensions);
+    const paddedNumber = sequenceNumber.toString().padStart(3, '0');
+    const newFilename = `${filePrefix}_${paddedNumber}${ext}`;
+    const finalPath = path.join(subfolderPath, newFilename);
+    
+    console.log(`   📝 [Local] 新文件名: ${newFilename} (序号: ${paddedNumber})`);
+    
+    // 确保目录存在
     const dir = path.dirname(finalPath);
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
     
-    // 使用 writeFileSync 的覆盖模式（如果文件存在会被覆盖）
+    // 写入文件
     fs.writeFileSync(finalPath, buffer, { flag: 'w' });
     console.log(`   ✅ [Local] 文件已成功写入: ${finalPath}`);
-    return true;
+    return { success: true, isNew: true, filename: newFilename };
   } catch (error) {
     console.error(`   ❌ [Local] 保存文件到本地失败: ${error.message}`);
-    return false;
+    return { success: false, isNew: false };
   }
 }
 
@@ -221,7 +250,12 @@ const CONFIG = {
   quality: Number(process.env.DRIVE_IMAGE_QUALITY || 85),
   processExisting: process.env.DRIVE_PROCESS_EXISTING === '1',
   autoDelete: process.env.DRIVE_AUTO_DELETE !== '0',
-  backupGif: true // 默认始终保存 GIF 到本地
+  get backupScreenshots() {
+    return userConfig.getBackupScreenshots();
+  },
+  get backupGif() {
+    return userConfig.getBackupGif();
+  }
 };
 
 // 更严格的验证：检查是否为空字符串或无效值
@@ -365,6 +399,7 @@ let realTimeStart = null;
 let isSyncing = false; // 防止重复触发手动同步
 
 const knownFileIds = new Set();
+const knownFileMD5s = new Map(); // md5Checksum -> { fileId, filename, createdTime } - 用于去重
 const pendingDeletes = new Map(); // fileId -> { filename, timestamp }
 const MAX_KNOWN_FILES = 10000; // 限制已知文件数量，防止内存无限增长
 
@@ -381,6 +416,31 @@ function safeSend(message) {
   } catch (error) {
     console.error('❌ 发送 WebSocket 消息失败:', error.message);
     return false;
+  }
+}
+
+// 清理文件的所有记录（从knownFileIds和knownFileMD5s中移除）
+function cleanupFileRecord(fileId, md5Checksum = null) {
+  // 从knownFileIds中移除
+  if (knownFileIds.has(fileId)) {
+    knownFileIds.delete(fileId);
+  }
+  
+  // 从knownFileMD5s中移除（如果提供了MD5）
+  if (md5Checksum && knownFileMD5s.has(md5Checksum)) {
+    const record = knownFileMD5s.get(md5Checksum);
+    // 只有当记录的fileId匹配时才删除（防止误删新文件的记录）
+    if (record.fileId === fileId) {
+      knownFileMD5s.delete(md5Checksum);
+    }
+  } else if (!md5Checksum) {
+    // 如果没有提供MD5，尝试从knownFileMD5s中找到并删除
+    for (const [md5, record] of knownFileMD5s.entries()) {
+      if (record.fileId === fileId) {
+        knownFileMD5s.delete(md5);
+        break;
+      }
+    }
   }
 }
 const CLEANUP_INTERVAL_MS = 5 * 60 * 1000; // 每5分钟清理一次
@@ -420,13 +480,32 @@ async function initializeKnownFiles() {
              /\.(jpg|jpeg|png|gif|webp|heic|heif|mp4|mov)$/i.test(name);
     });
     
-    // 将所有现有文件标记为"已知"
-    for (const file of imageFiles) {
-      knownFileIds.add(file.id);
-    }
-    
-    console.log(`✅ [Drive] 已标记 ${knownFileIds.size} 个现有文件为"已知"，实时模式将只处理新文件`);
-    console.log('ℹ️  启动后上传的文件将自动同步到 Figma');
+     // 将所有现有文件标记为"已知"，并记录MD5用于去重
+     for (const file of imageFiles) {
+       knownFileIds.add(file.id);
+       // 记录MD5以便去重（如果文件有MD5）
+       if (file.md5Checksum) {
+         knownFileMD5s.set(file.md5Checksum, {
+           fileId: file.id,
+           filename: file.name,
+           createdTime: file.createdTime
+         });
+       }
+     }
+     
+     console.log(`✅ [Drive] 已标记 ${knownFileIds.size} 个现有文件为"已知"，实时模式将只处理新文件`);
+     console.log(`   📋 已记录 ${knownFileMD5s.size} 个文件的MD5指纹，用于去重检测`);
+     console.log('ℹ️  启动后上传的文件将自动同步到 Figma');
+
+     // 通知用户已存在的现有文件数量，提示使用手动同步
+     if (knownFileIds.size > 0 && ws && ws.readyState === WebSocket.OPEN) {
+       safeSend({
+         type: 'toast',
+         message: `实时模式已启动 (忽略 ${knownFileIds.size} 个现有文件，如需同步请使用"手动同步")`,
+         duration: 5000,
+         level: 'info'
+       });
+     }
   } catch (error) {
     console.warn(`⚠️  扫描现有文件时出错: ${error.message}`);
     console.warn('   将继续启动实时模式，但可能会同步一些旧文件');
@@ -497,8 +576,48 @@ async function pollDrive() {
         continue;
       }
       
+      // 3. ✅ MD5去重检测：只查重当前云端存在的文件
+      if (file.md5Checksum && knownFileMD5s.has(file.md5Checksum)) {
+        const existingFile = knownFileMD5s.get(file.md5Checksum);
+        
+        // 检查已存在的文件是否还在云端（通过检查knownFileIds）
+        if (knownFileIds.has(existingFile.fileId)) {
+          // 文件仍在云端，确实是重复文件
+          console.log(`   🔄 检测到重复文件: ${file.name} (MD5: ${file.md5Checksum.substring(0, 8)}...)`);
+          console.log(`   💡 已存在相同内容的文件: ${existingFile.filename} (${new Date(existingFile.createdTime).toLocaleString()})`);
+          console.log(`   🗑️  正在删除重复文件: ${file.name}`);
+          
+          try {
+            await trashFile(file.id);
+            console.log(`   ✅ 重复文件已删除`);
+          } catch (deleteError) {
+            console.error(`   ❌ 删除重复文件失败:`, deleteError.message);
+          }
+          
+          // 标记为已知，避免重复处理
+          knownFileIds.add(file.id);
+          continue;
+        } else {
+          // 旧文件已不在云端（已被同步并清理），更新MD5记录为新文件
+          console.log(`   🔄 检测到相同MD5，但旧文件已清理，保留新文件: ${file.name}`);
+          console.log(`   📝 更新MD5记录: ${existingFile.filename} → ${file.name}`);
+          // 继续处理，不跳过
+        }
+      }
+      
       console.log(`   ✅ 发现新文件: ${file.name} (创建于 ${fileTime.toLocaleString()})`);
         knownFileIds.add(file.id);
+        // 记录MD5，用于后续去重
+        if (file.md5Checksum) {
+          knownFileMD5s.set(file.md5Checksum, {
+            fileId: file.id,
+            filename: file.name,
+            createdTime: file.createdTime
+          });
+          console.log(`      📋 MD5: ${file.md5Checksum.substring(0, 16)}...`);
+        } else {
+          console.log(`      ⚠️  该文件无MD5指纹，无法进行内容去重`);
+        }
         newFiles.push(file);
       }
 
@@ -510,9 +629,14 @@ async function pollDrive() {
       // 并发处理新文件（提高多图同步速度）
       const promises = newFiles.map(async (file) => {
         try {
-          // 为每个文件添加 60 秒超时保护
+          // 检测文件类型，如果是 GIF，给予更长的超时时间
+          const isGif = file.name.toLowerCase().endsWith('.gif') || (file.mimeType && file.mimeType.toLowerCase() === 'image/gif');
+          // GIF 文件给予 5 分钟超时，普通图片 60 秒
+          const timeoutMs = isGif ? 300000 : 60000;
+
+          // 为每个文件添加超时保护
           const fileTimeout = new Promise((_, reject) => {
-            setTimeout(() => reject(new Error(`处理文件超时（${file.name}）`)), 60000);
+            setTimeout(() => reject(new Error(`处理文件超时（${file.name}）`)), timeoutMs);
           });
           
           await Promise.race([
@@ -522,13 +646,18 @@ async function pollDrive() {
         } catch (fileError) {
           console.error(`   ❌ 处理文件失败: ${file.name}`, fileError.message);
           // 失败时移除，以便重试
-          knownFileIds.delete(file.id);
+          // 但如果是超时错误，暂不移除，防止因后台仍在运行导致重复处理
+          if (!fileError.message.includes('超时')) {
+            knownFileIds.delete(file.id);
+          } else {
+            console.warn(`   ⚠️  文件处理超时，保留在已知列表中防止重复处理: ${file.name}`);
+          }
         }
       });
       
-      // 为整个并发处理添加总体超时（最多3分钟）
+      // 为整个并发处理添加总体超时（最多10分钟）
       const allTimeout = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('批量处理超时（超过3分钟）')), 180000);
+        setTimeout(() => reject(new Error('批量处理超时（超过10分钟）')), 600000);
       });
       
       try {
@@ -724,10 +853,14 @@ async function handleDriveFile(file, deleteAfterSync = false) {
           console.log(`   🗑️  删除 Drive 文件: ${file.name} (ID: ${file.id})`);
           await trashFile(file.id);
           console.log(`   ✅ 已移至回收站`);
+          // 清理文件记录
+          cleanupFileRecord(file.id, file.md5Checksum);
         } catch (error) {
           const errorMsg = error.message || String(error);
           if (errorMsg.includes('not found') || errorMsg.includes('404')) {
             console.log(`   ℹ️  Drive 文件已不存在（可能已被删除）: ${file.name}`);
+            // 文件已不存在，也清理记录
+            cleanupFileRecord(file.id, file.md5Checksum);
           } else {
             console.error(`   ⚠️  删除 Drive 文件失败 (${file.name}):`, errorMsg);
           }
@@ -736,12 +869,14 @@ async function handleDriveFile(file, deleteAfterSync = false) {
         console.log(`   ⚠️  文件保存失败，保留 Drive 文件以便重试`);
       }
       
-      // 通知 Figma 插件此文件需要手动拖入（可选，因为视频文件不会发送到 Figma）
+      // 通知 Figma 插件此文件需要手动拖入，并传递缓存信息以便自动关联
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({
           type: 'file-skipped',
           filename: file.name,
-          reason: 'video' // 统一使用 video，包含 mp4 和 mov
+          reason: 'video', // 统一使用 video，包含 mp4 和 mov
+          gifCacheId: gifCacheId, // ✅ 传递缓存ID，用于导出时自动查找
+          driveFileId: file.id     // ✅ 传递Drive文件ID
         }));
       }
       
@@ -801,23 +936,30 @@ async function handleDriveFile(file, deleteAfterSync = false) {
             console.log(`   🗑️  删除 Drive 文件: ${file.name} (ID: ${file.id})`);
             await trashFile(file.id);
             console.log(`   ✅ 已移至回收站`);
+            // 清理文件记录
+            cleanupFileRecord(file.id, file.md5Checksum);
           } catch (error) {
             const errorMsg = error.message || String(error);
             if (errorMsg.includes('not found') || errorMsg.includes('404')) {
               console.log(`   ℹ️  Drive 文件已不存在（可能已被删除）: ${file.name}`);
+              // 文件已不存在，也清理记录
+              cleanupFileRecord(file.id, file.md5Checksum);
             } else {
               console.error(`   ⚠️  删除 Drive 文件失败 (${file.name}):`, errorMsg);
             }
           }
         }
         
-        // 通知 Figma 插件此文件需要手动拖入
+        // 通知 Figma 插件此文件需要手动拖入，并传递缓存信息以便自动关联
         if (ws && ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({
             type: 'file-skipped',
             filename: file.name,
-            reason: 'gif-too-large'
+            reason: 'gif-too-large',
+            gifCacheId: gifCacheId, // ✅ 传递缓存ID，用于导出时自动查找
+            driveFileId: file.id     // ✅ 传递Drive文件ID
           }));
+          console.log(`   📤 发送 file-skipped 消息: ${file.name}, gifCacheId: ${gifCacheId || '无'}`);
         }
         
         // 跳过此文件，不发送到 Figma
@@ -838,11 +980,19 @@ async function handleDriveFile(file, deleteAfterSync = false) {
         console.error(`   ⚠️  [GIF Cache] 缓存失败:`, cacheError.message);
       }
       
+      // 获取备份模式
+      const backupMode = userConfig.getBackupMode();
+      const shouldBackupGif = (backupMode === 'gif_only' || backupMode === 'all');
+
       // 如果启用了 GIF 备份，保存副本到本地（用户可见的文件夹）
-      if (CONFIG.backupGif) {
+      if (shouldBackupGif) {
         console.log(`   💾 [备份] 正在保存 GIF 副本到本地文件夹...`);
-        const saved = await saveFileToLocalFolder(processedBuffer, file.name, file.mimeType);
-        backedUpLocally = saved || false;
+        const saveResult = await saveFileToLocalFolder(processedBuffer, file.name, file.mimeType);
+        // 只有当成功保存且是新文件时才标记为已备份
+        backedUpLocally = (saveResult && saveResult.success && saveResult.isNew) || false;
+        if (saveResult && saveResult.success && !saveResult.isNew) {
+          console.log(`   ⏭️  [备份] 文件已存在，已替换但不计入备份数`);
+        }
       } else {
         backedUpLocally = false;
       }
@@ -965,6 +1115,28 @@ async function handleDriveFile(file, deleteAfterSync = false) {
       }
     }
 
+    // 如果启用了截图备份，保存副本到本地（转换为JPEG格式）
+    // 注意：变量 backupMode 在上面已经获取过，但为了安全起见重新获取（如果作用域不同）
+    // 或者重用上面定义的 backupMode? 上面是在 if(isGif) 块里定义的。
+    // 这里是 if (isHeif) ... else ... 块之后。
+    // 所以这里需要重新获取。
+    const backupModeForImage = userConfig.getBackupMode();
+    if (backupModeForImage === 'all' && !isGif && !isVideo) {
+      try {
+        console.log(`   💾 [备份] 正在保存截图副本到本地（JPEG格式）...`);
+        // 为备份文件生成 JPEG 文件名
+        const jpegFilename = file.name.replace(/\.(png|heic|heif|webp)$/i, '.jpg');
+        const saveResult = await saveFileToLocalFolder(processedBuffer, jpegFilename, 'image/jpeg');
+        if (saveResult && saveResult.success && saveResult.isNew) {
+          console.log(`   ✅ [备份] 截图已保存到本地`);
+        } else if (saveResult && saveResult.success && !saveResult.isNew) {
+          console.log(`   ⏭️  [备份] 文件已存在，已替换`);
+        }
+      } catch (backupError) {
+        console.error(`   ⚠️  [备份] 保存截图失败: ${backupError.message}`);
+      }
+    }
+
     // 使用 base64 编码，避免 Array.from 创建巨大数组占用内存
     const base64String = processedBuffer.toString('base64');
     processedBuffer = null; // 立即释放内存
@@ -1010,6 +1182,62 @@ async function handleDriveFile(file, deleteAfterSync = false) {
   }
 }
 
+async function countFilesForManualSync() {
+  console.log('\n📊 [Drive] 统计云端文件数量...');
+  
+  // Check if user folder is initialized
+  if (!CONFIG.userFolderId) {
+    console.log('⚠️  [Drive] 用户文件夹未初始化');
+    return;
+  }
+  
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    console.error('❌ [Drive] WebSocket 未连接，无法返回文件统计结果');
+    return;
+  }
+  
+  try {
+    console.log(`   🔍 正在获取文件列表...`);
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('获取文件列表超时')), 40000);
+    });
+    
+    const listPromise = listFolderFiles({ 
+      folderId: CONFIG.userFolderId, 
+      pageSize: 200, 
+      orderBy: 'createdTime asc' 
+    });
+    
+    const { files } = await Promise.race([listPromise, timeoutPromise]);
+    
+    // Filter media files
+    const imageFiles = files.filter(file => {
+      const mimeType = file.mimeType || '';
+      const name = file.name || '';
+      
+      // Ignore _exported files
+      if (name.toLowerCase().includes('_exported')) {
+        return false;
+      }
+      
+      return mimeType.startsWith('image/') || mimeType.startsWith('video/') ||
+             /\.(jpg|jpeg|png|gif|webp|heic|heif|mp4|mov)$/i.test(name);
+    });
+    
+    console.log(`   📋 找到 ${files.length} 个文件`);
+    console.log(`   🖼️  其中 ${imageFiles.length} 个是媒体文件`);
+    
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      safeSend({
+        type: 'manual-sync-file-count',
+        count: imageFiles.length
+      });
+    }
+  } catch (error) {
+    console.error('❌ [Drive] 统计文件失败:', error.message);
+  }
+}
+
 async function performManualSync() {
   console.log('\n📦 [Drive] 执行手动同步...');
   console.log(`   ⏰ 开始时间: ${new Date().toLocaleTimeString()}`);
@@ -1021,7 +1249,8 @@ async function performManualSync() {
       safeSend({
         type: 'manual-sync-complete',
         count: 0,
-        total: 0,
+        gifCount: 0,
+        videoCount: 0,
         message: '同步正在进行中，请勿重复触发'
       });
     }
@@ -1046,7 +1275,8 @@ async function performManualSync() {
         safeSend({
         type: 'manual-sync-complete',
         count: 0,
-        total: 0,
+        gifCount: 0,
+        videoCount: 0,
           message: `用户文件夹未初始化。${error.message.includes('未找到') ? '请先在手机端上传至少一个文件。' : '请检查网络连接并重试。'}`
         });
     }
@@ -1062,7 +1292,8 @@ async function performManualSync() {
       safeSend({
         type: 'manual-sync-complete',
         count: 0,
-        total: 0,
+        gifCount: 0,
+        videoCount: 0,
         message: 'WebSocket 未连接'
       });
     }
@@ -1111,36 +1342,112 @@ async function performManualSync() {
     
     console.log(`   🖼️  其中 ${imageFiles.length} 个是媒体文件`);
     
-    if (imageFiles.length === 0) {
-      console.log(`   ℹ️  用户专属文件夹中没有图片文件`);
+    // ✅ 手动同步前先进行MD5去重检测
+    console.log(`   🔍 开始检测重复文件...`);
+    const md5Map = new Map(); // 临时MD5映射，用于本次手动同步
+    let duplicateCount = 0;
+    let filesWithMD5 = 0;
+    let filesWithoutMD5 = 0;
+    
+    for (const file of imageFiles) {
+      if (file.md5Checksum) {
+        filesWithMD5++;
+        if (md5Map.has(file.md5Checksum)) {
+          // 发现重复文件
+          const existingFile = md5Map.get(file.md5Checksum);
+          const existingTime = new Date(existingFile.createdTime);
+          const currentTime = new Date(file.createdTime);
+          
+          // 保留较早上传的文件，删除较晚的
+          let fileToDelete, fileToKeep;
+          if (currentTime < existingTime) {
+            fileToDelete = existingFile;
+            fileToKeep = file;
+            md5Map.set(file.md5Checksum, file); // 更新映射
+          } else {
+            fileToDelete = file;
+            fileToKeep = existingFile;
+          }
+          
+          console.log(`   🔄 发现重复文件:`);
+          console.log(`      保留: ${fileToKeep.name} (${new Date(fileToKeep.createdTime).toLocaleString()})`);
+          console.log(`      删除: ${fileToDelete.name} (${new Date(fileToDelete.createdTime).toLocaleString()})`);
+          console.log(`      MD5: ${file.md5Checksum.substring(0, 16)}...`);
+          
+          try {
+            await trashFile(fileToDelete.id);
+            duplicateCount++;
+            console.log(`      ✅ 重复文件已删除`);
+          } catch (deleteError) {
+            console.error(`      ❌ 删除失败:`, deleteError.message);
+          }
+        } else {
+          md5Map.set(file.md5Checksum, file);
+        }
+      } else {
+        filesWithoutMD5++;
+      }
+    }
+    
+    console.log(`   📊 去重统计: 共 ${imageFiles.length} 个文件，${filesWithMD5} 个有MD5指纹，${filesWithoutMD5} 个无MD5`);
+    if (duplicateCount > 0) {
+      console.log(`   ✨ 已清理 ${duplicateCount} 个重复文件`);
+    } else {
+      console.log(`   ✅ 未发现重复文件`);
+    }
+    
+    if (filesWithoutMD5 > 0) {
+      console.log(`   ⚠️  注意: ${filesWithoutMD5} 个文件没有MD5指纹，无法进行内容去重`);
+      console.log(`   💡 提示: Google Drive可能正在处理这些文件，或文件类型不支持MD5`);
+    }
+    
+    // 重新获取文件列表（去重后）
+    const refreshResult = await listFolderFiles({ 
+      folderId: CONFIG.userFolderId, 
+      pageSize: 500,
+      orderBy: 'createdTime desc'
+    });
+    
+    const refreshedFiles = (refreshResult.files || []).filter(file => {
+      const mimeType = file.mimeType || '';
+      const name = file.name || '';
+      if (name.toLowerCase().includes('_exported')) return false;
+      return mimeType.startsWith('image/') || mimeType.startsWith('video/') ||
+             /\.(jpg|jpeg|png|gif|webp|heic|heif|mp4|mov)$/i.test(name);
+    });
+    
+    console.log(`   📋 去重后剩余 ${refreshedFiles.length} 个文件`);
+    
+    if (refreshedFiles.length === 0) {
+      console.log(`   ℹ️  没有文件需要同步`);
       if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({
+        safeSend({
           type: 'manual-sync-complete',
           count: 0,
-          total: 0,
-          errors: []
-          // 不设置 message，表示同步成功但没有文件
-        }));
+          gifCount: 0,
+          videoCount: 0
+        });
       }
-      // 不在这里重置 isSyncing，finally 块会处理
       return;
     }
 
     let success = 0;
+    let gifCount = 0; // ✅ 统计 GIF 数量
     // 收集所有处理过程中的错误
     const processingErrors = [];
+    let videoCount = 0; // ✅ 统计视频数量
     
     // 手动同步时，强制同步所有图片文件（不检查 knownFileIds）
     // 因为手动同步的目的就是同步残留的图片
-    console.log(`   🔄 手动同步模式：将并发处理所有 ${imageFiles.length} 个图片文件`);
+    console.log(`   🔄 手动同步模式：将并发处理所有 ${refreshedFiles.length} 个图片文件`);
     
     // 使用并发处理提升性能，但限制并发数避免过载
-    const CONCURRENT_LIMIT = 3; // 同时处理3个文件
+    const CONCURRENT_LIMIT = 10; // ⚡ 提高并发：同时处理10个文件
     const results = [];
     
-    for (let i = 0; i < imageFiles.length; i += CONCURRENT_LIMIT) {
-      const batch = imageFiles.slice(i, i + CONCURRENT_LIMIT);
-      console.log(`   📦 处理批次 ${Math.floor(i / CONCURRENT_LIMIT) + 1}/${Math.ceil(imageFiles.length / CONCURRENT_LIMIT)} (${batch.length} 个文件)`);
+    for (let i = 0; i < refreshedFiles.length; i += CONCURRENT_LIMIT) {
+      const batch = refreshedFiles.slice(i, i + CONCURRENT_LIMIT);
+      console.log(`   📦 处理批次 ${Math.floor(i / CONCURRENT_LIMIT) + 1}/${Math.ceil(refreshedFiles.length / CONCURRENT_LIMIT)} (${batch.length} 个文件)`);
       
       const batchPromises = batch.map(async (file) => {
       const wasKnown = knownFileIds.has(file.id);
@@ -1148,9 +1455,14 @@ async function performManualSync() {
         knownFileIds.add(file.id);
       }
       
-        // 为每个文件添加 60秒 超时保护
+        // 检测文件类型，如果是 GIF，给予更长的超时时间
+        const isGif = file.name.toLowerCase().endsWith('.gif') || (file.mimeType && file.mimeType.toLowerCase() === 'image/gif');
+        // GIF 文件给予 5 分钟超时，普通图片 60 秒
+        const timeoutMs = isGif ? 300000 : 60000;
+        
+        // 为每个文件添加超时保护
         const fileTimeout = new Promise((_, reject) => {
-          setTimeout(() => reject(new Error(`处理文件超时（超过60秒）: ${file.name}`)), 60000);
+          setTimeout(() => reject(new Error(`处理文件超时（超过${timeoutMs/1000}秒）: ${file.name}`)), timeoutMs);
         });
         
         const fileProcessing = (async () => {
@@ -1224,17 +1536,32 @@ async function performManualSync() {
         }
       });
       
+      // ✅ 统计 GIF 和视频数量
+      batchResults.forEach((result) => {
+        if (result.status === 'fulfilled' && result.value.file) {
+          const fileName = result.value.file.name.toLowerCase();
+          // ✅ 统计GIF（即使被skipped也算，因为已保存到本地）
+          if (fileName.endsWith('.gif')) {
+            gifCount++;
+          }
+          // ✅ 统计视频（即使被skipped也算，因为已保存到本地）
+          if (fileName.endsWith('.mp4') || fileName.endsWith('.mov')) {
+            videoCount++;
+          }
+        }
+      });
+      
       results.push(...batchResults);
       
       // 批次间短暂延迟，避免过载
-      if (i + CONCURRENT_LIMIT < imageFiles.length) {
-        await sleep(200);
+      if (i + CONCURRENT_LIMIT < refreshedFiles.length) {
+        await sleep(50); // ⚡ 减少批次间延迟：从200ms降到50ms
       }
     }
 
     console.log(`\n✅ [Drive] 手动同步完成`);
     console.log(`   ✅ 成功同步: ${success} 张截图`);
-    console.log(`   📊 总计: ${imageFiles.length} 个图片文件`);
+    console.log(`   📊 总计: ${refreshedFiles.length} 个图片文件`);
     if (processingErrors.length > 0) {
       console.log(`   ❌ 失败: ${processingErrors.length} 个`);
     }
@@ -1243,10 +1570,11 @@ async function performManualSync() {
       const message = {
         type: 'manual-sync-complete',
         count: success,
-        total: imageFiles.length,
-        errors: processingErrors // 发送错误列表
+        gifCount: gifCount,
+        videoCount: videoCount, // ✅ 添加视频数量
+        errors: processingErrors
       };
-      console.log(`   📤 发送完成消息: count=${success}, total=${imageFiles.length}, errors=${processingErrors.length}`);
+      console.log(`   📤 发送完成消息: count=${success}, gifCount=${gifCount}, videoCount=${videoCount}, errors=${processingErrors.length}`);
       ws.send(JSON.stringify(message));
     }
   })(); // 结束 syncTask async 函数
@@ -1273,7 +1601,8 @@ async function performManualSync() {
       safeSend({
         type: 'manual-sync-complete',
         count: 0,
-        total: 0,
+        gifCount: 0,
+        videoCount: 0,
         message: userMessage,
         errors: [{ filename: '系统错误', error: userMessage }]
       });
@@ -1423,6 +1752,8 @@ function connectWebSocket() {
             console.log(`   🗑️  删除 Drive 文件: ${filename} (ID: ${fileIdToDelete})`);
             await trashFile(fileIdToDelete);
             console.log(`   ✅ 已移至回收站`);
+            // 清理文件记录
+            cleanupFileRecord(fileIdToDelete);
           } catch (error) {
             // 如果文件不存在，可能是已经被删除或不存在，这是正常的
             const errorMsg = error.message || String(error);
@@ -1431,6 +1762,8 @@ function connectWebSocket() {
                 errorMsg.includes('404') ||
                 errorMsg.includes('does not exist')) {
               console.log(`   ℹ️  Drive 文件已不存在（可能已被删除）: ${filename}`);
+              // 文件已不存在，也清理记录
+              cleanupFileRecord(fileIdToDelete);
             } else {
               console.error(`   ⚠️  删除 Drive 文件失败 (${filename}):`, errorMsg);
             }
@@ -1465,6 +1798,11 @@ function connectWebSocket() {
         isRealTimeMode = false;
         wasRealTimeMode = false; // 用户主动停止，清除记录
         stopPolling();
+        return;
+      }
+
+      if (message.type === 'manual-sync-count-files') {
+        await countFilesForManualSync();
         return;
       }
 
@@ -1512,6 +1850,18 @@ function cleanupCache() {
       knownFileIds.delete(idsArray[i]);
     }
     console.log(`🧹 [缓存清理] 已清理 ${Math.floor(toRemove / 2)} 个旧文件ID，当前: ${knownFileIds.size}`);
+  }
+  
+  // 清理 knownFileMD5s（如果超过限制，保留最新的）
+  if (knownFileMD5s.size > MAX_KNOWN_FILES) {
+    const toRemove = knownFileMD5s.size - MAX_KNOWN_FILES;
+    const md5Array = Array.from(knownFileMD5s.entries());
+    // 按创建时间排序，移除最旧的
+    md5Array.sort((a, b) => new Date(a[1].createdTime) - new Date(b[1].createdTime));
+    for (let i = 0; i < Math.floor(toRemove / 2); i++) {
+      knownFileMD5s.delete(md5Array[i][0]);
+    }
+    console.log(`🧹 [缓存清理] 已清理 ${Math.floor(toRemove / 2)} 个旧MD5记录，当前: ${knownFileMD5s.size}`);
   }
   
   // 清理过期的 pendingDeletes（超过5分钟未确认的）

@@ -735,8 +735,8 @@
   </div>
 
   <div class="content">
-    <!-- Step 1: Upload Mode -->
-    <div class="step active" id="step1">
+    <!-- Step 1: Upload Mode (隐藏，默认 Google 模式) -->
+    <div class="step" id="step1" style="display: none;">
       <div class="step-header">
         <h2 class="step-title">选择储存方式</h2>
         <p class="step-description">用于暂存截图/录屏</p>
@@ -774,8 +774,8 @@
       </div>
     </div>
 
-    <!-- Step 2: System Check -->
-    <div class="step" id="step2">
+    <!-- Step 2: System Check (现在是第一步) -->
+    <div class="step active" id="step2">
       <div class="step-header">
         <h2 class="step-title">环境检查</h2>
         <p class="step-description">检查系统环境是否满足运行要求</p>
@@ -835,7 +835,7 @@
       </div>
 
       <div class="button-group" id="step2Buttons" style="display: none;">
-        <button class="btn btn-secondary" onclick="prevStep()">上一步</button>
+        <!-- 移除上一步按钮，因为 Step 1 已隐藏 -->
         <div style="flex:1"></div>
         <button class="btn btn-primary" onclick="nextStep()" id="step2Next">
           下一步
@@ -940,8 +940,8 @@
 
   <div class="footer">
     <div class="step-dots">
-      <div class="dot active" data-step="1"></div>
-      <div class="dot" data-step="2"></div>
+      <!-- 移除第一个点，因为 Step 1 已隐藏，现在只有 4 步 -->
+      <div class="dot active" data-step="2"></div>
       <div class="dot" data-step="3"></div>
       <div class="dot" data-step="4"></div>
       <div class="dot" data-step="5"></div>

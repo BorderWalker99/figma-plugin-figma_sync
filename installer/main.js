@@ -771,7 +771,8 @@ ipcMain.handle('install-dependencies', async (event, installPath) => {
     // spawn 需要一个文件作为第一个参数，如果 npmPath 是个复杂的脚本或者环境有问题容易挂
     // exec 直接在 shell 中执行字符串，兼容性更好
     // 使用 --prefix 来规避 cwd 在只读卷下的问题
-    const commandStr = `"${npmPath}" install --legacy-peer-deps --registry=https://registry.npmmirror.com --prefix "${installPath}"`;
+    // 添加 --omit=dev 以跳过开发依赖，加快安装速度
+    const commandStr = `"${npmPath}" install --legacy-peer-deps --omit=dev --registry=https://registry.npmmirror.com --prefix "${installPath}"`;
     console.log(`[DEBUG] Executing command: ${commandStr}`);
 
     // 重要：将 cwd 设置为 /tmp，避免 ENOTDIR

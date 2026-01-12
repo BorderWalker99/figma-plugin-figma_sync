@@ -3,6 +3,12 @@ const { spawn, execSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const { checkUpdateAsync } = require('./update-manager');
+let chokidar;
+try {
+  chokidar = require('chokidar');
+} catch (e) {
+  // 忽略错误，将在环境检查中处理
+}
 
 // 检查并清理端口 8888
 function cleanupPort() {
@@ -303,8 +309,48 @@ if (!checkEnvironmentWithRetry()) {
 
 // 环境检查通过，继续启动
 function continueStartup() {
-// 启动服务器
-startServer();
+  // 启动服务器
+  startServer();
+
+  // 监听 server.js 变化实现自动重启
+  if (chokidar) {
+    const serverWatcher = chokidar.watch(path.join(__dirname, 'server.js'), {
+      persistent: true,
+      ignoreInitial: true
+    });
+
+    serverWatcher.on('change', (filePath) => {
+      console.log(`\n🔄 检测到服务器文件变化: ${path.basename(filePath)}`);
+      console.log('   正在重启服务器...');
+      
+      if (server) {
+        // 移除 exit 监听器，防止触发异常退出后的自动重启逻辑
+        server.removeAllListeners('exit');
+        
+        // 从 services 中移除
+        const index = services.indexOf(server);
+        if (index > -1) {
+          services.splice(index, 1);
+        }
+
+        try {
+          server.kill();
+        } catch (e) {
+          console.error('   ⚠️ 停止旧服务器进程失败:', e.message);
+        }
+        server = null;
+      }
+      
+      // 稍等一下再重启，确保文件写入完成和端口释放
+      setTimeout(() => {
+        cleanupPort(); // 确保端口已清理
+        startServer();
+      }, 2000); // 增加等待时间到 2 秒
+    });
+    
+    // 将 watcher 加入 services 以便清理
+    // chokidar watcher 有 close 方法，这里简单处理，进程退出时不需要显式 kill watcher
+  }
   
   // 延迟启动监听器，避免重复启动
   setTimeout(() => {
