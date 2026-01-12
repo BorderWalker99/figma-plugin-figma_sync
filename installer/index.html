@@ -735,35 +735,14 @@
   </div>
 
   <div class="content">
-    <!-- Step 1: Upload Mode (隐藏，默认 Google 模式) -->
+    <!-- Step 1: Manual Path Selection (仅在自动检测失败时显示) -->
     <div class="step" id="step1" style="display: none;">
       <div class="step-header">
-        <h2 class="step-title">选择储存方式</h2>
-        <p class="step-description">用于暂存截图/录屏</p>
+        <h2 class="step-title">选择项目路径</h2>
+        <p class="step-description">请手动定位 ScreenSync 项目文件夹</p>
       </div>
 
-      <div class="card-grid">
-        <div class="feature-card" onclick="selectMode('drive')">
-          <div class="card-icon">
-            <img class="no-invert" src="https://raw.githubusercontent.com/BorderWalker99/figma-plugin-figma_sync/refs/heads/main/images/google.svg" width="56" height="56">
-          </div>
-          <div>
-            <div class="card-title">Google Cloud</div>
-            <div class="card-desc">iCloud 无空间也可使用</div>
-          </div>
-        </div>
-        <div class="feature-card" onclick="selectMode('icloud')">
-          <div class="card-icon">
-            <img class="no-invert" src="https://raw.githubusercontent.com/BorderWalker99/figma-plugin-figma_sync/refs/heads/main/images/icloud.svg" width="56" height="56">
-          </div>
-          <div>
-            <div class="card-title">iCloud</div>
-            <div class="card-desc">iCloud 需要足够空间，隐私性更好</div>
-          </div>
-        </div>
-      </div>
-
-      <div id="icloudCheckResult" style="display: none;"></div>
+      <!-- Mode selection cards removed -->
 
       <div class="button-group">
         <div style="flex:1"></div>

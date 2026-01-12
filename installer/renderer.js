@@ -650,8 +650,13 @@ window.finishInstallation = async function() {
 // 初始化
 document.addEventListener('DOMContentLoaded', async () => {
   // 自动检测项目根目录
-  await detectProjectRoot();
+  const success = await detectProjectRoot();
   
-  // 从步骤 1 开始（选择同步模式）
-  showStep(1);
+  if (success) {
+    // 成功检测，直接进入步骤 2（环境检查）
+    showStep(2);
+  } else {
+    // 检测失败，停留在步骤 1 显示手动选择提示
+    showStep(1);
+  }
 });
