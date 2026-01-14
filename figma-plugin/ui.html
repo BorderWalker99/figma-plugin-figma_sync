@@ -105,6 +105,11 @@
       --shadow-lg: 0 15px 48px rgba(0, 0, 0, 0.1);
       --shadow-inner: inset 0 1px 1px rgba(255,255,255,0.5);
       
+      /* Upload dropzone (Light) */
+      --bg-inset: #E0E4E8;
+      --dropzone-shadow: inset 2px 2px 5px #b8b9be, inset -3px -3px 7px #ffffff;
+      --primary-bg: rgba(33, 150, 243, 0.08);
+      
       /* Radius */
       --radius-s: 8px;
       --radius-m: 16px;
@@ -182,6 +187,11 @@
         
         --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
         --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.4);
+        
+        /* Upload dropzone */
+        --bg-inset: #1C1C1E;
+        --dropzone-shadow: inset 2px 2px 5px rgba(0,0,0,0.5), inset -3px -3px 7px rgba(255,255,255,0.05);
+        --primary-bg: rgba(33, 150, 243, 0.15);
       }
     }
 
@@ -658,7 +668,7 @@
     /* Update Banner - Neumorphic Style */
     .update-banner {
       display: none;
-      background: var(--neu-bg);
+      background: var(--neu-face-bg);
       color: var(--text-secondary);
       padding: 12px;
       font-size: 11px;
@@ -671,12 +681,13 @@
       box-shadow: 
         -2px -2px 5px var(--neu-shadow-light),
         2px 2px 5px var(--neu-shadow-dark);
-      border: 1px solid var(--neu-border);
+      border: 1px solid rgba(255,255,255,0.1);
     }
 
     @media (prefers-color-scheme: dark) {
       .update-banner {
-        background: var(--neu-bg);
+        background: var(--neu-face-bg);
+        border-color: rgba(255,255,255,0.05);
       }
     }
 
@@ -938,7 +949,7 @@
       transition: all 0.2s ease;
       white-space: nowrap;
       /* Neumorphic Button Style */
-      background: var(--neu-bg);
+      background: var(--neu-face-bg);
       color: var(--text-secondary);
       box-shadow: 
         -2px -2px 5px var(--neu-shadow-light),
@@ -984,16 +995,19 @@
     }
 
     .update-banner-btn:disabled {
-      opacity: 0.5;
+      /* opacity: 0.5; */ /* Disable default opacity reduction */
+      opacity: 1; /* Keep full opacity */
       cursor: not-allowed;
-      box-shadow: none;
+      /* box-shadow: none; */ /* Keep the shadow (button style) */
+      color: var(--text-tertiary); /* Optional: make text lighter to indicate disabled, but user said 'maintain button style' */
+      /* Actually user wants to maintain button style during download, so maybe keep original color or slight change */
     }
 
     .update-banner-close {
       width: 24px;
       height: 24px;
       padding: 0;
-      background: var(--neu-bg);
+      background: var(--neu-face-bg);
       border: none;
       border-radius: 50%;
       color: var(--text-secondary);
@@ -2241,9 +2255,16 @@
     }
     
     .neu-icon-large svg {
-        color: var(--primary);
+        color: var(--icon-color);
         stroke: currentColor;
-        filter: drop-shadow(0 2px 4px rgba(33, 150, 243, 0.2));
+        opacity: 0.6;
+        filter: drop-shadow(0 1px 1px rgba(255, 255, 255, 0.5));
+    }
+
+    @media (prefers-color-scheme: dark) {
+        .neu-icon-large svg {
+            filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.3));
+        }
     }
     
     /* Upload Modal Button Styling */
@@ -2289,16 +2310,6 @@
     #select-files-btn:active::after {
         background: var(--neu-face-bg-active);
         box-shadow: var(--neu-face-shadow-active);
-    }
-    
-    /* Success/Error Colors */
-    :root {
-        --success: #14AE5C;
-        --success-bg: rgba(20, 174, 92, 0.1);
-        --bg-inset: #E0E4E8;
-        --text-tertiary: #8B92A3;
-        --primary: #2196F3;
-        --primary-light: #42A5F5;
     }
     
     /* Upload Modal - Prevent scroll */
@@ -2356,8 +2367,8 @@
         box-shadow: 
             inset 3px 3px 6px rgba(0, 0, 0, 0.12),
             inset -2px -2px 5px rgba(255, 255, 255, 0.9),
-            0 0 0 2px var(--focus-ring-color),
-            0 0 8px var(--focus-ring-glow);
+            0 0 0 2px var(--logo-color-primary), /* Changed to blue */
+            0 0 8px var(--accent-soft); /* Changed to blue glow */
     }
     
     @media (prefers-color-scheme: dark) {
@@ -2365,8 +2376,8 @@
             box-shadow: 
                 inset 3px 3px 6px rgba(0, 0, 0, 0.5),
                 inset -2px -2px 5px rgba(255, 255, 255, 0.06),
-                0 0 0 2px var(--focus-ring-color),
-                0 0 6px var(--focus-ring-glow);
+                0 0 0 2px var(--logo-color-primary), /* Changed to blue */
+                0 0 6px var(--accent-soft); /* Changed to blue glow */
         }
     }
 
@@ -2398,6 +2409,12 @@
         font-size: 13px;
     }
     
+    /* Focus state for input wrapper (applied via JS or :focus-within if wrapper supported it, 
+       but here we likely target the wrapper based on input focus if structure allows, 
+       or target input itself if wrapper style is on input) */
+    /* Assuming .input-wrapper styles the container, we need to see how it's defined.
+       Searching for .input-wrapper definition... */
+    
     /* Placeholder color */
     .input-wrapper input::placeholder {
         color: var(--text-tertiary);
@@ -2414,6 +2431,25 @@
         justify-content: space-between;
         position: relative;
         box-shadow: var(--pill-recessed-shadow);
+    }
+    
+    /* Hide scrollbar in User ID display */
+    .user-id-display .id-content {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none; /* Firefox */
+        -ms-overflow-style: none; /* IE/Edge */
+        margin-right: 8px;
+        white-space: nowrap;
+        flex: 1; /* Allow content to take available space */
+        position: relative;
+        z-index: 1;
+    }
+    
+    .user-id-display .id-content::-webkit-scrollbar {
+        display: none; /* Chrome/Safari/Webkit */
+        width: 0;
+        height: 0;
     }
     
     .user-id-display::before {
@@ -2434,7 +2470,7 @@
     }
     
     .user-id-display #displayUserId {
-        color: var(--pill-screen-text);
+        color: var(--logo-color-primary); /* Changed to blue */
         font-family: 'SF Mono', 'Menlo', monospace;
         font-size: 13px;
         font-weight: 500;
@@ -3443,8 +3479,8 @@
                           <div id="userIdSubtitle" style="font-size: 12px; color: var(--text-secondary); margin-top: 4px; margin-bottom: 6px;">
                             请在快捷指令的文本框中填入此 ID:
                       </div>
-                          <div class="user-id-display" style="overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none;">
-                            <div style="overflow-x: auto; white-space: nowrap; margin-right: 8px; user-select: text; position: relative; z-index: 1;">
+                          <div class="user-id-display">
+                            <div class="id-content">
                               <span id="displayUserId">正在获取...</span>
                     </div>
                     <button id="copyUserIdBtn" class="icon-btn" style="width: 24px; height: 24px; flex-shrink: 0;" title="复制 User ID">
@@ -3475,56 +3511,62 @@
                     </button>
       
       <div class="modal-content" style="padding: 36px 32px; text-align: center;">
-        <!-- 完整的 Info Icon -->
-        <div style="margin-bottom: 20px;">
+        <!-- 上传 Icon -->
+        <div style="margin-bottom: 8px;">
           <div class="neu-icon-large" style="display: inline-flex; align-items: center; justify-content: center; width: 56px; height: 56px; border-radius: 50%; margin-bottom: 14px;">
             <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="12" r="10"></circle>
-              <line x1="12" y1="16" x2="12" y2="12"></line>
-              <line x1="12" y1="8" x2="12.01" y2="8"></line>
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="17 8 12 3 7 8"></polyline>
+              <line x1="12" y1="3" x2="12" y2="15"></line>
             </svg>
-                  </div>
+          </div>
           <h2 style="font-size: 16px; font-weight: 600; margin: 0; color: var(--text); letter-spacing: -0.01em;">检测到需手动上传的录屏</h2>
-                </div>
+        </div>
 
         <!-- 副标题 -->
         <div id="unsynced-gifs-subtitle" style="margin-bottom: 16px; color: var(--text-secondary); font-size: 13px; line-height: 1.5;">
           <!-- 动态填充文件名列表 -->
         </div>
-        
 
         <!-- 隐藏的文件选择器 -->
         <input type="file" id="multi-file-input" accept=".gif,.mov,.mp4" multiple style="display: none;">
 
-        <!-- 拟物化大按钮 -->
-        <button id="select-files-btn" style="
+        <!-- 拖拽上传区域 -->
+        <div id="upload-dropzone" style="
           width: 100%;
-          height: 44px;
-          font-size: 14px;
-          font-weight: 500;
-          color: var(--text);
+          min-height: 120px;
           border: none;
-          cursor: pointer;
+          border-radius: var(--radius-m);
           display: flex;
+          flex-direction: column;
           align-items: center;
           justify-content: center;
-          gap: 8px;
-          border-radius: 8px;
-          background: transparent;
-          position: relative;
-          box-shadow: 
-            -4px -4px 8px var(--neu-shadow-light),
-            4px 4px 8px var(--neu-shadow-dark);
+          gap: 4px;
+          padding: 24px 16px;
+          cursor: pointer;
           transition: all 0.2s ease;
+          background: var(--pill-recessed-bg);
+          box-shadow: var(--pill-recessed-shadow);
+          box-sizing: border-box;
         ">
-          <span style="position: relative; z-index: 1;">选择</span>
-        </button>
+          <!-- 主文案 -->
+          <div id="dropzone-text" style="text-align: center;">
+            <div style="font-size: 12px; color: var(--text-secondary);">
+              <span style="color: var(--primary);">点击上传 或 拖拽文件到此处</span>
+            </div>
+          </div>
+          
+          <!-- 支持格式提示 -->
+          <div style="font-size: 11px; color: var(--text-tertiary);">
+            支持 .gif .mov .mp4 格式
+          </div>
+        </div>
 
         <!-- 上传进度（隐藏） -->
         <div id="upload-progress-container" style="display: none; margin-top: 20px;">
           <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; font-weight: 500;" id="upload-progress-text">正在上传...</div>
           <div style="width: 100%; height: 5px; background: var(--bg-inset); border-radius: 3px; overflow: hidden; box-shadow: inset 0 1px 2px rgba(0,0,0,0.08);">
-            <div id="upload-progress-bar" style="width: 0%; height: 100%; background: linear-gradient(90deg, var(--primary) 0%, var(--primary-light) 100%); transition: width 0.3s ease;"></div>
+            <div id="upload-progress-bar" style="width: 0%; height: 100%; background: linear-gradient(90deg, var(--unified-green) 0%, #4ADE80 100%); transition: width 0.3s ease;"></div>
           </div>
         </div>
       </div>
@@ -3567,6 +3609,17 @@
     let gifBackupCount = 0;
     let exportedGifCount = 0; // New counter for exported GIFs
     let justFinishedExport = false; // Flag to prioritize export status display
+    
+    // ✅ 新的状态管理系统：支持多状态队列
+    // 每个状态可以独立存在，用户需要分别点击才能清除
+    // 但导出状态会立即清除所有"已保存"状态
+    let pendingStates = {
+      exported: { count: 0, active: false },    // 已导出 X 段 GIF
+      savedVideo: { count: 0, active: false },  // 已保存 X 段视频
+      savedGif: { count: 0, active: false }     // 已保存 X 段 GIF
+    };
+    
+    // 兼容旧代码的变量（后续会逐步移除）
     let currentButtonState = null; // 'exported', 'video', 'gif-backup', or null - locks the pill state until user clicks
     let currentPluginVersion = null; // 当前插件版本（初始为 null，等待 code.js 返回真实版本）
     let latestPluginVersion = null; // 最新版本
@@ -3876,6 +3929,10 @@
             }
           }
         } else if (data.type === 'screenshot') {
+          // ✅ 标记同步已开始（收到了服务器响应）
+          if (isManualSyncing) {
+            syncStarted = true;
+          }
           if (data.backedUpLocally || data.keptInIcloud) {
              gifBackupCount++;
              // Don't reset state - let currentButtonState handle locking
@@ -3883,6 +3940,10 @@
           }
           handleScreenshot(data);
         } else if (data.type === 'file-skipped') {
+          // ✅ 标记同步已开始（收到了服务器响应）
+          if (isManualSyncing) {
+            syncStarted = true;
+          }
           // 确定原因文本
           let reasonText = '未知原因';
           if (data.reason === 'mp4' || data.reason === 'video') {
@@ -3943,6 +4004,13 @@
           // Complete manual sync with animation
           console.log('🎉 手动同步完成！');
           
+          // ✅ 清除超时定时器
+          if (manualSyncTimeoutId) {
+            clearTimeout(manualSyncTimeoutId);
+            manualSyncTimeoutId = null;
+          }
+          syncStarted = false; // 重置同步开始标记
+
           const manualSyncBtn = document.getElementById('manualSyncBtn');
           
           // ✅ 立即停止旋转动画和进度环
@@ -3967,31 +4035,47 @@
           }
           
           // ✅ 构建 toast 消息
-          const totalCount = data.count || 0;
+          // imageCount = 成功导入 Figma 的纯图片数量
+          // gifCount = 所有 GIF 数量（用于 toast 显示）
+          // videoCount = 所有视频数量（用于 toast 显示）
+          // savedGifCount = 实际保存到本地的 GIF 数量（用于 status pill）
+          // savedVideoCount = 实际保存到本地的视频数量（用于 status pill）
+          const imageCount = data.imageCount || 0;
           const gifCount = data.gifCount || 0;
           const videoCount = data.videoCount || 0;
-          const imageCount = totalCount - gifCount; // 纯图片数量 = 总数 - GIF数
+          const savedGifCount = data.savedGifCount || 0;
+          const savedVideoCount = data.savedVideoCount || 0;
           
           let toastMessage;
+
+          // ✅ 更新 status pill 状态：只显示实际保存到本地的文件
+          // 注意：使用 savedGifCount 和 savedVideoCount，而不是 gifCount 和 videoCount
+          // 因为当备份模式为"无"时，GIF 不会被保存到本地
+          if (savedVideoCount > 0) {
+            manualDragCount = savedVideoCount;
+            pendingStates.savedVideo.active = true;
+            pendingStates.savedVideo.count = savedVideoCount;
+            currentButtonState = 'video';
+          }
+          if (savedGifCount > 0) {
+            gifBackupCount = savedGifCount;
+            pendingStates.savedGif.active = true;
+            pendingStates.savedGif.count = savedGifCount;
+            if (!pendingStates.savedVideo.active) {
+              currentButtonState = 'gif-backup';
+            }
+          }
+
+          // ✅ 构建 toast 消息：显示所有同步的文件类型（不管是否保存到本地）
+          const parts = [];
+          if (imageCount > 0) parts.push(`${imageCount} 张图片`);
+          if (gifCount > 0) parts.push(`${gifCount} 段 GIF`);
+          if (videoCount > 0) parts.push(`${videoCount} 段视频`);
           
-          // 优先处理视频情况
-          if (videoCount > 0) {
-            toastMessage = `已保存 ${videoCount} 段视频`;
-            // ✅ 更新 manualDragCount 以触发 status pill 更新
-            manualDragCount = videoCount;
-            currentButtonState = 'video'; // 锁定到video状态
-          } else if (imageCount === 0 && gifCount === 0) {
-            // 1. 没有新文件
+          if (parts.length === 0) {
             toastMessage = '已同步 0 张图片';
-          } else if (imageCount > 0 && gifCount === 0) {
-            // 2. 只有图片
-            toastMessage = `已同步 ${imageCount} 张图片`;
-          } else if (imageCount === 0 && gifCount > 0) {
-            // 3. 只有GIF
-            toastMessage = `已同步 ${gifCount} 张 GIF`;
           } else {
-            // 4. 图片 + GIF
-            toastMessage = `已同步 ${imageCount} 张图片，${gifCount} 段 GIF`;
+            toastMessage = `已同步 ${parts.join('，')}`;
           }
           
           // ✅ 显示 toast（延迟一点等 icon 开始闪烁）
@@ -4174,6 +4258,17 @@
           if (checkQRCodeVisibility()) {
             updateQRCodeDisplay();
           }
+        } else if (data.type === 'cache-existence-result') {
+          // ✅ 处理服务器返回的缓存检查结果
+          console.log('📥 收到服务器缓存检查结果:', data.results ? data.results.length : 0, '个文件');
+          
+          // 转发给 code.js 处理（转换消息类型以匹配 code.js 期望的格式）
+          parent.postMessage({
+            pluginMessage: {
+              type: 'server-cache-check-result',
+              results: data.results || []
+            }
+          }, '*');
         } else if (data.type === 'switch-sync-mode-result') {
           if (data.success) {
             // 简化消息：从"储存方式已切换为 XXX"改为"已切换为 XXX方式"
@@ -4260,9 +4355,18 @@
         exportedGifCount = 0;
         manualDragCount = 0;
         gifBackupCount = 0;
+        // ✅ 重置新的状态系统
+        pendingStates.exported = { count: 0, active: false };
+        pendingStates.savedVideo = { count: 0, active: false };
+        pendingStates.savedGif = { count: 0, active: false };
         
         // 重置同步标志，防止按钮永久禁用
         isManualSyncing = false;
+        syncStarted = false;
+        if (manualSyncTimeoutId) {
+          clearTimeout(manualSyncTimeoutId);
+          manualSyncTimeoutId = null;
+        }
       };
 
       ws.onclose = function () {
@@ -4274,11 +4378,20 @@
         exportedGifCount = 0;
         manualDragCount = 0;
         gifBackupCount = 0;
+        // ✅ 重置新的状态系统
+        pendingStates.exported = { count: 0, active: false };
+        pendingStates.savedVideo = { count: 0, active: false };
+        pendingStates.savedGif = { count: 0, active: false };
         
         if (heartbeatTimer) clearInterval(heartbeatTimer);
         if (updateCheckTimer) clearInterval(updateCheckTimer); // 清除更新检查定时器
         // 重置同步标志，防止按钮永久禁用
         isManualSyncing = false;
+        syncStarted = false;
+        if (manualSyncTimeoutId) {
+          clearTimeout(manualSyncTimeoutId);
+          manualSyncTimeoutId = null;
+        }
         
         // ✅ 智能重连逻辑
         if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
@@ -4417,6 +4530,10 @@
         if (type !== 'disconnected' && type !== 'waiting') {
           currentButtonState = null;
           justFinishedExport = false;
+          // ✅ 重置新的状态系统
+          pendingStates.exported = { count: 0, active: false };
+          pendingStates.savedVideo = { count: 0, active: false };
+          pendingStates.savedGif = { count: 0, active: false };
         }
         if (type === 'connected') {
         type = 'disconnected';
@@ -4474,12 +4591,35 @@
         return;
       }
 
-          // 2. Priority Override: Just finished export
-          // This ensures export result always overrides any previous state (including "saved video" etc.)
+          // ========================================
+          // ✅ 新的状态管理逻辑
+          // ========================================
+          // 规则：
+          // 1. 导出完成时，立即清除所有"已保存"状态，只显示"已导出"
+          // 2. 点击"已导出"后，恢复"已连接"
+          // 3. 同步完成时，"已保存视频"和"已保存GIF"可同时存在
+          // 4. 点击"已保存视频"后，只清除视频状态，继续显示GIF状态（如果有）
+          // 5. 点击"已保存GIF"后，只清除GIF状态，继续显示视频状态（如果有）
+          // 6. 所有状态都点击完后，恢复"已连接"
+          // ========================================
+
+          // 2. 导出完成 - 最高优先级，立即清除所有"已保存"状态
           if (justFinishedExport) {
-            currentButtonState = 'exported'; // Lock to exported state
-            // Display at least count of 1 even if exportedGifCount is 0 (file was skipped)
-            const displayCount = exportedGifCount > 0 ? exportedGifCount : 1;
+            // ✅ 关键：导出完成时，清除所有"已保存"状态
+            pendingStates.savedVideo.active = false;
+            pendingStates.savedVideo.count = 0;
+            pendingStates.savedGif.active = false;
+            pendingStates.savedGif.count = 0;
+            manualDragCount = 0;
+            gifBackupCount = 0;
+            skippedFilesSet.clear();
+            
+            // 设置导出状态
+            pendingStates.exported.active = true;
+            pendingStates.exported.count = exportedGifCount > 0 ? exportedGifCount : 1;
+            currentButtonState = 'exported';
+            
+            const displayCount = pendingStates.exported.count;
             const exportText = `已导出 ${displayCount} 段 GIF`;
             statusEl.innerHTML = `
               <div class="bezel"></div>
@@ -4493,28 +4633,20 @@
               if (ws && ws.readyState === WebSocket.OPEN) {
                 ws.send(JSON.stringify({ type: 'open-folder', targetFolder: 'GIF-导出' }));
               }
+              // ✅ 点击后清除导出状态，恢复"已连接"
+              pendingStates.exported.active = false;
+              pendingStates.exported.count = 0;
               exportedGifCount = 0;
               justFinishedExport = false;
-              
-              // Explicitly restore previous states if counts exist
-              if (manualDragCount > 0) {
-                currentButtonState = 'video';
-              } else if (gifBackupCount > 0) {
-                currentButtonState = 'gif-backup';
-              } else {
-                currentButtonState = null; // Unlock state
-              }
-              
+              currentButtonState = null;
               updateStatus('connected', '已连接');
             };
             return;
           }
 
-          // 3. Check if we have a locked button state
-          // If locked, maintain that state (only update count) until user clicks
-          if (currentButtonState === 'exported') {
-            // Display at least count of 1 even if exportedGifCount is 0 (file was skipped)
-            const displayCount = exportedGifCount > 0 ? exportedGifCount : 1;
+          // 3. 检查是否有导出状态（已锁定）
+          if (pendingStates.exported.active || currentButtonState === 'exported') {
+            const displayCount = pendingStates.exported.count > 0 ? pendingStates.exported.count : (exportedGifCount > 0 ? exportedGifCount : 1);
             const exportText = `已导出 ${displayCount} 段 GIF`;
             statusEl.innerHTML = `
               <div class="bezel"></div>
@@ -4523,111 +4655,71 @@
               <span style="position: relative; z-index: 2;">${exportText}</span>
             `;
             statusEl.className = 'connection-pill connected interactive';
-        statusEl.style.cursor = 'pointer';
-        statusEl.onclick = function() {
-          if (ws && ws.readyState === WebSocket.OPEN) {
+            statusEl.style.cursor = 'pointer';
+            statusEl.onclick = function() {
+              if (ws && ws.readyState === WebSocket.OPEN) {
                 ws.send(JSON.stringify({ type: 'open-folder', targetFolder: 'GIF-导出' }));
-          }
+              }
+              pendingStates.exported.active = false;
+              pendingStates.exported.count = 0;
               exportedGifCount = 0;
               justFinishedExport = false;
+              currentButtonState = null;
+              updateStatus('connected', '已连接');
+            };
+            return;
+          }
+          
+          // 4. 检查"已保存视频"状态
+          // 同步计数到 pendingStates
+          if (manualDragCount > 0) {
+            pendingStates.savedVideo.active = true;
+            pendingStates.savedVideo.count = manualDragCount;
+          }
+          
+          if (pendingStates.savedVideo.active && pendingStates.savedVideo.count > 0) {
+            currentButtonState = 'video';
+            const warningText = `已保存 ${pendingStates.savedVideo.count} 段视频`;
+            statusEl.innerHTML = `
+              <div class="bezel"></div>
+              <div class="face"></div>
+              <span class="status-dot" style="position: relative; z-index: 2;"></span>
+              <span style="position: relative; z-index: 2;">${warningText}</span>
+            `;
+            statusEl.className = 'connection-pill connected interactive';
+            statusEl.style.cursor = 'pointer';
+            statusEl.onclick = function() {
+              if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'open-local-folder', targetFolder: '视频' }));
+              }
+              // ✅ 只清除视频状态
+              pendingStates.savedVideo.active = false;
+              pendingStates.savedVideo.count = 0;
+              manualDragCount = 0;
+              skippedFilesSet.clear();
               
-              // Explicitly restore previous states if counts exist
-              if (manualDragCount > 0) {
-                currentButtonState = 'video';
-              } else if (gifBackupCount > 0) {
+              // ✅ 检查是否还有 GIF 状态，如果有则继续显示
+              if (pendingStates.savedGif.active && pendingStates.savedGif.count > 0) {
                 currentButtonState = 'gif-backup';
               } else {
-                currentButtonState = null; // Unlock state
+                currentButtonState = null;
               }
-              
-              updateStatus('connected', '已连接');
-            };
-            return;
-          }
-          
-          if (currentButtonState === 'video' && manualDragCount > 0) {
-            const warningText = `已保存 ${manualDragCount} 段视频`;
-            statusEl.innerHTML = `
-              <div class="bezel"></div>
-              <div class="face"></div>
-              <span class="status-dot" style="position: relative; z-index: 2;"></span>
-              <span style="position: relative; z-index: 2;">${warningText}</span>
-            `;
-            statusEl.className = 'connection-pill connected interactive';
-        statusEl.style.cursor = 'pointer';
-        statusEl.onclick = function() {
-          if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: 'open-local-folder', targetFolder: '视频' }));
-          }
-              manualDragCount = 0;
-              skippedFilesSet.clear(); // ✅ 清空去重集合，允许相同文件再次触发提示
-              currentButtonState = null; // Unlock state
               justFinishedExport = false;
-              updateStatus('connected', '已连接');
-            };
-            return;
-          } else if (currentButtonState === 'video' && manualDragCount === 0) {
-            // Count is 0, unlock the state
-            currentButtonState = null;
-          }
-          
-          if (currentButtonState === 'gif-backup' && gifBackupCount > 0) {
-            const backupText = `已保存 ${gifBackupCount} 段 GIF`;
-            statusEl.innerHTML = `
-              <div class="bezel"></div>
-              <div class="face"></div>
-              <span class="status-dot" style="position: relative; z-index: 2;"></span>
-              <span style="position: relative; z-index: 2;">${backupText}</span>
-            `;
-            statusEl.className = 'connection-pill connected interactive';
-        statusEl.style.cursor = 'pointer';
-        statusEl.onclick = function() {
-          if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: 'open-local-folder', targetFolder: 'GIF' }));
-          }
-              gifBackupCount = 0;
-              currentButtonState = null; // Unlock state
-              justFinishedExport = false;
-              updateStatus('connected', '已连接');
-            };
-            return;
-          } else if (currentButtonState === 'gif-backup' && gifBackupCount === 0) {
-            // Count is 0, unlock the state
-            currentButtonState = null;
-          }
-
-          // 4. No locked state - determine new state based on priority
-          // Priority: Video > GIF Backup > Export (existing)
-          
-          /* JustFinishedExport moved to top priority */
-
-          if (manualDragCount > 0) {
-            currentButtonState = 'video'; // Lock to video state
-            const warningText = `已保存 ${manualDragCount} 段视频`;
-            statusEl.innerHTML = `
-              <div class="bezel"></div>
-              <div class="face"></div>
-              <span class="status-dot" style="position: relative; z-index: 2;"></span>
-              <span style="position: relative; z-index: 2;">${warningText}</span>
-            `;
-            statusEl.className = 'connection-pill connected interactive';
-        statusEl.style.cursor = 'pointer';
-        statusEl.onclick = function() {
-          if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: 'open-local-folder', targetFolder: '视频' }));
-          }
-              manualDragCount = 0;
-              skippedFilesSet.clear(); // ✅ 清空去重集合
-              currentButtonState = null; // Unlock state
-              justFinishedExport = false;
-              updateStatus('connected', '已连接');
+              updateStatus('connected', '');
             };
             return;
           }
           
+          // 5. 检查"已保存GIF"状态
+          // 同步计数到 pendingStates
           if (gifBackupCount > 0) {
-            currentButtonState = 'gif-backup'; // Lock to GIF backup state
-            const backupText = `已保存 ${gifBackupCount} 段 GIF`;
+            pendingStates.savedGif.active = true;
+            pendingStates.savedGif.count = gifBackupCount;
+          }
+          
+          if (pendingStates.savedGif.active && pendingStates.savedGif.count > 0) {
+            currentButtonState = 'gif-backup';
+            const backupText = `已保存 ${pendingStates.savedGif.count} 段 GIF`;
             statusEl.innerHTML = `
               <div class="bezel"></div>
               <div class="face"></div>
@@ -4635,21 +4727,33 @@
               <span style="position: relative; z-index: 2;">${backupText}</span>
             `;
             statusEl.className = 'connection-pill connected interactive';
-        statusEl.style.cursor = 'pointer';
-        statusEl.onclick = function() {
-          if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: 'open-local-folder', targetFolder: 'GIF' }));
-          }
+            statusEl.style.cursor = 'pointer';
+            statusEl.onclick = function() {
+              if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'open-local-folder', targetFolder: 'GIF' }));
+              }
+              // ✅ 只清除 GIF 状态
+              pendingStates.savedGif.active = false;
+              pendingStates.savedGif.count = 0;
               gifBackupCount = 0;
-              currentButtonState = null; // Unlock state
+              
+              // ✅ 检查是否还有视频状态，如果有则继续显示
+              if (pendingStates.savedVideo.active && pendingStates.savedVideo.count > 0) {
+                currentButtonState = 'video';
+              } else {
+                currentButtonState = null;
+              }
               justFinishedExport = false;
-              updateStatus('connected', '已连接');
+              updateStatus('connected', '');
             };
             return;
           }
 
+          // 6. 兼容旧逻辑：检查 exportedGifCount（如果新状态系统没捕获到）
           if (exportedGifCount > 0) {
-            currentButtonState = 'exported'; // Lock to exported state
+            pendingStates.exported.active = true;
+            pendingStates.exported.count = exportedGifCount;
+            currentButtonState = 'exported';
             const exportText = `已导出 ${exportedGifCount} 段 GIF`;
             statusEl.innerHTML = `
               <div class="bezel"></div>
@@ -4663,24 +4767,18 @@
               if (ws && ws.readyState === WebSocket.OPEN) {
                 ws.send(JSON.stringify({ type: 'open-folder', targetFolder: 'GIF-导出' }));
               }
+              // ✅ 使用新的状态管理系统
+              pendingStates.exported.active = false;
+              pendingStates.exported.count = 0;
               exportedGifCount = 0;
               justFinishedExport = false;
-              
-              // Explicitly restore previous states if counts exist
-              if (manualDragCount > 0) {
-                currentButtonState = 'video';
-              } else if (gifBackupCount > 0) {
-                currentButtonState = 'gif-backup';
-      } else {
-                currentButtonState = null; // Unlock state
-              }
-              
+              currentButtonState = null;
               updateStatus('connected', '已连接');
             };
             return;
           }
 
-          // 4. Default: Connected (Screen Style)
+          // 7. Default: Connected (Screen Style)
           // No counts, show connected state
           currentButtonState = null; // Ensure state is unlocked
           statusEl.innerHTML = `
@@ -5438,31 +5536,31 @@
         // 只更新按钮文字，不显示 toast
         if (bannerBtn) {
           bannerBtn.disabled = true;
-          // 去除蓝色背景：添加 transparent 类
-          bannerBtn.classList.add('transparent');
-          bannerBtn.textContent = data.progress ? `${data.progress}%` : '下载中...';
+          // 保持按钮样式，不添加 transparent 类
+          // bannerBtn.classList.add('transparent'); // 已移除
+          bannerBtn.textContent = data.progress ? `下载中 ${data.progress}%` : '下载中...';
       }
-      } else if (data.status === 'extracting') {
-        // 只更新按钮文字，不显示 toast
+      } else if (data.status === 'extracting' || data.status === 'checking' || data.status === 'installing') {
+        // 合并中间状态为“正在安装”
         if (bannerBtn) {
-          bannerBtn.classList.add('transparent');
-          bannerBtn.textContent = '解压中...';
-          }
-      } else if (data.status === 'checking') {
-        // 只更新按钮文字，不显示 toast
-        if (bannerBtn) {
-          bannerBtn.classList.add('transparent');
-          bannerBtn.textContent = '检查中...';
-        }
-      } else if (data.status === 'installing') {
-        // 只更新按钮文字，不显示 toast
-        if (bannerBtn) {
-          bannerBtn.classList.add('transparent');
-          bannerBtn.textContent = '安装中...';
+          // bannerBtn.classList.add('transparent'); // 已移除
+          bannerBtn.textContent = '正在安装';
         }
       } else if (data.status === 'completed') {
         const successMsg = data.message || `更新完成！已更新 ${data.updatedCount || 0} 个文件`;
         showToast(successMsg, 'success');
+        
+        // 更新按钮状态为“更新完成”
+        if (bannerBtn) {
+          bannerBtn.textContent = '更新完成';
+          bannerBtn.classList.add('success');
+          
+          // 成功状态：绿色描边风格
+          bannerBtn.style.background = 'transparent';
+          bannerBtn.style.color = '#4CAF50'; 
+          bannerBtn.style.borderColor = '#4CAF50';
+          bannerBtn.style.opacity = '1';
+        }
         
         // 保存当前版本号到 localStorage，防止 banner 再次弹出
         if (data.latestVersion) {
@@ -5475,8 +5573,10 @@
           }
         }
         
-        // 隐藏更新通知条
-        hideUpdateBanner();
+        // 隐藏更新通知条 (延迟一点以便用户看到“更新完成”)
+        setTimeout(() => {
+          hideUpdateBanner();
+        }, 1500);
         
         // 更新版本（如果提供）
         if (data.version) {
@@ -5499,8 +5599,14 @@
         // 重置按钮状态，但保持 banner 主文字不变
         if (bannerBtn) {
           bannerBtn.disabled = false;
-          bannerBtn.classList.remove('transparent');
+          // bannerBtn.classList.remove('transparent'); // 已移除添加逻辑
           bannerBtn.textContent = '立即更新';
+          // 恢复样式
+          bannerBtn.classList.remove('success');
+          bannerBtn.style.background = '';
+          bannerBtn.style.color = '';
+          bannerBtn.style.borderColor = '';
+          bannerBtn.style.opacity = '';
         }
       }
     }
@@ -5538,6 +5644,9 @@
     const TOAST_DEBOUNCE_TIME = 500; // 去重时间窗口（毫秒）
     
     function showToast(message, type = 'info') {
+      // 最小化状态下不显示 toast
+      if (isMinimized) return;
+      
       const toast = document.getElementById('toast');
       if (!toast) return;
       
@@ -5623,6 +5732,9 @@
     }
 
     function showToastWithAction(message, actionText, actionCallback) {
+      // 最小化状态下不显示 toast
+      if (isMinimized) return;
+      
       const toast = document.getElementById('toast');
       if (!toast) return;
       
@@ -5890,22 +6002,61 @@
         updateBannerNowBtn.disabled = true;
         updateBannerNowBtn.textContent = '更新中...';
         
-        // 统一全量更新（插件 + 服务器所有代码）
-          if (ws && ws.readyState === 1) {
-          // 发送统一更新请求
-          ws.send(JSON.stringify({ type: 'update-full' }));
-          console.log('📤 发送全量更新请求（插件 + 服务器）');
-          
-          // 不修改 banner 主文字，保持"发现新版本 vX.X.X"
-          // 进度信息通过 handleUpdateProgress 处理（只修改按钮文字）
-        } else {
-          showToast('未连接到服务器', 'error');
-          updateBannerNowBtn.disabled = false;
-          updateBannerNowBtn.textContent = '立即更新';
-          }
+        // Mock Update Flow (Simulated)
+        console.log('🧪 Starting Mock Update Flow...');
         
-        // 注：已移除旧的分类更新逻辑（插件和服务器分开更新）
-        // 现在统一使用 update-full 进行全量更新
+        // Helper to simulate delay
+        const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+        
+        (async () => {
+          try {
+             // 1. Downloading (0% -> 100%)
+             // 保持按钮样式，不添加 transparent 类
+             for (let i = 0; i <= 100; i += 10) {
+               updateBannerNowBtn.textContent = `下载中 ${i}%`;
+               await delay(200);
+             }
+             
+             // 2. Installing (Only one step)
+             updateBannerNowBtn.textContent = '正在安装';
+             await delay(2000); // Wait a bit longer to simulate installation
+             
+             // 5. Completed
+             updateBannerNowBtn.textContent = '更新完成';
+             updateBannerNowBtn.classList.add('success'); 
+             
+             // 成功状态：绿色描边风格（保持按钮形状，但改为绿色文字）
+             updateBannerNowBtn.style.background = 'transparent';
+             updateBannerNowBtn.style.color = '#4CAF50'; 
+             updateBannerNowBtn.style.borderColor = '#4CAF50';
+             updateBannerNowBtn.style.opacity = '1'; // 确保不透明
+             
+             showToast('更新成功！', 'success');
+             
+             // 6. Hide Banner
+             await delay(1500);
+             hideUpdateBanner();
+             console.log('✅ Mock Update Flow Completed');
+             
+          } catch (e) {
+             console.error('Mock Update Failed', e);
+             updateBannerNowBtn.disabled = false;
+             updateBannerNowBtn.textContent = '立即更新';
+             updateBannerNowBtn.style.background = '';
+             updateBannerNowBtn.style.color = '';
+             updateBannerNowBtn.style.borderColor = '';
+             updateBannerNowBtn.style.opacity = '';
+          }
+        })();
+
+        /* 
+        // Real Update Logic (Commented out for Mock)
+        if (ws && ws.readyState === 1) {
+          // ...
+        } else {
+          // ...
+        }
+        */
       };
     }
 
@@ -5927,15 +6078,71 @@
       const overlay = document.getElementById('uploadGifOverlay');
       const subtitleContainer = document.getElementById('unsynced-gifs-subtitle');
       const multiFileInput = document.getElementById('multi-file-input');
-      const selectFilesBtn = document.getElementById('select-files-btn');
+      const dropzone = document.getElementById('upload-dropzone');
+      const dropzoneText = document.getElementById('dropzone-text');
       
       // 填充副标题：通用提示
       subtitleContainer.innerHTML = `请手动选择 Frame 中包含的本地录屏文件`;
       
-      // 绑定文件选择器
-      selectFilesBtn.onclick = () => {
+      // 重置拖拽区域状态
+      resetDropzoneStyle();
+      
+      // 点击拖拽区域 -> 打开文件选择器
+      dropzone.onclick = () => {
         multiFileInput.click();
       };
+      
+      // 拖拽进入
+      dropzone.ondragenter = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropzone.style.border = '2px dashed var(--primary)';
+        dropzone.style.background = 'var(--primary-bg)';
+        dropzone.style.boxShadow = 'var(--pill-recessed-shadow)';
+      };
+      
+      // 拖拽悬停
+      dropzone.ondragover = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        // 保持悬停状态样式
+        dropzone.style.border = '2px dashed var(--primary)';
+        dropzone.style.background = 'var(--primary-bg)';
+      };
+      
+      // 拖拽离开
+      dropzone.ondragleave = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        resetDropzoneStyle();
+      };
+      
+      // 拖拽放下
+      dropzone.ondrop = async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        resetDropzoneStyle();
+        
+        const files = Array.from(e.dataTransfer.files).filter(file => {
+          const ext = file.name.toLowerCase().split('.').pop();
+          return ['gif', 'mov', 'mp4'].includes(ext);
+        });
+        
+        if (files.length === 0) {
+          showToast('请拖入 .gif .mov .mp4 格式的文件', 'warning');
+          return;
+        }
+        
+        console.log(`📁 用户拖入了 ${files.length} 个文件，开始匹配并上传...`);
+        await matchAndUploadFiles(files, unsyncedGifs);
+      };
+      
+      // 重置拖拽区域样式（和 status pill 保持一致）
+      function resetDropzoneStyle() {
+        dropzone.style.border = 'none';
+        dropzone.style.background = 'var(--pill-recessed-bg)';
+        dropzone.style.boxShadow = 'var(--pill-recessed-shadow)';
+      }
       
       // 选择文件后立即开始上传
       multiFileInput.onchange = async (e) => {
@@ -5975,11 +6182,20 @@
       const progressContainer = document.getElementById('upload-progress-container');
       const progressText = document.getElementById('upload-progress-text');
       const progressBar = document.getElementById('upload-progress-bar');
-      const selectFilesBtn = document.getElementById('select-files-btn');
+      const dropzone = document.getElementById('upload-dropzone');
       
-      // 显示进度，隐藏选择按钮
-      selectFilesBtn.style.display = 'none';
-      progressContainer.style.display = 'block';
+      // 显示进度，隐藏拖拽区域
+      if (dropzone) dropzone.style.display = 'none';
+      if (progressContainer) progressContainer.style.display = 'block';
+      
+      // 立即设置初始进度，避免显示空的进度条
+      if (progressBar) {
+        progressBar.style.width = '0%';
+        // 强制重绘后再设置初始进度
+        progressBar.offsetHeight;
+        progressBar.style.width = '5%';
+      }
+      if (progressText) progressText.textContent = '上传中...';
       
       try {
         // 匹配文件到图层
@@ -6035,70 +6251,37 @@
         const totalToUpload = matchedGifs.length;
         
         if (totalToUpload === 0) {
-          throw new Error('没有匹配到任何文件，请确保文件名与图层名相似');
+          showToast('未能匹配任何文件，请检查文件名是否包含在图层名中', 'warning');
+          // 恢复拖拽区域
+          if (dropzone) dropzone.style.display = 'flex';
+          if (progressContainer) progressContainer.style.display = 'none';
+          return;
         }
         
-        console.log(`📤 开始上传 ${totalToUpload} 个文件...`);
+        console.log(`🚀 开始上传 ${totalToUpload} 个文件...`);
         
-        // 检查是否有大文件需要压缩
-        const largeFiles = matchedGifs.filter(gif => {
-          const file = selectedFiles[gif.layerId];
-          return file.size > 50 * 1024 * 1024; // 50MB
-        });
+        // 匹配完成，更新进度
+        if (progressBar) progressBar.style.width = '15%';
         
-        if (largeFiles.length > 0) {
-          const totalSize = largeFiles.reduce((sum, gif) => sum + selectedFiles[gif.layerId].size, 0);
-          console.log(`⚠️  检测到 ${largeFiles.length} 个大文件 (总计 ${(totalSize / 1024 / 1024).toFixed(1)} MB)，服务器将自动压缩`);
-        }
-        
-        // 上传匹配的文件
-        for (let i = 0; i < matchedGifs.length; i++) {
+        // 开始上传
+        for (let i = 0; i < totalToUpload; i++) {
           const gif = matchedGifs[i];
           const file = selectedFiles[gif.layerId];
           
-          const fileSizeMB = (file.size / 1024 / 1024).toFixed(1);
-          const needsCompression = file.size > 50 * 1024 * 1024;
+          // 更新进度条（从20%开始，到90%，留出空间给最后的100%动画）
+          const percent = (20 + ((i + 1) / totalToUpload) * 70).toFixed(0);
+          if (progressBar) progressBar.style.width = `${percent}%`;
           
-          // 先更新进度条
-          const progressPercent = ((i) / totalToUpload * 100).toFixed(0);
-          progressBar.style.width = `${progressPercent}%`;
-          
-          if (needsCompression) {
-            progressText.textContent = `正在上传 (${i + 1}/${totalToUpload}): ${file.name} (${fileSizeMB}MB，服务器将压缩)`;
-          } else {
-            progressText.textContent = `正在准备上传 (${i + 1}/${totalToUpload}): ${file.name} (${fileSizeMB}MB)`;
-          }
-          
-          // 读取文件并转换为 Base64（更快）
-          console.log(`   📖 正在读取文件: ${file.name} (${fileSizeMB}MB)`);
-          progressText.textContent = `正在读取 (${i + 1}/${totalToUpload}): ${file.name}`;
-          
-          const fileBuffer = await file.arrayBuffer();
-          
-          // 使用 Base64 编码代替数组（大幅提升传输速度）
-          console.log(`   🔄 正在编码文件...`);
-          progressText.textContent = `正在编码 (${i + 1}/${totalToUpload}): ${file.name}`;
-          
-          const base64 = await new Promise((resolve) => {
-            const blob = new Blob([fileBuffer]);
+          // 读取文件内容为 Base64
+          const base64Data = await new Promise((resolve, reject) => {
             const reader = new FileReader();
-            reader.onloadend = () => resolve(reader.result.split(',')[1]);
-            reader.readAsDataURL(blob);
+            reader.onload = () => resolve(reader.result.split(',')[1]);
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
           });
           
-          console.log(`   ✅ 编码完成，开始上传...`);
-          
-          // 更新为"上传中"
-          progressText.textContent = `正在上传 (${i + 1}/${totalToUpload}): ${file.name} (${fileSizeMB}MB)`;
-          
-          const uploadResult = await uploadGifToCloud(file.name, base64, gif.layerId, (stage) => {
-            // 上传阶段回调
-            if (stage === 'sending') {
-              progressText.textContent = `正在传输 (${i + 1}/${totalToUpload}): ${file.name} (${fileSizeMB}MB)`;
-            } else if (stage === 'processing') {
-              progressText.textContent = `服务器处理中 (${i + 1}/${totalToUpload}): ${file.name}`;
-            }
-          });
+          // 发送上传请求
+          const uploadResult = await uploadGifToCloud(file.name, base64Data, gif.layerId);
           
           if (uploadResult.success) {
             uploadedGifs.add(gif.layerId);
@@ -6124,8 +6307,11 @@
         }
         
         // 确保进度条显示 100%
-        progressBar.style.width = '100%';
-        progressText.textContent = '上传完成！正在继续导出...';
+        if (progressBar) progressBar.style.width = '100%';
+        if (progressText) progressText.textContent = '上传完成';
+        
+        // 等待进度条动画完成，让用户看到100%的效果
+        await new Promise(resolve => setTimeout(resolve, 500));
         
         // 检查上传文件大小，如果较大给出优化提示
         const totalUploadSize = matchedGifs.reduce((sum, gif) => {
@@ -6176,9 +6362,9 @@
         console.error('❌ 上传失败:', error);
         showToast('上传失败: ' + error.message, 'error');
         
-        // 恢复选择按钮
-        selectFilesBtn.style.display = 'block';
-        progressContainer.style.display = 'none';
+        // 恢复拖拽区域
+        if (dropzone) dropzone.style.display = 'flex';
+        if (progressContainer) progressContainer.style.display = 'none';
       }
     }
     
@@ -6686,6 +6872,13 @@
     let totalManualSyncFiles = 0;
     let completedManualSyncFiles = 0;
     let isManualSyncing = false;
+    let syncStarted = false; // ✅ 标记同步是否已经开始（收到了第一个响应）
+    let manualSyncTimeoutId = null; // ✅ 保存超时 ID，以便清除
+    
+    // ✅ 导出超时检测
+    let exportTimeoutId = null; // 导出超时计时器
+    let lastProgressUpdate = 0; // 上次进度更新时间
+    const EXPORT_STALL_TIMEOUT = 180000; // 3分钟无进度更新视为卡住
     let circumferenceManual = 0;
     let progressCircleManual = null;
     let progressRingManual = null;
@@ -6715,6 +6908,21 @@
 
     // Initialize after DOM is ready
     document.addEventListener('DOMContentLoaded', function() {
+        // Check for Update Banner and adjust height immediately
+        const updateBanner = document.getElementById('updateBanner');
+        if (updateBanner && (updateBanner.classList.contains('show') || updateBanner.style.display === 'block' || updateBanner.style.display === 'flex')) {
+            console.log('📏 Initial Resize: Banner visible, setting height to 460');
+            parent.postMessage({
+                pluginMessage: { type: 'resize', width: 360, height: 460 }
+            }, '*');
+        } else {
+            // Ensure standard height
+            console.log('📏 Initial Resize: Standard height 400');
+            parent.postMessage({
+                pluginMessage: { type: 'resize', width: 360, height: 400 }
+            }, '*');
+        }
+
         // 开发者模式：显示模式切换区域
         if (DEVELOPER_MODE) {
           const modeSwitchSection = document.getElementById('modeSwitchSection');
@@ -6801,13 +7009,23 @@
                 manualSyncBtn.classList.add('exporting');
                 manualSyncBtn.setAttribute('data-tooltip', '同步中...');
                 
+                // ✅ 重置同步开始标记
+                syncStarted = false;
+                
                 log('🫳🏻 开始手动同步...');
                 updateStatus('connected', '正在同步');
                 
-                // ✅ 超时保护 (10秒)
-                setTimeout(() => {
-                    if (isManualSyncing) {
-                        console.warn('⚠️ 手动同步超时 (10s)');
+                // ✅ 清除之前的超时（如果有）
+                if (manualSyncTimeoutId) {
+                    clearTimeout(manualSyncTimeoutId);
+                    manualSyncTimeoutId = null;
+                }
+                
+                // ✅ 超时保护 (30秒内完全没反应才算超时)
+                manualSyncTimeoutId = setTimeout(() => {
+                    // 只有当同步尚未开始时才判断为超时
+                    if (isManualSyncing && !syncStarted) {
+                        console.warn('⚠️ 手动同步超时 (30s内无响应)');
                         isManualSyncing = false;
                         manualSyncBtn.classList.remove('exporting');
                         manualSyncBtn.setAttribute('data-tooltip', '手动同步');
@@ -6816,9 +7034,14 @@
                             progressRingManual.style.animation = '';
                         }
                         updateStatus('connected', '同步超时');
-                        showToast('同步请求超时', 'error');
+                        showToast('同步请求超时，请检查连接', 'error');
+                        manualSyncTimeoutId = null;
+                    } else if (isManualSyncing && syncStarted) {
+                        // 已经开始同步但还没完成，不算超时，清除超时 ID
+                        console.log('✅ 同步已开始，取消超时检查');
+                        manualSyncTimeoutId = null;
                     }
-                }, 10000);
+                }, 30000);
                 
                 // ✅ 直接发送同步请求（立即响应）
                 try {
@@ -6944,6 +7167,9 @@
 
     // 更新真实进度
     function updateRealProgress(percent, message) {
+        // ✅ 收到进度更新，重置卡住检测计时器
+        resetExportStallDetection();
+        
         // 如果有消息，可以更新状态文本（如果有状态显示区域的话）
         if (message) {
             console.log(`📊 进度 ${percent}%: ${message}`);
@@ -6986,6 +7212,7 @@
         
         // 初始进度
         currentSmoothProgress = 2;
+        lastProgressUpdate = Date.now(); // 记录开始时间
         console.log('📈 调用 setExportProgress(2)...');
         setExportProgress(currentSmoothProgress);
         
@@ -6993,6 +7220,9 @@
            const btnText = exportGifBtn.querySelector('span');
            if (btnText) btnText.textContent = '准备中...';
         }
+        
+        // ✅ 启动导出超时检测
+        startExportStallDetection();
         
         smoothProgressInterval = setInterval(() => {
             // 仅仅做极缓慢的增加，作为"我还在运行"的信号
@@ -7011,6 +7241,61 @@
             }
             
         }, 100); 
+    }
+    
+    // ✅ 导出卡住检测
+    function startExportStallDetection() {
+        // 清除之前的超时（如果有）
+        if (exportTimeoutId) {
+            clearTimeout(exportTimeoutId);
+            exportTimeoutId = null;
+        }
+        
+        // 设置新的超时检测
+        exportTimeoutId = setTimeout(() => {
+            // 检查是否还在导出中，且进度卡在高位（>85%）
+            if (isExporting && currentSmoothProgress >= 85) {
+                console.warn('⚠️  检测到导出卡住（进度停滞超过 3 分钟）');
+                
+                // 停止导出并提示用户
+                stopSmoothProgress();
+                clearExportStallDetection();
+                
+                isExporting = false;
+                totalExports = 0;
+                completedExports = 0;
+                currentSmoothProgress = 0;
+                
+                // 重置 UI
+                if (exportGifBtn) {
+                    exportGifBtn.classList.remove("exporting");
+                    exportGifBtn.classList.remove("success");
+                    exportGifBtn.setAttribute('data-tooltip', '导出 GIF');
+                }
+                if (progressRing) progressRing.style.opacity = 0;
+                
+                // 提示用户
+                showToast('导出的 GIF 尺寸过大，处理超时', 'error');
+                log('❌ 导出超时：GIF 尺寸过大，建议减小画面尺寸或缩短视频时长');
+                updateStatus('connected', '');
+            }
+        }, EXPORT_STALL_TIMEOUT);
+    }
+    
+    // ✅ 清除导出卡住检测
+    function clearExportStallDetection() {
+        if (exportTimeoutId) {
+            clearTimeout(exportTimeoutId);
+            exportTimeoutId = null;
+        }
+    }
+    
+    // ✅ 重置导出卡住检测（收到进度更新时调用）
+    function resetExportStallDetection() {
+        lastProgressUpdate = Date.now();
+        if (isExporting) {
+            startExportStallDetection();
+        }
     }
 
     function stopSmoothProgress() {
@@ -7066,6 +7351,7 @@
         
         // 立即停止平滑进度动画
         stopSmoothProgress();
+        clearExportStallDetection(); // ✅ 清除超时检测
         
         // 完全重置所有状态
         isExporting = false;
@@ -7084,7 +7370,7 @@
         // 立即隐藏进度环
         setExportProgress(0);
         
-        showToastWithAction("GIF 导出已终止", null, null, 2000);
+        showToast("GIF 导出已停止", 'info');
 
         if (progressRing) {
             progressRing.style.transition = 'none';
@@ -7115,14 +7401,15 @@
 
     function handleExportSuccess() {
         completedExports++;
-        
+
         console.log(`✅ 导出成功 ${completedExports}/${totalExports}`);
-        
+
         // On final completion, stop smooth progress and update status pill
         if (completedExports >= totalExports && totalExports > 0) {
             console.log('🎉 所有导出完成！');
-            
+
             stopSmoothProgress();
+            clearExportStallDetection(); // ✅ 清除超时检测
             setExportProgress(100);
             
             setTimeout(() => {
@@ -7162,10 +7449,11 @@
 
     function handleExportError() {
         completedExports++;
-        
+
         // On final completion (even with errors), stop smooth progress
         if (totalExports > 0 && completedExports >= totalExports) {
             stopSmoothProgress();
+            clearExportStallDetection(); // ✅ 清除超时检测
             setExportProgress(100);
             
             setTimeout(() => {

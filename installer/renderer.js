@@ -21,7 +21,7 @@ window.closeAlert = function() {
   }
 };
 
-let currentStep = 2; // 直接从 Step 2 开始（环境检查）
+let currentStep = 1; // 从 Step 1 (封面) 开始
 let installPath = '';
 let selectedMode = 'drive'; // 默认 Google 模式
 let userId = '';
@@ -30,6 +30,12 @@ let userId = '';
 function showStep(step) {
   document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
   document.getElementById(`step${step}`).classList.add('active');
+  
+  // 第一步（封面页）隐藏顶部栏，其他步骤显示
+  const header = document.querySelector('.header');
+  if (header) {
+    header.style.display = step === 1 ? 'none' : 'flex';
+  }
   
   // 更新步骤指示器（现在只有 5 步）
   document.querySelectorAll('.dot').forEach((dot, index) => {
@@ -238,185 +244,158 @@ let dependencyStatus = {
 // Step 2: 统一的系统检查（自动开始）
 async function checkSystemRequirements() {
   const checks = document.getElementById('systemChecks');
-  const installAllSection = document.getElementById('installAllSection');
   const step2Buttons = document.getElementById('step2Buttons');
+  const actionBtn = document.getElementById('step2ActionBtn');
   
-  // 重置状态
-  dependencyStatus = {
-    homebrew: null,
-    node: null,
-    imagemagick: null,
-    ffmpeg: null
-  };
+  // 立即显示按钮区域
+  step2Buttons.style.display = 'flex';
   
-  // 检查 Homebrew
-  const homebrewCheck = checks.children[0];
-  const homebrewResult = await ipcRenderer.invoke('check-homebrew');
-  dependencyStatus.homebrew = homebrewResult.installed;
+  // 设置为加载状态
+  actionBtn.disabled = true;
+  actionBtn.innerHTML = '<svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg> 检测中...';
   
-  if (homebrewResult.installed) {
-    homebrewCheck.className = 'status-item success';
-    homebrewCheck.innerHTML = `
-      <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
-      <div class="status-content">
-        <div class="status-label">Homebrew</div>
-        <div class="status-detail">已安装</div>
-      </div>
-    `;
-  } else {
-    homebrewCheck.className = 'status-item error';
-    homebrewCheck.innerHTML = `
-      <div class="status-icon"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
-      <div class="status-content">
-        <div class="status-label">Homebrew</div>
-        <div class="status-detail">未安装</div>
-      </div>
-    `;
-  }
-  
-  // 检查 Node.js
-  const nodeCheck = checks.children[1];
-  const nodeResult = await ipcRenderer.invoke('check-node');
-  dependencyStatus.node = nodeResult.installed;
-  
-  if (nodeResult.installed) {
-    nodeCheck.className = 'status-item success';
-    nodeCheck.innerHTML = `
-      <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
-      <div class="status-content">
-        <div class="status-label">Node.js</div>
-        <div class="status-detail">${nodeResult.version}</div>
-      </div>
-    `;
-  } else {
-    nodeCheck.className = 'status-item error';
-    nodeCheck.innerHTML = `
-      <div class="status-icon"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
-      <div class="status-content">
-        <div class="status-label">Node.js</div>
-        <div class="status-detail">未安装</div>
-      </div>
-    `;
-  }
-  
-  // 检查 ImageMagick
-  const imageMagickCheck = checks.children[2];
-  const imageMagickResult = await ipcRenderer.invoke('check-imagemagick');
-  dependencyStatus.imagemagick = imageMagickResult.installed;
-  
-  if (imageMagickResult.installed) {
-    imageMagickCheck.className = 'status-item success';
-    imageMagickCheck.innerHTML = `
-      <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
-      <div class="status-content">
-        <div class="status-label">ImageMagick</div>
-        <div class="status-detail">${imageMagickResult.version}</div>
-      </div>
-    `;
-  } else {
-    imageMagickCheck.className = 'status-item error';
-    imageMagickCheck.innerHTML = `
-      <div class="status-icon"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
-      <div class="status-content">
-        <div class="status-label">ImageMagick</div>
-        <div class="status-detail">未安装</div>
-      </div>
-    `;
-  }
-  
-  // 检查 FFmpeg
-  const ffmpegCheck = checks.children[3];
-  const ffmpegResult = await ipcRenderer.invoke('check-ffmpeg');
-  dependencyStatus.ffmpeg = ffmpegResult.installed;
-  
-  if (ffmpegResult.installed) {
-    ffmpegCheck.className = 'status-item success';
-    ffmpegCheck.innerHTML = `
-      <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
-      <div class="status-content">
-        <div class="status-label">FFmpeg</div>
-        <div class="status-detail">${ffmpegResult.version}</div>
-      </div>
-    `;
-  } else {
-    ffmpegCheck.className = 'status-item error';
-    ffmpegCheck.innerHTML = `
-      <div class="status-icon"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
-      <div class="status-content">
-        <div class="status-label">FFmpeg</div>
-        <div class="status-detail">未安装</div>
-      </div>
-    `;
-  }
-  
-  // 判断是否所有依赖都已安装
-  const allInstalled = homebrewResult.installed && nodeResult.installed && imageMagickResult.installed && ffmpegResult.installed;
-  
-  if (allInstalled) {
-    // 所有依赖已安装，显示下一步按钮
-    installAllSection.style.display = 'none';
-    step2Buttons.style.display = 'flex';
-    document.getElementById('step2Next').disabled = false;
-  } else {
-    // 有依赖未安装，显示一键安装按钮
-    installAllSection.style.display = 'block';
-    step2Buttons.style.display = 'flex';
-    document.getElementById('step2Next').disabled = true;
+  try {
+    // 重置状态
+    dependencyStatus = {
+      homebrew: null,
+      node: null,
+      imagemagick: null,
+      ffmpeg: null
+    };
+    
+    // 检查 Homebrew
+    const homebrewCheck = checks.children[0];
+    const homebrewResult = await ipcRenderer.invoke('check-homebrew');
+    dependencyStatus.homebrew = homebrewResult.installed;
+    
+    if (homebrewResult.installed) {
+      homebrewCheck.className = 'status-item success';
+      homebrewCheck.innerHTML = `
+        <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
+        <div class="status-content">
+          <div class="status-label">Homebrew</div>
+          <div class="status-detail">已安装</div>
+        </div>
+      `;
+    } else {
+      homebrewCheck.className = 'status-item error';
+      homebrewCheck.innerHTML = `
+        <div class="status-icon"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
+        <div class="status-content">
+          <div class="status-label">Homebrew</div>
+          <div class="status-detail">未安装</div>
+        </div>
+      `;
+    }
+    
+    // 检查 Node.js
+    const nodeCheck = checks.children[1];
+    const nodeResult = await ipcRenderer.invoke('check-node');
+    dependencyStatus.node = nodeResult.installed;
+    
+    if (nodeResult.installed) {
+      nodeCheck.className = 'status-item success';
+      nodeCheck.innerHTML = `
+        <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
+        <div class="status-content">
+          <div class="status-label">Node.js</div>
+          <div class="status-detail">已安装</div>
+        </div>
+      `;
+    } else {
+      nodeCheck.className = 'status-item error';
+      nodeCheck.innerHTML = `
+        <div class="status-icon"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
+        <div class="status-content">
+          <div class="status-label">Node.js</div>
+          <div class="status-detail">未安装</div>
+        </div>
+      `;
+    }
+    
+    // 检查 ImageMagick
+    const imageMagickCheck = checks.children[2];
+    const imageMagickResult = await ipcRenderer.invoke('check-imagemagick');
+    dependencyStatus.imagemagick = imageMagickResult.installed;
+    
+    if (imageMagickResult.installed) {
+      imageMagickCheck.className = 'status-item success';
+      imageMagickCheck.innerHTML = `
+        <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
+        <div class="status-content">
+          <div class="status-label">ImageMagick</div>
+          <div class="status-detail">已安装</div>
+        </div>
+      `;
+    } else {
+      imageMagickCheck.className = 'status-item error';
+      imageMagickCheck.innerHTML = `
+        <div class="status-icon"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
+        <div class="status-content">
+          <div class="status-label">ImageMagick</div>
+          <div class="status-detail">未安装</div>
+        </div>
+      `;
+    }
+    
+    // 检查 FFmpeg
+    const ffmpegCheck = checks.children[3];
+    const ffmpegResult = await ipcRenderer.invoke('check-ffmpeg');
+    dependencyStatus.ffmpeg = ffmpegResult.installed;
+    
+    if (ffmpegResult.installed) {
+      ffmpegCheck.className = 'status-item success';
+      ffmpegCheck.innerHTML = `
+        <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
+        <div class="status-content">
+          <div class="status-label">FFmpeg</div>
+          <div class="status-detail">已安装</div>
+        </div>
+      `;
+    } else {
+      ffmpegCheck.className = 'status-item error';
+      ffmpegCheck.innerHTML = `
+        <div class="status-icon"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
+        <div class="status-content">
+          <div class="status-label">FFmpeg</div>
+          <div class="status-detail">未安装</div>
+        </div>
+      `;
+    }
+    
+    // 判断是否所有依赖都已安装
+    const allInstalled = dependencyStatus.homebrew && dependencyStatus.node && dependencyStatus.imagemagick && dependencyStatus.ffmpeg;
+    
+    actionBtn.disabled = false;
+    
+    if (allInstalled) {
+      // 所有依赖已安装，显示下一步按钮
+      actionBtn.innerHTML = '下一步 <svg viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>';
+      actionBtn.onclick = window.nextStep;
+      // 确保样式是 primary
+      actionBtn.className = 'btn btn-primary';
+    } else {
+      // 有依赖未安装，显示重新检测按钮
+      actionBtn.innerHTML = '重新检测';
+      actionBtn.onclick = checkSystemRequirements;
+      // 保持 primary 样式，引导用户点击
+      actionBtn.className = 'btn btn-primary';
+    }
+  } catch (error) {
+    console.error('Environment check failed:', error);
+    showToast('环境检查失败: ' + error.message, 'error');
+    
+    // 出错时允许重试
+    actionBtn.disabled = false;
+    actionBtn.innerHTML = '重新检测';
+    actionBtn.onclick = checkSystemRequirements;
   }
 }
 
-// 一键安装所有缺失的依赖
-window.installAllDependencies = async function() {
-  const installAllBtn = document.getElementById('installAllBtn');
-  const recheckBtn = document.getElementById('recheckBtn');
-  
-  // 禁用按钮
-  installAllBtn.disabled = true;
-  recheckBtn.disabled = true;
-  installAllBtn.innerHTML = '<svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>打开终端中...';
-  
-  try {
-    // 调用一键安装
-    const result = await ipcRenderer.invoke('install-all-dependencies', dependencyStatus);
-    
-    if (result.success) {
-      showAlert('终端已打开，请按提示完成所有依赖的安装（只需输入一次密码）', '正在安装依赖');
-      
-      // 更新按钮状态
-      installAllBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>重新检测';
-      installAllBtn.disabled = false;
-      recheckBtn.disabled = false;
-      installAllBtn.onclick = recheckDependencies;
-    } else {
-      showToast(result.error || '无法打开终端', 'error');
-      installAllBtn.disabled = false;
-      recheckBtn.disabled = false;
-      installAllBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>一键安装所有依赖';
-    }
-  } catch (error) {
-    showToast('安装失败: ' + error.message, 'error');
-    installAllBtn.disabled = false;
-    recheckBtn.disabled = false;
-    installAllBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>一键安装所有依赖';
-  }
-};
-
-// 重新检测所有依赖
-window.recheckDependencies = async function() {
-  const installAllBtn = document.getElementById('installAllBtn');
-  const recheckBtn = document.getElementById('recheckBtn');
-  
-  recheckBtn.disabled = true;
-  installAllBtn.disabled = true;
-  recheckBtn.innerHTML = '<svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>检测中...';
-  
-  await checkSystemRequirements();
-  
-  recheckBtn.disabled = false;
-  installAllBtn.disabled = false;
-  recheckBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>重新检测';
-  installAllBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>一键安装所有依赖';
-};
+// 移除 recheckDependencies 函数，因为逻辑已合并到 checkSystemRequirements
+// 如果有其他地方调用 recheckDependencies (例如HTML onclick)，在新的 HTML 中已经去掉了
+// 但为了兼容性（如果有遗漏），可以保留一个别名
+window.recheckDependencies = checkSystemRequirements;
 
 // Step 2: 安装依赖
 async function installDependencies() {
@@ -430,7 +409,7 @@ async function installDependencies() {
   progressBar.classList.remove('success');
   progressBar.style.width = '10%';
   if (statusLabel) {
-    statusLabel.textContent = '正在安装依赖';
+    statusLabel.textContent = '正在安装依赖...';
   }
   
   // 创建日志显示区域（默认隐藏，出错时显示）
@@ -584,6 +563,7 @@ window.finishInstallation = async function() {
   
   try {
     // 显示启动中状态
+    button.classList.add('keep-raised'); // 保持凸起样式
     button.disabled = true;
     button.textContent = '正在启动服务器';
     
@@ -592,6 +572,7 @@ window.finishInstallation = async function() {
     
     if (!startResult.success) {
       // 启动失败
+      button.classList.remove('keep-raised');
       button.disabled = false;
       button.textContent = originalText;
       showToast('服务器启动失败', 'error');
@@ -640,6 +621,7 @@ window.finishInstallation = async function() {
     }
   } catch (err) {
     // 出错，恢复按钮状态
+    button.classList.remove('keep-raised');
     button.disabled = false;
     button.textContent = originalText;
     showToast('配置失败', 'error');
@@ -649,14 +631,9 @@ window.finishInstallation = async function() {
 
 // 初始化
 document.addEventListener('DOMContentLoaded', async () => {
-  // 自动检测项目根目录
-  const success = await detectProjectRoot();
+  // 立即显示第一步（封面页），确保 Header 隐藏
+  showStep(1);
   
-  if (success) {
-    // 成功检测，直接进入步骤 2（环境检查）
-    showStep(2);
-  } else {
-    // 检测失败，停留在步骤 1 显示手动选择提示
-    showStep(1);
-  }
+  // 自动检测项目根目录（后台运行，不阻塞 UI）
+  const success = await detectProjectRoot();
 });

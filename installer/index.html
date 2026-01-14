@@ -9,46 +9,56 @@
   <link href="https://fonts.googleapis.com/css2?family=Staatliches&family=Archivo+Black&display=swap" rel="stylesheet">
   <style>
     /*========================
-      Design System: Lab / Apple Hybrid (Matched with Figma Plugin)
+      Design System: Neumorphism (Matched with Figma Plugin)
     ========================*/
     :root {
       /* Colors */
-      --bg-app: #F5F5F7;
-      --bg-card: #FFFFFF;
-      --bg-card-hover: #FDFDFD;
+      --bg-app: #E8ECF0;
+      --bg-card: #E8ECF0;
       
-      /* Logo Colors */
-      --logo-color-primary: #007AFF;
-      --logo-color-secondary: #FFFFFF;
+      /* Neumorphism Colors (Light Theme) */
+      --neu-shadow-light: rgba(255, 255, 255, 0.9);
+      --neu-shadow-dark: rgba(0, 0, 0, 0.12);
+      --neu-face: #E8ECF0;
+      
+      --neu-ring-gradient: linear-gradient(145deg, #FFFFFF, #E0E5E9);
+      --neu-ring-inner-shadow: inset 1px 1px 2px rgba(255,255,255,0.9);
+      --neu-face-bg: #E8ECF0;
+      --neu-face-shadow: 
+        inset 1px 1px 2px rgba(255,255,255,0.9), 
+        inset -1px -1px 2px rgba(0,0,0,0.08);
+      
+      --neu-face-bg-hover: #EEF2F6;
+      --neu-face-bg-active: #E0E4E8;
+      --neu-face-shadow-active: 
+        inset 3px 3px 6px rgba(0,0,0,0.15),
+        inset -2px -2px 4px rgba(255,255,255,0.7);
 
-      --text-primary: #1D1D1F;
-      --text-secondary: #86868B;
-      --text-tertiary: #AEAEB2;
-      
-      --accent: #007AFF;
-      --accent-gradient: linear-gradient(135deg, #007AFF, #0062CC);
-      --accent-soft: rgba(0, 122, 255, 0.1);
+      /* Accent & Status */
+      --unified-green: #4DE34F;
+      --unified-green-glow: rgba(77, 227, 79, 0.4);
+      --accent: #0066FF;
+      --accent-gradient: linear-gradient(135deg, #0066FF, #0052CC);
+      --accent-soft: rgba(0, 102, 255, 0.1);
       
       --success: #34C759;
       --success-bg: rgba(52, 199, 89, 0.1);
-      
       --warning: #FF9500;
       --warning-bg: rgba(255, 149, 0, 0.1);
-      
       --danger: #FF3B30;
       --danger-bg: rgba(255, 59, 48, 0.1);
+      
+      /* Text */
+      --text-primary: #1D1D1F;
+      --text-secondary: #86868B;
+      --text-tertiary: #AEAEB2;
+      --neu-text: #999999;
       
       --divider: rgba(0, 0, 0, 0.05);
       --border: rgba(0, 0, 0, 0.08);
       
-      /* Shadows */
-      --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
-      --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.06);
-      --shadow-lg: 0 15px 48px rgba(0, 0, 0, 0.1);
-      --shadow-inner: inset 0 1px 1px rgba(255,255,255,0.5);
-      
       /* Radius */
-      --radius-s: 8px;
+      --radius-s: 16px; /* Updated to 16px for consistency if used elsewhere */
       --radius-m: 16px;
       --radius-l: 24px;
       
@@ -59,24 +69,67 @@
 
     @media (prefers-color-scheme: dark) {
       :root {
-        --bg-app: #121212;
-        --bg-card: #1C1C1E;
-        --bg-card-hover: #2C2C2E;
+        --bg-app: #2C2C2E;
+        --bg-card: #2C2C2E;
+        --bg-card-hover: #3A3A3C;
         
-        /* Logo Colors Dark Mode */
-        --logo-color-primary: #0051D5;
-        --logo-color-secondary: #1C1C1E;
-
+        /* Neumorphism Colors (Dark Theme) */
+        --neu-shadow-light: rgba(255, 255, 255, 0.06);
+        --neu-shadow-dark: rgba(0, 0, 0, 0.5);
+        --neu-face: #2C2C2E;
+        
+        --neu-ring-gradient: linear-gradient(145deg, #3A3A3C, #2C2C2E);
+        --neu-ring-inner-shadow: inset 1px 1px 2px rgba(255,255,255,0.08);
+        --neu-face-bg: #2C2C2E;
+        --neu-face-shadow: 
+          inset 1px 1px 2px rgba(255,255,255,0.08), 
+          inset -1px -1px 2px rgba(0,0,0,0.3);
+        
+        --neu-face-bg-hover: #3A3A3C;
+        --neu-face-bg-active: #2C2C2E;
+        --neu-face-shadow-active: 
+          inset 3px 3px 6px rgba(0,0,0,0.5),
+          inset -2px -2px 4px rgba(255,255,255,0.05);
+        
         --text-primary: #F5F5F7;
         --text-secondary: #8E8E93;
         --text-tertiary: #48484A;
+        --neu-text: #8E8E93;
         
         --divider: rgba(255, 255, 255, 0.08);
         --border: rgba(255, 255, 255, 0.12);
-        
-        --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-        --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.4);
       }
+    }
+
+    /* Global Text Shadow (Skeuomorphic) */
+    body, button, h1, h2, h3, p, span, div {
+       /* text-shadow: 0 1px 1px rgba(255, 255, 255, 0.5); */
+    }
+    
+    @media (prefers-color-scheme: dark) {
+      body, button, h1, h2, h3, p, span, div {
+         /* text-shadow: 0 1px 1px rgba(0, 0, 0, 0.3); */
+      }
+    }
+    
+    /* Apply text shadow more selectively to avoid blurriness on small text */
+    h1, h2, .btn, .step-title {
+        text-shadow: 0 1px 1px rgba(255, 255, 255, 0.5);
+    }
+    @media (prefers-color-scheme: dark) {
+        h1, h2, .btn, .step-title {
+            text-shadow: 0 1px 1px rgba(0, 0, 0, 0.3);
+        }
+    }
+
+    /* Global Icon Shadow */
+    svg {
+        filter: drop-shadow(0 1px 1px rgba(255, 255, 255, 0.5));
+    }
+    @media (prefers-color-scheme: dark) {
+        svg {
+            filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.3));
+        }
     }
 
     * {
@@ -102,10 +155,8 @@
 
     /* Header */
     .header {
-      /* background: var(--bg-card); */
       padding: 40px 24px 8px 24px;
       text-align: left;
-      /* border-bottom: 1px solid var(--border); */
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -119,17 +170,14 @@
     }
 
     .logo-box {
-      width: 18px;
-      height: 18px;
-      /* Transparent background for SVG logo */
+      width: 24px;
+      height: 24px;
       background: transparent; 
       display: flex;
       align-items: center;
       justify-content: center;
       color: var(--accent);
-      /* box-shadow: var(--shadow-sm); Removed shadow for transparent logo */
     }
-    
 
     .app-title {
       display: flex;
@@ -145,13 +193,6 @@
       line-height: 100%;
       color: var(--text-primary);
       margin: 0;
-    }
-
-    .app-title p {
-      font-size: 12px;
-      color: var(--text-secondary);
-      margin: 0;
-      font-weight: 500;
     }
 
     /* Content */
@@ -197,192 +238,90 @@
       margin: 0;
     }
 
-    /* Components */
+    /* Neumorphic Buttons */
     .btn {
-      padding: 8px 8px 8px 8px;
-      border-radius: var(--radius-s);
+      padding: 10px 12px 10px 20px;
+      border-radius: 16px; /* Explicitly set to 16px */
       font-size: 14px;
       font-weight: 600;
       cursor: pointer;
-      border: 1px solid transparent;
+      border: none;
+      outline: none;
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      gap: 6px;
+      gap: 8px;
       transition: all 0.2s var(--ease-spring);
       min-width: 90px;
+      
+      /* Neumorphic Style */
+      background: var(--neu-ring-gradient);
+      color: var(--text-primary);
+      box-shadow: 
+        -3px -3px 6px var(--neu-shadow-light),
+        3px 3px 6px var(--neu-shadow-dark),
+        var(--neu-ring-inner-shadow);
     }
 
     .btn:active {
+      background: var(--neu-face-bg-active);
+      box-shadow: var(--neu-face-shadow-active);
       transform: scale(0.98);
     }
 
     .btn:disabled {
-      opacity: 0.5;
+      opacity: 0.6;
       cursor: not-allowed;
-      transform: none;
-    }
-
-    .btn-primary {
-      background: var(--accent);
-      color: #FFFFFF;
-      box-shadow: var(--shadow-sm);
-    }
-
-    .btn-primary:hover:not(:disabled) {
-      background: #0051D5;
       box-shadow: none;
+      background: var(--neu-face-bg);
     }
 
-    .btn-secondary {
-      background: transparent;
-      border-color: var(--border);
-      color: var(--text-primary);
+    /* Keep raised effect even when disabled (for specific states) */
+    .btn.keep-raised:disabled {
+      background: var(--neu-ring-gradient);
+      box-shadow: 
+        -3px -3px 6px var(--neu-shadow-light),
+        3px 3px 6px var(--neu-shadow-dark),
+        var(--neu-ring-inner-shadow);
+      opacity: 0.8;
+      cursor: wait;
     }
 
-    .btn-secondary:hover:not(:disabled) {
-      background: rgba(0, 0, 0, 0.05);
-      border-color: var(--border);
+    /* Primary Button - Uses Accent Color for Text/Icon to stand out */
+    .btn-primary {
+      color: var(--accent);
     }
     
-    @media (prefers-color-scheme: dark) {
-      .btn-primary {
-        background: #0051D5;
-        color: #FFFFFF;
-      }
-      .btn-primary:hover:not(:disabled) {
-        background: #0040B3;
-      }
-      .btn-secondary {
-        border-color: rgba(255, 255, 255, 0.15);
-      }
-      .btn-secondary:hover:not(:disabled) {
-        background: rgba(255, 255, 255, 0.08);
-        border-color: rgba(255, 255, 255, 0.15);
-      }
+    .btn-primary svg {
+        color: var(--accent);
     }
 
-    .input-group {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-m);
-      padding: 20px;
-      box-shadow: var(--shadow-sm);
-      margin-bottom: 24px;
-    }
-
-    .input-label {
-      display: block;
-      font-size: 14px;
-      font-weight: 600;
-      color: var(--text-secondary);
-      margin-bottom: 12px;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
-
-    .input-row {
-      display: flex;
-      gap: 12px;
-    }
-
-    .input-field {
-      flex: 1;
-      padding: 12px 16px;
-      border: 1px solid var(--border);
-      border-radius: var(--radius-s);
-      font-size: 14px;
-      color: var(--text-primary);
-      background: var(--bg-app);
-      transition: all 0.2s ease;
-    }
-
-    .input-field:focus {
-      outline: none;
-      border-color: var(--accent);
-      box-shadow: 0 0 0 3px var(--accent-soft);
-    }
-
-    /* Cards */
-    .card-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 20px;
-    }
-
-    .feature-card {
-      background: var(--bg-card);
-      border: 2px solid transparent;
-      border-radius: var(--radius-m);
-      padding: 24px;
-      cursor: pointer;
-      transition: all 0.3s var(--ease-spring);
-      box-shadow: var(--shadow-sm);
-      position: relative;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      text-align: center;
-      gap: 16px;
-    }
-
-    .feature-card:hover {
-      transform: translateY(-4px);
-      box-shadow: var(--shadow-md);
-      border-color: var(--border);
-    }
-
-    .feature-card.selected {
-      border-color: var(--accent);
-      background: var(--bg-card);
-      box-shadow: 0 0 0 1px var(--accent), var(--shadow-md);
-    }
-
-    .card-icon {
-      width: 56px;
-      height: 56px;
-      border-radius: 50%;
-      /* background: var(--bg-app); */
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: var(--text-primary);
-      transition: all 0.3s ease;
-    }
-
-    /* .feature-card.selected .card-icon {
-      background: var(--accent-soft);
-      color: var(--accent);
-    } */
-
-    .card-title {
-      font-size: 16px;
-      font-weight: 700;
-      color: var(--text-primary);
-      margin-bottom: 4px;
-    }
-
-    .card-desc {
-      font-size: 13px;
-      color: var(--text-secondary);
-      line-height: 1.5;
-    }
-
-    /* Status Items */
+    /* Status Items - Neumorphic Cards */
     .status-list {
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 16px;
     }
 
     .status-item {
       display: flex;
       align-items: center;
       padding: 16px 20px;
-      background: var(--bg-card);
       border-radius: var(--radius-m);
-      border: 1px solid var(--border);
       transition: all 0.3s ease;
+      
+      /* Neumorphic Recessed/Flat look */
+      background: var(--neu-face-bg);
+      box-shadow: 
+        -2px -2px 5px var(--neu-shadow-light),
+        2px 2px 5px var(--neu-shadow-dark);
+      border: 1px solid rgba(255,255,255,0.1); /* Subtle border */
+    }
+    
+    @media (prefers-color-scheme: dark) {
+        .status-item {
+            border: 1px solid rgba(255,255,255,0.05);
+        }
     }
 
     .status-icon {
@@ -413,39 +352,42 @@
     .status-item.success .status-icon { color: var(--success); }
     .status-item.error .status-icon { color: var(--danger); }
     .status-item.checking .status-icon { color: var(--accent); }
-
-    /* Progress */
+    
+    /* Progress Bar - Neumorphic Recessed */
     .progress-container {
-      background: var(--bg-card);
       border-radius: var(--radius-m);
       padding: 24px;
-      border: 1px solid var(--border);
-      box-shadow: var(--shadow-sm);
+      background: var(--neu-face-bg);
+      box-shadow: 
+        -2px -2px 5px var(--neu-shadow-light),
+        2px 2px 5px var(--neu-shadow-dark);
     }
 
     .progress-bar {
-      height: 8px;
-      background: var(--bg-app);
-      border-radius: 4px;
+      height: 10px;
+      background: var(--neu-face-bg);
+      border-radius: 5px;
       overflow: hidden;
       margin: 16px 0;
+      box-shadow: var(--neu-face-shadow-active); /* Inner shadow for recessed look */
     }
 
     .progress-fill {
       height: 100%;
       background: var(--accent-gradient);
       width: 0%;
-      transition: width 0.3s ease, background 0.3s ease;
-      border-radius: 4px;
+      transition: width 0.3s ease;
+      border-radius: 5px;
+      box-shadow: 2px 0 5px rgba(0,0,0,0.2); /* Slight shadow for the bar */
     }
 
     .progress-fill.success {
       background: var(--success);
     }
 
-    /* Logs */
+    /* Logs - Recessed */
     .log-container {
-      background: #1e1e1e;
+      background: #1e1e1e; /* Keep dark for logs */
       color: #d4d4d4;
       padding: 16px;
       border-radius: var(--radius-s);
@@ -455,6 +397,7 @@
       overflow-y: auto;
       margin-top: 16px;
       border: 1px solid var(--border);
+      box-shadow: inset 2px 2px 5px rgba(0,0,0,0.5);
     }
 
     .log-line {
@@ -465,59 +408,90 @@
 
     /* Footer */
     .footer {
-      background: var(--bg-card);
-      padding: 20px 40px;
-      border-top: 1px solid var(--border);
+      padding: 20px 24px;
       display: flex;
       justify-content: space-between;
       align-items: center;
+      
+      /* Raised Effect - Neumorphic */
+      background: var(--neu-face-bg);
+      box-shadow: 
+        0 -4px 10px var(--neu-shadow-light),
+        0 -1px 4px rgba(0,0,0,0.02);
+      position: relative;
+      z-index: 10;
     }
 
     .step-dots {
       display: flex;
-      gap: 10px;
+      gap: 12px;
     }
 
     .dot {
-      width: 8px;
-      height: 8px;
+      width: 10px;
+      height: 10px;
       border-radius: 50%;
-      background: var(--border);
+      background: var(--neu-face-bg);
+      /* Recessed State (Unvisited) */
+      box-shadow: 
+        inset 1px 1px 2px var(--neu-shadow-dark),
+        inset -1px -1px 2px var(--neu-shadow-light);
       transition: all 0.3s ease;
+      border: 1px solid rgba(0,0,0,0.05); /* Subtle border */
+    }
+    
+    @media (prefers-color-scheme: dark) {
+      .dot {
+        border-color: rgba(255,255,255,0.05);
+      }
     }
 
     .dot.active {
-      background: var(--success);
-      box-shadow: 0 0 0 4px rgba(52, 199, 89, 0.3);
-      opacity: 1;
+      background: var(--unified-green);
+      border-color: transparent;
+      /* Green Glowing State (Current) */
+      box-shadow: 
+        0 0 8px var(--unified-green-glow),
+        inset 1px 1px 2px rgba(255,255,255,0.4);
     }
 
     .dot.completed {
-      background: var(--success);
+      background: var(--unified-green);
+      border-color: transparent;
+      /* Green Non-glowing State (Completed) - Raised */
+      box-shadow: 
+        -1px -1px 2px var(--neu-shadow-light),
+        1px 1px 2px var(--neu-shadow-dark);
     }
 
     .button-group {
       display: flex;
       gap: 16px;
-      margin-top: auto; /* Push to bottom of step content if needed */
+      margin: 0;
+      padding: 0;
+      margin-top: auto;
     }
 
     /* Alerts */
     .alert {
-      padding: 12px 16px 12px 16px;
+      padding: 12px 16px;
       border-radius: var(--radius-s);
       font-size: 13px;
       display: flex;
       align-items: flex-start;
       gap: 12px;
       line-height: 1.5;
+      /* Neumorphic Alert */
+      background: var(--neu-face-bg);
+      box-shadow: 
+        -2px -2px 5px var(--neu-shadow-light),
+        2px 2px 5px var(--neu-shadow-dark);
+      margin-bottom: 16px;
     }
 
-    .alert-success { background: var(--success-bg); color: #006600; }
-    .alert-error { background: var(--danger-bg); color: #CC0000; }
-    .alert-info { background: var(--accent-soft); color: #0044AA; }
-
-    /* Alert icons */
+    .alert-success { color: var(--success); }
+    .alert-error { color: var(--danger); }
+    
     .alert-icon {
       width: 20px !important;
       height: 20px !important;
@@ -542,26 +516,33 @@
       fill: none;
       stroke-linecap: round;
       stroke-linejoin: round;
+      filter: drop-shadow(0 1px 1px rgba(255, 255, 255, 0.5));
+    }
+    
+    @media (prefers-color-scheme: dark) {
+        svg {
+            filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.3));
+        }
+    }
+    
+    /* Disable shadow on spinner to prevent rotating shadow */
+    svg.spinner {
+        filter: none;
     }
 
-    /* Button icons - smaller */
     .btn svg {
-      width: 14px;
-      height: 14px;
+      width: 16px;
+      height: 16px;
     }
-
-    /* Completion icon - larger */
+    
+    /* Completion icon */
     .completion-icon svg {
       width: 40px !important;
       height: 40px !important;
+      /* Custom shadow for this large icon */
+      filter: drop-shadow(0 2px 4px rgba(0,0,0,0.1));
     }
     
-    /* Figma icon specific size */
-    .figma-icon {
-      width: 16px !important;
-      height: 16px !important;
-    }
-
     .spinner {
       animation: spin 1s linear infinite;
     }
@@ -585,7 +566,7 @@
       opacity: 0;
       pointer-events: none;
       transition: opacity 0.2s ease;
-      backdrop-filter: blur(2px);
+      backdrop-filter: blur(4px);
     }
 
     .overlay.show {
@@ -596,14 +577,17 @@
     .modal {
       background: var(--bg-card);
       width: 320px;
-      padding: 24px;
+      padding: 32px 24px;
       border-radius: var(--radius-m);
-      box-shadow: var(--shadow-lg);
+      /* Neumorphic Modal */
+      box-shadow: 
+        -10px -10px 20px var(--neu-shadow-light),
+        10px 10px 20px var(--neu-shadow-dark);
       transform: scale(0.95);
       transition: transform 0.2s var(--ease-spring);
       display: flex;
       flex-direction: column;
-      gap: 16px;
+      gap: 20px;
       text-align: center;
     }
 
@@ -617,21 +601,28 @@
       justify-content: center;
       margin: 0 auto;
       color: var(--accent);
+      /* Neumorphic Indent for icon */
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      background: var(--neu-face-bg);
+      box-shadow: var(--neu-face-shadow);
     }
     
     .modal-icon svg {
-      width: 48px !important;
-      height: 48px !important;
+      width: 32px !important;
+      height: 32px !important;
+      filter: drop-shadow(0 1px 1px rgba(255, 255, 255, 0.8));
     }
     
     .modal-title {
-      font-size: 16px;
-      font-weight: 600;
+      font-size: 18px;
+      font-weight: 700;
       color: var(--text-primary);
     }
 
     .modal-message {
-      font-size: 13px;
+      font-size: 14px;
       color: var(--text-secondary);
       line-height: 1.5;
     }
@@ -649,11 +640,14 @@
       left: 50%;
       transform: translateX(-50%) translateY(-100px);
       background: var(--bg-card);
-      border-radius: var(--radius-m); /* Match --radius-m usually, or specific value */
-      padding: 8px 16px;
-      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12), 0 0 1px rgba(0, 0, 0, 0.1);
+      border-radius: 50px; /* Pill shape */
+      padding: 12px 24px;
+      /* Neumorphic Toast */
+      box-shadow: 
+        -4px -4px 10px var(--neu-shadow-light),
+        4px 4px 10px var(--neu-shadow-dark);
       font-size: 13px;
-      font-weight: 500;
+      font-weight: 600;
       color: var(--text-primary);
       z-index: 1000;
       opacity: 0;
@@ -663,7 +657,7 @@
       width: fit-content;
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 12px;
     }
 
     .toast.show {
@@ -672,47 +666,17 @@
       pointer-events: auto;
     }
     
-    @media (prefers-color-scheme: dark) {
-        .toast {
-            color: #F5F5F7;
-            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4), 0 0 1px rgba(255, 255, 255, 0.1);
-        }
-    }
-
     .toast-icon {
-      width: 16px;
-      height: 16px;
+      width: 18px;
+      height: 18px;
       flex-shrink: 0;
       display: flex;
       align-items: center;
       justify-content: center;
     }
-    
-    .toast-icon svg {
-      width: 100%;
-      height: 100%;
-      display: block;
-    }
 
-    .toast-message {
-      font-size: 13px;
-      font-weight: 500;
-      color: var(--text-primary);
-      white-space: nowrap;
-    }
-
-    /* Toast Variants */
     .toast.success .toast-icon { color: var(--success); }
     .toast.error .toast-icon { color: var(--danger); }
-    .toast.loading .toast-icon { color: var(--text-secondary); }
-    
-    /* Dark Mode specific toast adjustment */
-    @media (prefers-color-scheme: dark) {
-        .toast {
-            background: #2C2C2E;
-            border-color: #38383A;
-        }
-    }
   </style>
 </head>
 <body>
@@ -735,26 +699,26 @@
   </div>
 
   <div class="content">
-    <!-- Step 1: Manual Path Selection (仅在自动检测失败时显示) -->
-    <div class="step" id="step1" style="display: none;">
-      <div class="step-header">
-        <h2 class="step-title">选择项目路径</h2>
-        <p class="step-description">请手动定位 ScreenSync 项目文件夹</p>
+    <!-- Step 1: Welcome / Cover -->
+    <div class="step active" id="step1">
+      <div class="step-header" style="flex: 1; display: flex; flex-direction: column; justify-content: center; margin: 0;">
+        <div style="margin-bottom: 24px;">
+          <img src="https://raw.githubusercontent.com/BorderWalker99/figma-plugin-figma_sync/refs/heads/main/images/logo.svg" width="80" height="80" style="filter: drop-shadow(0 4px 12px rgba(0,0,0,0.1));" />
+        </div>
+        <h1 style="font-family: 'Archivo Black', sans-serif; font-size: 32px; margin: 0 0 12px 0; color: var(--text-primary); letter-spacing: -0.02em;">ScreenSync</h1>
+        <p style="font-size: 16px; color: var(--text-secondary); margin: 0;">自动化传输并整理截图</p>
       </div>
 
-      <!-- Mode selection cards removed -->
-
-      <div class="button-group">
-        <div style="flex:1"></div>
-        <button class="btn btn-primary" onclick="nextStep()" id="step1Next" disabled>
-          下一步
+      <div class="button-group" style="justify-content: center; margin-top: 0; padding-bottom: 20px;">
+        <button class="btn btn-primary" onclick="nextStep()" style="min-width: 120px; padding: 10px 12px 10px 20px; font-size: 15px;">
+          开始安装
           <svg viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
         </button>
       </div>
     </div>
 
-    <!-- Step 2: System Check (现在是第一步) -->
-    <div class="step active" id="step2">
+    <!-- Step 2: System Check (现在是第二步) -->
+    <div class="step" id="step2">
       <div class="step-header">
         <h2 class="step-title">环境检查</h2>
         <p class="step-description">检查系统环境是否满足运行要求</p>
@@ -765,60 +729,41 @@
           <div class="status-icon"><svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg></div>
           <div class="status-content">
             <div class="status-label">Homebrew</div>
-            <div class="status-detail">检查中</div>
+            <div class="status-detail">检查中...</div>
           </div>
         </div>
         <div class="status-item checking">
           <div class="status-icon"><svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg></div>
           <div class="status-content">
             <div class="status-label">Node.js</div>
-            <div class="status-detail">检查中</div>
+            <div class="status-detail">检查中...</div>
           </div>
         </div>
         <div class="status-item checking">
           <div class="status-icon"><svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg></div>
           <div class="status-content">
             <div class="status-label">ImageMagick</div>
-            <div class="status-detail">检查中</div>
+            <div class="status-detail">检查中...</div>
           </div>
         </div>
         <div class="status-item checking">
           <div class="status-icon"><svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg></div>
           <div class="status-content">
             <div class="status-label">FFmpeg</div>
-            <div class="status-detail">检查中</div>
+            <div class="status-detail">检查中...</div>
           </div>
         </div>
       </div>
 
       <!-- 统一安装按钮区域 -->
-      <div id="installAllSection" style="display: none; margin-top: 16px;">
-        <div class="alert alert-info">
-          <div class="alert-icon">
-            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="currentColor" fill-opacity="0.1"/><path d="M12 8v5M12 16.5v.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          </div>
-          <div>
-            检测到部分依赖未安装，点击下方按钮一键安装所有缺失依赖，安装过程中只需输入一次密码
-          </div>
-        </div>
-        <div style="display: flex; gap: 12px; margin-top: 12px;">
-          <button class="btn btn-primary" onclick="installAllDependencies()" id="installAllBtn" style="flex: 1;">
-            <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
-            一键安装所有依赖
-          </button>
-          <button class="btn btn-secondary" onclick="recheckDependencies()" id="recheckBtn">
-            <svg viewBox="0 0 24 24"><path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
-            重新检测
-          </button>
-        </div>
-      </div>
+      <!-- Alert notification and installAllSection removed as requested -->
 
       <div class="button-group" id="step2Buttons" style="display: none;">
         <!-- 移除上一步按钮，因为 Step 1 已隐藏 -->
         <div style="flex:1"></div>
-        <button class="btn btn-primary" onclick="nextStep()" id="step2Next">
-          下一步
-          <svg viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+        <button class="btn btn-primary" id="step2ActionBtn">
+            <svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+            检测中...
         </button>
       </div>
     </div>
@@ -831,7 +776,7 @@
       </div>
 
       <div class="progress-container">
-        <div class="status-label" id="installStatusLabel">正在安装</div>
+        <div class="status-label" id="installStatusLabel">正在安装...</div>
         <div class="progress-bar">
           <div class="progress-fill" id="installProgress" style="width: 0%"></div>
         </div>
@@ -860,8 +805,8 @@
         <div class="status-item checking">
           <div class="status-icon"><svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg></div>
           <div class="status-content">
-            <div class="status-label">配置中</div>
-            <div class="status-detail">正在设置权限和文件夹</div>
+            <div class="status-label">配置中...</div>
+            <div class="status-detail">正在设置权限和文件夹...</div>
           </div>
         </div>
       </div>
@@ -888,29 +833,8 @@
         <h2 class="step-title">安装完成</h2>
       </div>
       
-      <!-- 下一步提示 -->
-      <div style="background: var(--bg-card); border-radius: var(--radius-m); padding: 16px; border: 1px solid var(--border);">
-        <div style="display: flex; align-items: flex-start; gap: 12px;">
-          <!-- Figma Logo SVG -->
-          <svg class="figma-icon" viewBox="0 0 200 300" style="flex-shrink: 0; margin-top: 2px;">
-            <path fill="#0acf83" d="M50 300c27.6 0 50-22.4 50-50v-50H50c-27.6 0-50 22.4-50 50s22.4 50 50 50z"/>
-            <path fill="#a259ff" d="M0 150c0-27.6 22.4-50 50-50h50v100H50c-27.6 0-50-22.4-50-50z"/>
-            <path fill="#f24e1e" d="M0 50C0 22.4 22.4 0 50 0h50v100H50C22.4 100 0 77.6 0 50z"/>
-            <path fill="#ff7262" d="M100 0h50c27.6 0 50 22.4 50 50s-22.4 50-50 50h-50V0z"/>
-            <path fill="#1abcfe" d="M200 150c0 27.6-22.4 50-50 50s-50-22.4-50-50 22.4-50 50-50 50 22.4 50 50z"/>
-          </svg>
-          <div>
-            <div style="font-size: 13px; font-weight: 600; margin-bottom: 4px;">下一步：导入 Figma 插件</div>
-            <div style="font-size: 12px; color: var(--text-secondary); line-height: 1.5;">
-              Plugins → Development → Import plugin from manifest<br>
-              选择:<span style="font-family: 'Monaco', 'Courier New', monospace; background: rgba(0,0,0,0.05); padding: 2px 6px; border-radius: 3px; font-size: 11px;">{安装目录}/项目文件/figma-plugin/manifest.json</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
       <div class="button-group" style="justify-content: center; margin-top: 0;">
-        <button class="btn btn-primary" onclick="finishInstallation()" style="min-width: 200px;">
+        <button class="btn btn-primary" onclick="finishInstallation()" style="min-width: 120px;">
           我知道了
         </button>
       </div>
@@ -919,8 +843,8 @@
 
   <div class="footer">
     <div class="step-dots">
-      <!-- 移除第一个点，因为 Step 1 已隐藏，现在只有 4 步 -->
-      <div class="dot active" data-step="2"></div>
+      <div class="dot active" data-step="1"></div>
+      <div class="dot" data-step="2"></div>
       <div class="dot" data-step="3"></div>
       <div class="dot" data-step="4"></div>
       <div class="dot" data-step="5"></div>

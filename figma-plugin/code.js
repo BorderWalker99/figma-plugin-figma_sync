@@ -8,7 +8,7 @@ console.log('🔍 将输出详细的 imageTransform 检查日志');
 
 figma.showUI(__html__, { 
   width: 360, 
-  height: 350,
+  height: 400,
   themeColors: true 
 });
 
@@ -464,10 +464,11 @@ figma.ui.onmessage = async (msg) => {
       }
       
       // 递归查找 Frame 中的所有 GIF 图层（支持嵌套结构）
-      function findAllGifLayers(node, results = []) {
+      async function findAllGifLayers(node, results = []) {
         // 检查当前节点
         let filename = node.getPluginData('originalFilename');
         let isManualDrag = false;
+        let isGifDetected = false;
         
         console.log(`   🔎 正在检查节点: ${node.name} (type: ${node.type})`);
         console.log(`      originalFilename (pluginData): ${filename || '无'}`);
@@ -558,41 +559,43 @@ figma.ui.onmessage = async (msg) => {
                 console.log(`      使用图层名称作为文件名: ${filename}`);
               }
             }
-            // 方法 2：检查 IMAGE 填充（可能是 GIF）
-            else if (fill.type === 'IMAGE') {
-              // 检查图层名称是否包含 GIF 相关关键词
-              const nameLower = node.name.toLowerCase();
-              if (nameLower.includes('gif') || 
-                  nameLower.includes('recording') || 
-                  nameLower.endsWith('.gif') ||
-                  nameLower.includes('screen')) {
-                
-                // 检查是否有 driveFileId 或 ossFileId
-                const driveFileId = node.getPluginData('driveFileId');
-                const ossFileId = node.getPluginData('ossFileId');
-                
-                if (driveFileId || ossFileId) {
-                  // 这是手机同步的 GIF
-                  console.log(`   📱 检测到手机同步的 GIF 图层: ${node.name}`);
-                  isManualDrag = false;
-                } else {
-                  // 这是手动拖入的 GIF
-                  console.log(`   🎬 检测到手动拖入的 GIF 图层: ${node.name}`);
-                  isManualDrag = true;
+            // 方法 2：检查 IMAGE 填充（通过读取字节头识别 GIF）
+            else if (fill.type === 'IMAGE' && fill.imageHash) {
+              try {
+                const image = figma.getImageByHash(fill.imageHash);
+                if (image) {
+                  const bytes = await image.getBytesAsync();
+                  // 检查 GIF 魔法数 (GIF89a 或 GIF87a) -> 'GIF' (0x47, 0x49, 0x46)
+                  if (bytes.length >= 3 && bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) {
+                    console.log(`   🎨 [ByteCheck] 检测到 GIF 格式图片: ${node.name}`);
+                    isGifDetected = true;
+                    
+                    // 检查是否有关联数据
+                    const driveFileId = node.getPluginData('driveFileId');
+                    const ossFileId = node.getPluginData('ossFileId');
+                    
+                    if (driveFileId || ossFileId) {
+                      console.log(`   📱 检测到手机同步的 GIF 图层: ${node.name}`);
+                      isManualDrag = false;
+                    } else {
+                      console.log(`   🎬 检测到手动拖入的 GIF 图层: ${node.name}`);
+                      isManualDrag = true;
+                    }
+                    
+                    filename = node.name;
+                    if (!filename.toLowerCase().endsWith('.gif')) {
+                      filename = filename + '.gif';
+                    }
+                  }
                 }
-                
-                filename = node.name;
-                
-                // 确保文件名有 .gif 扩展名
-                if (!filename.toLowerCase().endsWith('.gif')) {
-                  filename = filename + '.gif';
-                }
+              } catch (e) {
+                console.error('Failed to read image bytes:', e);
               }
             }
           }
         }
         
-        if (filename) {
+        if (filename && (isGifDetected || filename.toLowerCase().endsWith('.mp4') || filename.toLowerCase().endsWith('.mov') || filename.toLowerCase().endsWith('.gif'))) {
           console.log(`      最终 filename: ${filename}`);
           
           // 检查 1：文件扩展名
@@ -610,7 +613,7 @@ figma.ui.onmessage = async (msg) => {
           console.log(`      isScreenRecordingLayer: ${isScreenRecordingLayer}`);
           console.log(`      filenameIndicatesRecording: ${filenameIndicatesRecording}`);
           
-          if (hasValidExtension || isScreenRecordingLayer || filenameIndicatesRecording) {
+          if (hasValidExtension || isScreenRecordingLayer || filenameIndicatesRecording || isGifDetected) {
             console.log(`      ✅ 图层符合条件，添加到结果列表`);
             
             // 如果是手动拖入的，保存文件名到 pluginData（以便下次识别）
@@ -624,13 +627,13 @@ figma.ui.onmessage = async (msg) => {
             console.log(`      ⏭️  图层不符合条件，跳过`);
           }
         } else {
-          console.log(`      ⏭️  无 filename，跳过此节点`);
+          console.log(`      ⏭️  无 filename 或非 GIF/Video，跳过此节点`);
         }
         
         // 递归检查子节点
         if ('children' in node) {
           for (const child of node.children) {
-            findAllGifLayers(child, results);
+            await findAllGifLayers(child, results);
           }
         }
         
@@ -647,7 +650,7 @@ figma.ui.onmessage = async (msg) => {
           continue;
         }
 
-        const gifLayers = findAllGifLayers(node);
+        const gifLayers = await findAllGifLayers(node);
         if (gifLayers.length > 0) {
           validTasks.push({
             frame: node,
@@ -732,17 +735,17 @@ figma.ui.onmessage = async (msg) => {
           unsyncedGifs: unsyncedGifs
         });
 
-        // ✅ 设置超时保护 (5秒)
+        // ✅ 设置超时保护 (3秒)
         if (serverCheckTimer) clearTimeout(serverCheckTimer);
         serverCheckTimer = setTimeout(() => {
-          console.warn('⚠️ Server 缓存检查超时 (5s)，自动切换到手动上传模式');
+          console.warn('⚠️ Server 缓存检查超时 (2s)，自动切换到手动上传模式');
           serverCheckTimer = null;
           // 通知 UI 重新触发导出，并跳过 Server 检查
           figma.ui.postMessage({
             type: 'trigger-export-from-code',
             skipServerCheck: true
           });
-        }, 5000);
+        }, 2000);
 
         return; // 停止导出流程，等待异步检查结果
       }
@@ -1404,6 +1407,7 @@ figma.ui.onmessage = async (msg) => {
     try {
       // 允许最小宽度为 80px（用于最小化状态），最大宽度为 880px
       const width = Math.max(80, Math.min(880, msg.width || 480));
+      // 增加最大高度限制，以适应 update banner
       const height = Math.max(40, Math.min(1200, msg.height || 700));
       figma.ui.resize(width, height);
       console.log(`🪟 已调整UI尺寸: ${width}x${height}`);

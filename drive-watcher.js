@@ -1432,10 +1432,16 @@ async function performManualSync() {
     }
 
     let success = 0;
-    let gifCount = 0; // ✅ 统计 GIF 数量
+    let imageCount = 0; // ✅ 统计成功导入的纯图片数量
+    let gifCount = 0; // ✅ 统计 GIF 数量（包括成功导入的和跳过的）
+    let videoCount = 0; // ✅ 统计视频数量（全部跳过保存到本地）
     // 收集所有处理过程中的错误
     const processingErrors = [];
-    let videoCount = 0; // ✅ 统计视频数量
+    
+    // ✅ 获取当前备份模式，用于判断 GIF/视频是否真的被保存到本地
+    const backupMode = userConfig.getBackupMode();
+    const shouldBackupGif = (backupMode === 'gif_only' || backupMode === 'all');
+    console.log(`   📋 当前备份模式: ${backupMode}, 备份GIF: ${shouldBackupGif}`);
     
     // 手动同步时，强制同步所有图片文件（不检查 knownFileIds）
     // 因为手动同步的目的就是同步残留的图片
@@ -1467,9 +1473,20 @@ async function performManualSync() {
         
         const fileProcessing = (async () => {
       try {
-        // 检查文件是否需要手动拖入（GIF过大或视频文件）
+        // 检查文件类型
         const fileName = file.name.toLowerCase();
-        const isGif = fileName.endsWith('.gif');
+        const mimeType = (file.mimeType || '').toLowerCase();
+        const isGif = fileName.endsWith('.gif') || mimeType === 'image/gif';
+        const isVideo = fileName.endsWith('.mp4') || fileName.endsWith('.mov') ||
+                        mimeType.startsWith('video/') ||
+                        mimeType === 'video/mp4' ||
+                        mimeType === 'video/quicktime';
+        
+        // ✅ 视频文件：处理后标记为 skipped（保存到本地但不导入 Figma）
+        if (isVideo) {
+          await handleDriveFile(file, true);
+          return { success: false, skipped: true, isVideo: true, file };
+        }
         
         // 如果是 GIF，先检查大小
         if (isGif) {
@@ -1487,16 +1504,19 @@ async function performManualSync() {
                   reason: 'gif-too-large'
                 }));
               }
-                  return { success: false, skipped: true, file };
+              // 大 GIF 也要调用 handleDriveFile 保存到本地
+              await handleDriveFile(file, true);
+              return { success: false, skipped: true, isGif: true, file };
             }
           } catch (checkError) {
             console.log(`   ⚠️  检查 GIF 大小失败，继续处理: ${checkError.message}`);
           }
         }
         
-            // 调用通用处理函数
+        // 调用通用处理函数
         await handleDriveFile(file, true);
-            return { success: true, file };
+        // 普通图片或小 GIF 成功导入 Figma
+        return { success: true, isGif: isGif, file };
       } catch (error) {
         console.error(`   ❌ 处理文件失败: ${file.name}`, error.message);
             processingErrors.push({
@@ -1529,24 +1549,25 @@ async function performManualSync() {
       
       const batchResults = await Promise.allSettled(batchPromises);
       
-      // 统计本批次结果
-      batchResults.forEach((result, idx) => {
-        if (result.status === 'fulfilled' && result.value.success) {
-          success += 1;
-        }
-      });
-      
-      // ✅ 统计 GIF 和视频数量
+      // ✅ 统计本批次结果（分类统计图片、GIF、视频）
       batchResults.forEach((result) => {
-        if (result.status === 'fulfilled' && result.value.file) {
-          const fileName = result.value.file.name.toLowerCase();
-          // ✅ 统计GIF（即使被skipped也算，因为已保存到本地）
-          if (fileName.endsWith('.gif')) {
-            gifCount++;
-          }
-          // ✅ 统计视频（即使被skipped也算，因为已保存到本地）
-          if (fileName.endsWith('.mp4') || fileName.endsWith('.mov')) {
+        if (result.status === 'fulfilled' && result.value) {
+          const value = result.value;
+          const wasSuccess = value.success === true;
+          
+          if (value.isVideo) {
+            // 视频文件（全部跳过保存到本地）
             videoCount++;
+          } else if (value.isGif) {
+            // GIF 文件（无论成功导入还是跳过都计入 gifCount）
+            gifCount++;
+            if (wasSuccess) success++;
+          } else if (value.file) {
+            // 普通图片
+            if (wasSuccess) {
+              imageCount++;
+              success++;
+            }
           }
         }
       });
@@ -1560,21 +1581,33 @@ async function performManualSync() {
     }
 
     console.log(`\n✅ [Drive] 手动同步完成`);
-    console.log(`   ✅ 成功同步: ${success} 张截图`);
-    console.log(`   📊 总计: ${refreshedFiles.length} 个图片文件`);
+    console.log(`   ✅ 成功导入 Figma: ${success} 个文件`);
+    console.log(`   🖼️  图片数量: ${imageCount} 张`);
+    console.log(`   🎞️  GIF数量: ${gifCount} 段`);
+    console.log(`   🎥 视频数量: ${videoCount} 段`);
+    console.log(`   📊 总计处理: ${refreshedFiles.length} 个媒体文件`);
     if (processingErrors.length > 0) {
       console.log(`   ❌ 失败: ${processingErrors.length} 个`);
     }
 
     if (ws && ws.readyState === WebSocket.OPEN) {
+      // ✅ 计算实际被保存到本地的数量
+      // - 视频始终会被保存到本地（Figma 不支持导入）
+      // - GIF 只有在备份模式为 'gif_only' 或 'all' 时才会被保存
+      const savedGifCount = shouldBackupGif ? gifCount : 0;
+      const savedVideoCount = videoCount; // 视频始终保存到本地
+      
       const message = {
         type: 'manual-sync-complete',
-        count: success,
-        gifCount: gifCount,
-        videoCount: videoCount, // ✅ 添加视频数量
+        count: success, // 成功导入 Figma 的总数（图片 + 小 GIF）
+        imageCount: imageCount, // ✅ 纯图片数量
+        gifCount: gifCount, // ✅ GIF 数量（包括成功导入的和跳过的）
+        videoCount: videoCount, // ✅ 视频数量（全部跳过保存到本地）
+        savedGifCount: savedGifCount, // ✅ 实际保存到本地的 GIF 数量
+        savedVideoCount: savedVideoCount, // ✅ 实际保存到本地的视频数量
         errors: processingErrors
       };
-      console.log(`   📤 发送完成消息: count=${success}, gifCount=${gifCount}, videoCount=${videoCount}, errors=${processingErrors.length}`);
+      console.log(`   📤 发送完成消息: imageCount=${imageCount}, gifCount=${gifCount}(saved:${savedGifCount}), videoCount=${videoCount}, errors=${processingErrors.length}`);
       ws.send(JSON.stringify(message));
     }
   })(); // 结束 syncTask async 函数

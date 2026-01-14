@@ -13,7 +13,7 @@ echo -e "${BLUE}╔════════════════════�
 echo -e "${BLUE}║  ScreenSync GUI 安装器打包脚本        ║${NC}"
 echo -e "${BLUE}╚════════════════════════════════════════╝${NC}\n"
 
-cd installer
+# cd installer
 
 # 清理旧的构建产物（重要！防止缓存旧文件）
 if [ -d "dist" ]; then
