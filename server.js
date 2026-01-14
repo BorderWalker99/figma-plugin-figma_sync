@@ -1239,7 +1239,7 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
       console.log(`   📝 FFmpeg 命令: ${ffmpegCmd}`);
       
       try {
-        await execAsync(ffmpegCmd, { maxBuffer: 200 * 1024 * 1024, timeout: 180000 });
+        await execAsync(ffmpegCmd, { maxBuffer: 200 * 1024 * 1024, timeout: 600000 }); // 10分钟超时
         
         console.log(`   ✅ GIF 生成完成`);
         
@@ -1672,7 +1672,7 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
         const pixelCount = gifW * gifH;
         const isLarge = pixelCount > 2000000 || sourceStats.size > 10 * 1024 * 1024; // 2MP 或 10MB
         const bufferSize = isLarge ? 200 * 1024 * 1024 : 50 * 1024 * 1024;
-        const timeout = isLarge ? 300000 : 120000; // 5分钟 vs 2分钟
+        const timeout = isLarge ? 600000 : 300000; // 10分钟 vs 5分钟
         
         if (isLarge) {
           console.log(`      ⚠️  检测到大尺寸 GIF (${gifW}x${gifH}, ${(sourceStats.size / 1024 / 1024).toFixed(2)}MB)`);
@@ -1714,7 +1714,7 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
         const roundPixelCount = gifW * gifH;
         const roundIsLarge = roundPixelCount > 2000000 || roundSourceStats.size > 10 * 1024 * 1024;
         const roundBufferSize = roundIsLarge ? 200 * 1024 * 1024 : 50 * 1024 * 1024;
-        const roundTimeout = roundIsLarge ? 300000 : 120000; // 大文件 5 分钟
+        const roundTimeout = roundIsLarge ? 600000 : 300000; // 大文件 10 分钟 vs 5分钟
         
         if (roundIsLarge) {
           console.log(`      ⚠️  大型 GIF，增加圆角处理资源: buffer=${(roundBufferSize / 1024 / 1024).toFixed(0)}MB, timeout=${(roundTimeout / 1000).toFixed(0)}s`);
@@ -1834,7 +1834,7 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
       const compositePixels = frameW * frameH;
       const compositeIsLarge = compositePixels > 2000000 || processedStats.size > 10 * 1024 * 1024;
       const compositeBuffer = compositeIsLarge ? 200 * 1024 * 1024 : 50 * 1024 * 1024;
-      const compositeTimeout = compositeIsLarge ? 300000 : 120000;
+      const compositeTimeout = compositeIsLarge ? 600000 : 300000; // 大文件 10 分钟 vs 5分钟
       
       if (compositeIsLarge) {
         console.log(`      ⚠️  大尺寸合成 (${frameW}x${frameH}, ${(processedStats.size / 1024 / 1024).toFixed(2)}MB)`);

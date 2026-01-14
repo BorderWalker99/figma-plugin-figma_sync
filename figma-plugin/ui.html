@@ -589,7 +589,7 @@
       color: var(--text-secondary); /* Grey text */
       cursor: pointer;
       /* Raised Style (凸起) */
-      box-shadow: 
+      box-shadow:
         -2px -2px 5px var(--neu-shadow-light),
         2px 2px 5px var(--neu-shadow-dark);
       /* Chevron Down SVG */
@@ -597,8 +597,7 @@
       background-repeat: no-repeat;
       background-position: right 8px center;
       background-size: 14px;
-      transition: all 0.2s ease;
-      min-width: 100px;
+      transition: all 0.2s ease, width 0.15s ease;
     }
 
     .settings-select:hover {
@@ -1235,11 +1234,12 @@
         color: var(--pill-screen-text); /* Green text */
         font-weight: 600;
         font-size: 13px;
-        /* ⚠️ 不要过渡 width，避免文字截断问题 */
+        /* 丝滑过渡效果 */
         transition: background 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), 
                     box-shadow 0.4s cubic-bezier(0.34, 1.56, 0.64, 1),
                     color 0.4s cubic-bezier(0.34, 1.56, 0.64, 1),
-                    transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+                    transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1),
+                    width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         border: none; /* Reset */
         white-space: nowrap; /* Prevent text wrapping during transition */
         
@@ -1405,6 +1405,116 @@
     @media (prefers-color-scheme: dark) {
         .connection-pill.waiting .status-dot {
              box-shadow: 0 0 5px #007AFF, 0 0 10px rgba(0, 122, 255, 0.3); /* Subtler for dark theme */
+        }
+    }
+
+    /* Status Pill Close Button - Neumorphic Style */
+    .connection-pill .pill-close-btn {
+        position: absolute;
+        top: -7px;
+        right: -7px;
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background: transparent;
+        border: none;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        opacity: 0;
+        transform: scale(0.8);
+        transition: opacity 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+        z-index: 10;
+        /* Neumorphic Shadow */
+        box-shadow: 
+            -2px -2px 4px var(--neu-shadow-light),
+            2px 2px 4px var(--neu-shadow-dark);
+    }
+
+    /* Close Button Ring */
+    .connection-pill .pill-close-btn::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-radius: 50%;
+        background: var(--neu-ring-gradient);
+        box-shadow: var(--neu-ring-inner-shadow);
+        z-index: -2;
+        pointer-events: none;
+    }
+
+    /* Close Button Face */
+    .connection-pill .pill-close-btn::after {
+        content: "";
+        position: absolute;
+        inset: 2px;
+        border-radius: 50%;
+        background: var(--neu-face-bg);
+        box-shadow: var(--neu-face-shadow);
+        z-index: -1;
+        transition: all 0.2s ease;
+        pointer-events: none;
+    }
+
+    .connection-pill .pill-close-btn svg {
+        width: 8px;
+        height: 8px;
+        position: relative;
+        z-index: 1;
+        opacity: 0.5;
+        color: var(--icon-color);
+        stroke: currentColor;
+        transition: opacity 0.2s ease, color 0.2s ease;
+        filter: drop-shadow(0 1px 1px rgba(255, 255, 255, 0.5));
+    }
+
+    .connection-pill.interactive:hover .pill-close-btn {
+        opacity: 1;
+        transform: scale(1);
+    }
+
+    .connection-pill .pill-close-btn:hover {
+        box-shadow: 
+            -3px -3px 6px var(--neu-shadow-light),
+            3px 3px 6px var(--neu-shadow-dark);
+    }
+
+    .connection-pill .pill-close-btn:hover::after {
+        background: var(--neu-face-bg-hover);
+    }
+
+    .connection-pill .pill-close-btn:hover svg {
+        opacity: 1;
+        color: var(--icon-off-color);
+    }
+
+    .connection-pill .pill-close-btn:active {
+        box-shadow: 
+            -1px -1px 2px var(--neu-shadow-light),
+            1px 1px 2px var(--neu-shadow-dark);
+    }
+
+    .connection-pill .pill-close-btn:active::after {
+        background: var(--neu-face-bg-active);
+        box-shadow: var(--neu-face-shadow-active);
+    }
+
+    @media (prefers-color-scheme: dark) {
+        .connection-pill .pill-close-btn {
+            box-shadow: 
+                2px 2px 4px var(--neu-shadow-dark),
+                -1px -1px 3px rgba(255, 255, 255, 0.02);
+        }
+
+        .connection-pill .pill-close-btn:hover {
+            box-shadow: 
+                3px 3px 6px var(--neu-shadow-dark),
+                -1px -1px 4px rgba(255, 255, 255, 0.02);
+        }
+
+        .connection-pill .pill-close-btn svg {
+            filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.3));
         }
     }
 
@@ -3433,9 +3543,9 @@
         <div class="settings-section" id="backupSection" style="display: flex; align-items: center; justify-content: space-between;">
             <h3 style="margin: 0;">备份到本地</h3>
             <select id="backupModeSelect" class="settings-select">
-                <option value="none">无</option>
-                <option value="gif_only">仅 GIF</option>
-                <option value="all">图片 + GIF</option>
+                <option value="none">仅视频</option>
+                <option value="gif_only">视频 + GIF</option>
+                <option value="all">视频 + GIF + 图片</option>
             </select>
         </div>
 
@@ -4225,6 +4335,14 @@
           console.error('   错误消息:', data.message || data.error || '未知错误');
           console.error('   完整错误详情:', data.details || '无');
           
+          // ✅ 如果是因为取消导出导致的错误，忽略错误 toast
+          if (isCancellingExport) {
+            console.log('   ℹ️  忽略取消导出后的错误消息');
+            handleExportError();
+            isCancellingExport = false; // 重置标志
+            return;
+          }
+          
           // 检查是否是"未找到文件"的错误
           const errorMsg = data.message || data.error || '';
           if (errorMsg.includes('未找到 GIF/视频文件')) {
@@ -4334,6 +4452,10 @@
             originalSettings.backupMode = mode;
             currentSettings.backupMode = mode;
             checkSettingsChanges();
+            // 调整宽度以适应当前选项
+            if (typeof adjustSelectWidth === 'function') {
+              adjustSelectWidth(backupModeSelect);
+            }
           }
         } else if (data.type === 'backup-screenshot-setting-updated') {
           // 备份截图设置已更新
@@ -4495,6 +4617,10 @@
         const oldWidth = element.offsetWidth;
         element.style.width = oldWidth + 'px';
         
+        // Prevent text wrapping and overflow during transition
+        element.style.whiteSpace = 'nowrap';
+        element.style.overflow = 'hidden';
+        
         // 2. Perform content update
         updateContentFn();
         
@@ -4506,24 +4632,45 @@
         // 4. Set back to old width immediately to start animation from there
         element.style.width = oldWidth + 'px';
         
-        // Prevent text wrapping and overflow during transition
-        element.style.whiteSpace = 'nowrap';
-        element.style.overflow = 'hidden';
+        // Force reflow to ensure transition works
+        void element.offsetHeight;
         
-        // Force reflow
-        element.offsetHeight;
+        // 5. Animate to new width using CSS transition
+        requestAnimationFrame(() => {
+            element.style.width = newWidth + 'px';
+        });
         
-        // 5. Animate to new width
-        element.style.width = newWidth + 'px';
-        
-        // 6. Clean up after transition
+        // 6. Clean up after transition (match CSS transition duration: 0.3s = 300ms + buffer)
         setTimeout(() => {
-            if (element.style.width === newWidth + 'px') {
+            // Only clean up if width hasn't changed again
+            if (Math.abs(element.offsetWidth - newWidth) < 2) {
                 element.style.width = '';
                 element.style.whiteSpace = '';
                 element.style.overflow = ''; // Restore to CSS value (visible)
             }
-        }, 600);
+        }, 350);
+    }
+
+    // 生成 status pill 关闭按钮的 HTML
+    function getPillCloseButtonHTML() {
+      return `
+        <span class="pill-close-btn" onclick="event.stopPropagation();">
+          <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <path d="M2 2L10 10M10 2L2 10"/>
+          </svg>
+        </span>
+      `;
+    }
+
+    // 为 status pill 绑定关闭按钮事件
+    function bindPillCloseButton(statusEl, clearStateFn) {
+      const closeBtn = statusEl.querySelector('.pill-close-btn');
+      if (closeBtn) {
+        closeBtn.onclick = function(e) {
+          e.stopPropagation();
+          clearStateFn();
+        };
+      }
     }
 
     function updateStatus(type, text) {
@@ -4630,6 +4777,7 @@
               <div class="face"></div>
               <span class="status-dot" style="position: relative; z-index: 2;"></span>
               <span style="position: relative; z-index: 2;">${exportText}</span>
+              ${getPillCloseButtonHTML()}
             `;
             statusEl.className = 'connection-pill connected interactive';
             statusEl.style.cursor = 'pointer';
@@ -4645,6 +4793,15 @@
               currentButtonState = null;
               updateStatus('connected', '已连接');
             };
+            // 绑定关闭按钮（不打开文件夹，直接清除状态）
+            bindPillCloseButton(statusEl, function() {
+              pendingStates.exported.active = false;
+              pendingStates.exported.count = 0;
+              exportedGifCount = 0;
+              justFinishedExport = false;
+              currentButtonState = null;
+              updateStatus('connected', '已连接');
+            });
             return;
           }
 
@@ -4657,6 +4814,7 @@
               <div class="face"></div>
               <span class="status-dot" style="position: relative; z-index: 2;"></span>
               <span style="position: relative; z-index: 2;">${exportText}</span>
+              ${getPillCloseButtonHTML()}
             `;
             statusEl.className = 'connection-pill connected interactive';
             statusEl.style.cursor = 'pointer';
@@ -4671,6 +4829,15 @@
               currentButtonState = null;
               updateStatus('connected', '已连接');
             };
+            // 绑定关闭按钮
+            bindPillCloseButton(statusEl, function() {
+              pendingStates.exported.active = false;
+              pendingStates.exported.count = 0;
+              exportedGifCount = 0;
+              justFinishedExport = false;
+              currentButtonState = null;
+              updateStatus('connected', '已连接');
+            });
             return;
           }
           
@@ -4689,6 +4856,7 @@
               <div class="face"></div>
               <span class="status-dot" style="position: relative; z-index: 2;"></span>
               <span style="position: relative; z-index: 2;">${warningText}</span>
+              ${getPillCloseButtonHTML()}
             `;
             statusEl.className = 'connection-pill connected interactive';
             statusEl.style.cursor = 'pointer';
@@ -4711,6 +4879,20 @@
               justFinishedExport = false;
               updateStatus('connected', '');
             };
+            // 绑定关闭按钮（不打开文件夹，直接清除状态）
+            bindPillCloseButton(statusEl, function() {
+              pendingStates.savedVideo.active = false;
+              pendingStates.savedVideo.count = 0;
+              manualDragCount = 0;
+              skippedFilesSet.clear();
+              if (pendingStates.savedGif.active && pendingStates.savedGif.count > 0) {
+                currentButtonState = 'gif-backup';
+              } else {
+                currentButtonState = null;
+              }
+              justFinishedExport = false;
+              updateStatus('connected', '');
+            });
             return;
           }
           
@@ -4729,6 +4911,7 @@
               <div class="face"></div>
               <span class="status-dot" style="position: relative; z-index: 2;"></span>
               <span style="position: relative; z-index: 2;">${backupText}</span>
+              ${getPillCloseButtonHTML()}
             `;
             statusEl.className = 'connection-pill connected interactive';
             statusEl.style.cursor = 'pointer';
@@ -4750,6 +4933,19 @@
               justFinishedExport = false;
               updateStatus('connected', '');
             };
+            // 绑定关闭按钮
+            bindPillCloseButton(statusEl, function() {
+              pendingStates.savedGif.active = false;
+              pendingStates.savedGif.count = 0;
+              gifBackupCount = 0;
+              if (pendingStates.savedVideo.active && pendingStates.savedVideo.count > 0) {
+                currentButtonState = 'video';
+              } else {
+                currentButtonState = null;
+              }
+              justFinishedExport = false;
+              updateStatus('connected', '');
+            });
             return;
           }
 
@@ -4764,6 +4960,7 @@
               <div class="face"></div>
               <span class="status-dot" style="position: relative; z-index: 2;"></span>
               <span style="position: relative; z-index: 2;">${exportText}</span>
+              ${getPillCloseButtonHTML()}
             `;
             statusEl.className = 'connection-pill connected interactive';
             statusEl.style.cursor = 'pointer';
@@ -4779,6 +4976,15 @@
               currentButtonState = null;
               updateStatus('connected', '已连接');
             };
+            // 绑定关闭按钮
+            bindPillCloseButton(statusEl, function() {
+              pendingStates.exported.active = false;
+              pendingStates.exported.count = 0;
+              exportedGifCount = 0;
+              justFinishedExport = false;
+              currentButtonState = null;
+              updateStatus('connected', '已连接');
+            });
             return;
           }
 
@@ -5302,11 +5508,35 @@
     if (imageWidthInput) imageWidthInput.addEventListener('input', checkSettingsChanges);
     if (imageHeightInput) imageHeightInput.addEventListener('input', checkSettingsChanges);
     if (frameColumnsInput) frameColumnsInput.addEventListener('input', checkSettingsChanges);
+    // 动态调整 select 宽度以适应当前选项文字
+    function adjustSelectWidth(selectEl) {
+      if (!selectEl) return;
+      
+      // 创建临时 span 测量文字宽度
+      const tempSpan = document.createElement('span');
+      tempSpan.style.visibility = 'hidden';
+      tempSpan.style.position = 'absolute';
+      tempSpan.style.whiteSpace = 'nowrap';
+      tempSpan.style.fontSize = getComputedStyle(selectEl).fontSize;
+      tempSpan.style.fontFamily = getComputedStyle(selectEl).fontFamily;
+      tempSpan.textContent = selectEl.options[selectEl.selectedIndex].text;
+      document.body.appendChild(tempSpan);
+      
+      // 设置宽度：文字宽度 + padding (10px 左 + 28px 右给箭头) + 边框
+      const textWidth = tempSpan.offsetWidth;
+      selectEl.style.width = (textWidth + 42) + 'px';
+      
+      document.body.removeChild(tempSpan);
+    }
+
     if (backupModeSelect) {
       backupModeSelect.addEventListener('change', function() {
         checkSettingsChanges();
+        adjustSelectWidth(this);
         this.blur(); // Remove focus to restore raised style immediately
       });
+      // 初始化时也调整一次宽度
+      adjustSelectWidth(backupModeSelect);
     }
     
     function loadSizeSettings() {
@@ -5815,7 +6045,12 @@
       if (frameColumnsInput) frameColumnsInput.value = originalSettings.frameColumns || '';
       
       // Reset Backup Mode Select
-      if (backupModeSelect) backupModeSelect.value = originalSettings.backupMode || 'none';
+      if (backupModeSelect) {
+        backupModeSelect.value = originalSettings.backupMode || 'none';
+        if (typeof adjustSelectWidth === 'function') {
+          adjustSelectWidth(backupModeSelect);
+        }
+      }
       
       const gifBackupToggle = document.getElementById('gifBackupToggle');
       if (gifBackupToggle) gifBackupToggle.checked = originalSettings.backupGif || false;
@@ -6006,61 +6241,21 @@
         updateBannerNowBtn.disabled = true;
         updateBannerNowBtn.textContent = '更新中...';
         
-        // Mock Update Flow (Simulated)
-        console.log('🧪 Starting Mock Update Flow...');
+        console.log('🔄 开始全量更新...');
         
-        // Helper to simulate delay
-        const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-        
-        (async () => {
-          try {
-             // 1. Downloading (0% -> 100%)
-             // 保持按钮样式，不添加 transparent 类
-             for (let i = 0; i <= 100; i += 10) {
-               updateBannerNowBtn.textContent = `下载中 ${i}%`;
-               await delay(200);
-             }
-             
-             // 2. Installing (Only one step)
-             updateBannerNowBtn.textContent = '正在安装';
-             await delay(2000); // Wait a bit longer to simulate installation
-             
-             // 5. Completed
-             updateBannerNowBtn.textContent = '更新完成';
-             updateBannerNowBtn.classList.add('success'); 
-             
-             // 成功状态：绿色描边风格（保持按钮形状，但改为绿色文字）
-             updateBannerNowBtn.style.background = 'transparent';
-             updateBannerNowBtn.style.color = '#4CAF50'; 
-             updateBannerNowBtn.style.borderColor = '#4CAF50';
-             updateBannerNowBtn.style.opacity = '1'; // 确保不透明
-             
-             showToast('更新成功！', 'success');
-             
-             // 6. Hide Banner
-             await delay(1500);
-             hideUpdateBanner();
-             console.log('✅ Mock Update Flow Completed');
-             
-          } catch (e) {
-             console.error('Mock Update Failed', e);
-             updateBannerNowBtn.disabled = false;
-             updateBannerNowBtn.textContent = '立即更新';
-             updateBannerNowBtn.style.background = '';
-             updateBannerNowBtn.style.color = '';
-             updateBannerNowBtn.style.borderColor = '';
-             updateBannerNowBtn.style.opacity = '';
-          }
-        })();
-
-        /* 
-        // Real Update Logic (Commented out for Mock)
-        if (ws && ws.readyState === 1) {
-          // ...
+        // 发送更新请求到服务器
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            type: 'update-full'
+          }));
+          console.log('   📤 已发送更新请求到服务器');
         } else {
-          // ...
+          // WebSocket 未连接，显示错误
+          console.error('❌ WebSocket 未连接，无法更新');
+          showToast('服务器未连接，无法更新', 'error');
+          updateBannerNowBtn.disabled = false;
+          updateBannerNowBtn.textContent = '立即更新';
         }
-        */
       };
     }
 
@@ -6522,7 +6717,8 @@
         totalExports = msg.total || 0;
         completedExports = 0;
         isExporting = true;
-        
+        isCancellingExport = false; // ✅ 重置取消标志
+
         console.log('🎬 开始批量导出，总数:', totalExports);
         console.log('🔍 检查元素状态:', {
             exportGifBtn: !!exportGifBtn,
@@ -6560,6 +6756,20 @@
         const exportBtn = document.getElementById('exportGifBtn');
         if (exportBtn) {
             exportBtn.classList.remove('success');
+            const ring = exportBtn.querySelector('.progress-ring');
+            if (ring) ring.style.opacity = 0;
+        }
+        isExporting = false;
+      } else if (msg.type === 'export-gif-cancelled') {
+        // ✅ 处理 code.js 发来的取消确认消息
+        // cancelExport() 已经显示了 toast 和重置了状态，这里只需确保 isExporting 被重置
+        console.log('🛑 收到 code.js 取消确认');
+        stopSmoothProgress();
+        const exportBtn = document.getElementById('exportGifBtn');
+        if (exportBtn) {
+            exportBtn.classList.remove('exporting');
+            exportBtn.classList.remove('success');
+            exportBtn.setAttribute('data-tooltip', '导出 GIF');
             const ring = exportBtn.querySelector('.progress-ring');
             if (ring) ring.style.opacity = 0;
         }
@@ -6869,6 +7079,7 @@
     let totalExports = 0;
     let completedExports = 0;
     let isExporting = false;
+    let isCancellingExport = false; // 标记是否正在取消导出（用于忽略取消后的错误消息）
     let pendingExportCacheCheck = false; // 标记是否有待处理的导出流程缓存检查
     let successTimer = null;
     let circumference = 0;
@@ -6884,7 +7095,7 @@
     // ✅ 导出超时检测
     let exportTimeoutId = null; // 导出超时计时器
     let lastProgressUpdate = 0; // 上次进度更新时间
-    const EXPORT_STALL_TIMEOUT = 180000; // 3分钟无进度更新视为卡住
+    const EXPORT_STALL_TIMEOUT = 600000; // 10分钟无进度更新视为卡住
     let circumferenceManual = 0;
     let progressCircleManual = null;
     let progressRingManual = null;
@@ -7259,9 +7470,21 @@
         
         // 设置新的超时检测
         exportTimeoutId = setTimeout(() => {
-            // 检查是否还在导出中，且进度卡在高位（>85%）
-            if (isExporting && currentSmoothProgress >= 85) {
-                console.warn('⚠️  检测到导出卡住（进度停滞超过 3 分钟）');
+            // 检查是否还在导出中
+            if (isExporting) {
+                console.warn('⚠️  检测到导出超时（进度停滞超过 10 分钟）');
+                
+                // ✅ 设置取消标志，忽略后续的错误消息
+                isCancellingExport = true;
+                
+                // ✅ 发送取消消息给 code.js
+                parent.postMessage({ pluginMessage: { type: "cancel-gif-export" } }, "*");
+                
+                // ✅ 发送取消消息给 server
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: "cancel-gif-export" }));
+                    console.log('   📤 已发送超时取消请求到服务器');
+                }
                 
                 // 停止导出并提示用户
                 stopSmoothProgress();
@@ -7281,8 +7504,8 @@
                 if (progressRing) progressRing.style.opacity = 0;
                 
                 // 提示用户
-                showToast('导出的 GIF 尺寸过大，处理超时', 'error');
-                log('❌ 导出超时：GIF 尺寸过大，建议减小画面尺寸或缩短视频时长');
+                showToast('导出超时，已自动终止', 'error');
+                log('❌ 导出超时：GIF 尺寸过大或处理时间过长，建议减小画面尺寸或缩短视频时长');
                 updateStatus('connected', '');
             }
         }, EXPORT_STALL_TIMEOUT);
@@ -7352,6 +7575,9 @@
     function cancelExport() {
         console.log('🛑 用户点击取消导出');
         
+        // ✅ 设置取消标志，忽略后续的错误消息
+        isCancellingExport = true;
+
         // 发送取消消息给后端
         parent.postMessage({ pluginMessage: { type: "cancel-gif-export" } }, "*");
         

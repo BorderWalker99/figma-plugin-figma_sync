@@ -478,13 +478,57 @@ figma.ui.onmessage = async (msg) => {
         console.log(`   🔎 正在检查节点: ${node.name} (type: ${node.type})`);
         console.log(`      originalFilename (pluginData): ${filename || '无'}`);
         
-        // 如果没有 originalFilename，检查是否是手动拖入的视频/GIF
-        if (!filename) {
+        // ✅ 优化：即使有 originalFilename，也尝试通过字节检测确认是否是 GIF
+        // 这能处理文件名没有扩展名或扩展名不正确的情况
+        if (node.type === 'RECTANGLE' && node.fills && node.fills.length > 0) {
+          const fill = node.fills[0];
+          console.log(`      填充类型: ${fill.type}`);
+          
+          // 检查 IMAGE 填充（通过字节头识别 GIF）
+          if (fill.type === 'IMAGE' && fill.imageHash) {
+            try {
+              const image = figma.getImageByHash(fill.imageHash);
+              if (image) {
+                const bytes = await image.getBytesAsync();
+                // 检查 GIF 魔法数 (GIF89a 或 GIF87a) -> 'GIF' (0x47, 0x49, 0x46)
+                if (bytes.length >= 3 && bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) {
+                  console.log(`   🎨 [ByteCheck] 检测到 GIF 格式图片: ${node.name}`);
+                  isGifDetected = true;
+                  
+                  // 检查是否有关联数据（用于判断是手动拖入还是手机同步）
+                  const driveFileId = node.getPluginData('driveFileId');
+                  const ossFileId = node.getPluginData('ossFileId');
+                  
+                  if (driveFileId || ossFileId) {
+                    console.log(`   📱 检测到手机同步的 GIF 图层: ${node.name}`);
+                    isManualDrag = false;
+                  } else {
+                    console.log(`   🎬 检测到手动拖入的 GIF 图层: ${node.name}`);
+                    isManualDrag = true;
+                  }
+                  
+                  // 如果没有 filename，使用节点名称
+                  if (!filename) {
+                    filename = node.name;
+                    if (!filename.toLowerCase().endsWith('.gif')) {
+                      filename = filename + '.gif';
+                    }
+                  }
+                }
+              }
+            } catch (e) {
+              console.error('Failed to read image bytes:', e);
+            }
+          }
+        }
+        
+        // 如果没有 originalFilename，且不是 GIF，继续检查是否是手动拖入的视频
+        if (!filename && !isGifDetected) {
           console.log('      没有 originalFilename，检查填充类型...');
           // 检查填充类型是否是 VIDEO 或 IMAGE
           if (node.type === 'RECTANGLE' && node.fills && node.fills.length > 0) {
             const fill = node.fills[0];
-            console.log(`      填充类型: ${fill.type}`);
+            // 填充类型已在上面打印过
             
             // 方法 1：检查 VIDEO 填充
             if (fill.type === 'VIDEO') {
@@ -564,39 +608,7 @@ figma.ui.onmessage = async (msg) => {
                 console.log(`      使用图层名称作为文件名: ${filename}`);
               }
             }
-            // 方法 2：检查 IMAGE 填充（通过读取字节头识别 GIF）
-            else if (fill.type === 'IMAGE' && fill.imageHash) {
-              try {
-                const image = figma.getImageByHash(fill.imageHash);
-                if (image) {
-                  const bytes = await image.getBytesAsync();
-                  // 检查 GIF 魔法数 (GIF89a 或 GIF87a) -> 'GIF' (0x47, 0x49, 0x46)
-                  if (bytes.length >= 3 && bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) {
-                    console.log(`   🎨 [ByteCheck] 检测到 GIF 格式图片: ${node.name}`);
-                    isGifDetected = true;
-                    
-                    // 检查是否有关联数据
-                    const driveFileId = node.getPluginData('driveFileId');
-                    const ossFileId = node.getPluginData('ossFileId');
-                    
-                    if (driveFileId || ossFileId) {
-                      console.log(`   📱 检测到手机同步的 GIF 图层: ${node.name}`);
-                      isManualDrag = false;
-                    } else {
-                      console.log(`   🎬 检测到手动拖入的 GIF 图层: ${node.name}`);
-                      isManualDrag = true;
-                    }
-                    
-                    filename = node.name;
-                    if (!filename.toLowerCase().endsWith('.gif')) {
-                      filename = filename + '.gif';
-                    }
-                  }
-                }
-              } catch (e) {
-                console.error('Failed to read image bytes:', e);
-              }
-            }
+            // 注意：IMAGE 填充的 GIF 检测已在函数开头处理
           }
         }
         
