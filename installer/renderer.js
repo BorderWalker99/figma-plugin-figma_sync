@@ -369,15 +369,17 @@ async function checkSystemRequirements() {
     actionBtn.disabled = false;
     
     if (allInstalled) {
-      // 所有依赖已安装，显示下一步按钮
+      // 所有依赖已安装，显示下一步按钮（有 icon，恢复默认 padding）
       actionBtn.innerHTML = '下一步 <svg viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>';
+      actionBtn.style.padding = '10px 12px 10px 20px';
       actionBtn.onclick = window.nextStep;
       // 确保样式是 primary
       actionBtn.className = 'btn btn-primary';
     } else {
-      // 有依赖未安装，显示重新检测按钮
-      actionBtn.innerHTML = '重新检测';
-      actionBtn.onclick = checkSystemRequirements;
+      // 有依赖未安装，显示立即安装按钮（无 icon，左右 padding 对称）
+      actionBtn.innerHTML = '立即安装';
+      actionBtn.style.padding = '10px 20px';
+      actionBtn.onclick = installMissingDependencies;
       // 保持 primary 样式，引导用户点击
       actionBtn.className = 'btn btn-primary';
     }
@@ -396,6 +398,51 @@ async function checkSystemRequirements() {
 // 如果有其他地方调用 recheckDependencies (例如HTML onclick)，在新的 HTML 中已经去掉了
 // 但为了兼容性（如果有遗漏），可以保留一个别名
 window.recheckDependencies = checkSystemRequirements;
+
+// 安装缺失的依赖
+async function installMissingDependencies() {
+  const actionBtn = document.getElementById('step2ActionBtn');
+  
+  // 设置按钮为安装中状态
+  actionBtn.disabled = true;
+  actionBtn.classList.add('keep-raised');
+  actionBtn.innerHTML = '<svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg> 正在安装...';
+  
+  try {
+    // 调用一键安装所有缺失的依赖
+    const result = await ipcRenderer.invoke('install-all-dependencies', dependencyStatus);
+    
+    if (result.success) {
+      showToast('依赖安装命令已发送到终端', 'success');
+      
+      // 显示重新检测按钮，让用户在终端安装完成后点击（无 icon，左右 padding 对称）
+      actionBtn.disabled = false;
+      actionBtn.classList.remove('keep-raised');
+      actionBtn.innerHTML = '重新检测';
+      actionBtn.style.padding = '10px 20px';
+      actionBtn.onclick = checkSystemRequirements;
+    } else {
+      showToast(result.error || '安装失败', 'error');
+      
+      // 恢复按钮状态（无 icon，左右 padding 对称）
+      actionBtn.disabled = false;
+      actionBtn.classList.remove('keep-raised');
+      actionBtn.innerHTML = '立即安装';
+      actionBtn.style.padding = '10px 20px';
+      actionBtn.onclick = installMissingDependencies;
+    }
+  } catch (error) {
+    console.error('安装依赖失败:', error);
+    showToast('安装失败: ' + error.message, 'error');
+    
+    // 恢复按钮状态（无 icon，左右 padding 对称）
+    actionBtn.disabled = false;
+    actionBtn.classList.remove('keep-raised');
+    actionBtn.innerHTML = '立即安装';
+    actionBtn.style.padding = '10px 20px';
+    actionBtn.onclick = installMissingDependencies;
+  }
+}
 
 // Step 2: 安装依赖
 async function installDependencies() {

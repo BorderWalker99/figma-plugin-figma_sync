@@ -2427,9 +2427,73 @@
         max-height: 90vh;
         overflow: visible;
     }
-    
+
     #uploadGifOverlay .modal-content {
         overflow: visible;
+    }
+
+    /* QR Code Zoom Modal */
+    #qrZoomOverlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.8);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 10000;
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity 0.25s ease, visibility 0.25s ease;
+      cursor: zoom-out;
+    }
+
+    #qrZoomOverlay.show {
+      opacity: 1;
+      visibility: visible;
+    }
+
+    #qrZoomOverlay .qr-zoom-content {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+      transform: scale(0.9);
+      transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+
+    #qrZoomOverlay.show .qr-zoom-content {
+      transform: scale(1);
+    }
+
+    #qrZoomOverlay .qr-zoom-image {
+      width: 200px;
+      height: 200px;
+      border-radius: 12px;
+      background: white;
+      padding: 12px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+    }
+
+    #qrZoomOverlay .qr-zoom-label {
+      font-size: 14px;
+      color: rgba(255, 255, 255, 0.9);
+      font-weight: 500;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+    }
+
+    /* QR Code clickable style */
+    .qr-clickable {
+      cursor: zoom-in;
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .qr-clickable:hover {
+      transform: scale(1.05);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    }
+
+    .qr-clickable:active {
+      transform: scale(1.02);
     }
     
     /* Hide number input spinners */
@@ -3605,6 +3669,14 @@
 
                       </div>
                     </div>
+  </div>
+
+  <!-- QR Code Zoom Modal -->
+  <div id="qrZoomOverlay">
+    <div class="qr-zoom-content">
+      <img id="qrZoomImage" class="qr-zoom-image" src="" alt="QR Code">
+      <div id="qrZoomLabel" class="qr-zoom-label"></div>
+    </div>
   </div>
 
   <!-- Upload GIF Modal -->
@@ -5223,6 +5295,49 @@
       if (qrIcloudAlbum) qrIcloudAlbum.src = uris.icloudAlbum || uris.icloud;
     }
 
+    // QR Code Zoom Functions
+    function setupQRCodeZoom() {
+      const qrImages = [
+        { id: 'qrGoogleScreenshot', label: '直接截图' },
+        { id: 'qrGoogleAlbum', label: '相册选择' },
+        { id: 'qrIcloudScreenshot', label: '直接截图' },
+        { id: 'qrIcloudAlbum', label: '相册选择' }
+      ];
+
+      qrImages.forEach(({ id, label }) => {
+        const img = document.getElementById(id);
+        if (img) {
+          img.classList.add('qr-clickable');
+          img.onclick = () => openQRZoom(img.src, label);
+        }
+      });
+
+      // Click overlay to close
+      const overlay = document.getElementById('qrZoomOverlay');
+      if (overlay) {
+        overlay.onclick = closeQRZoom;
+      }
+    }
+
+    function openQRZoom(src, label) {
+      const overlay = document.getElementById('qrZoomOverlay');
+      const zoomImage = document.getElementById('qrZoomImage');
+      const zoomLabel = document.getElementById('qrZoomLabel');
+
+      if (overlay && zoomImage && zoomLabel) {
+        zoomImage.src = src;
+        zoomLabel.textContent = label;
+        overlay.classList.add('show');
+      }
+    }
+
+    function closeQRZoom() {
+      const overlay = document.getElementById('qrZoomOverlay');
+      if (overlay) {
+        overlay.classList.remove('show');
+      }
+    }
+
     function setIdStepImages() {
       const idStep1Image = document.getElementById('idStep1Image');
       const idStep2Image = document.getElementById('idStep2Image');
@@ -5251,9 +5366,11 @@
     if (document.readyState === 'loading') {
       window.addEventListener('DOMContentLoaded', function() {
         handleThemeChange();
+        setupQRCodeZoom();
       });
     } else {
       handleThemeChange();
+      setupQRCodeZoom();
     }
     
     const themeMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
