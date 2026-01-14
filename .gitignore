@@ -64,3 +64,6 @@ ScreenSyncImg/
 
 # 开发者临时文件
 Developer_*.command
+
+# 缓存文件
+.gif-cache/
