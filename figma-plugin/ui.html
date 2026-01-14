@@ -4263,12 +4263,16 @@
           console.log('📥 收到服务器缓存检查结果:', data.results ? data.results.length : 0, '个文件');
           
           // 转发给 code.js 处理（转换消息类型以匹配 code.js 期望的格式）
+          // ✅ 只有在导出流程中的缓存检查才需要继续触发导出
           parent.postMessage({
             pluginMessage: {
               type: 'server-cache-check-result',
-              results: data.results || []
+              results: data.results || [],
+              fromExport: pendingExportCacheCheck // 标记是否来自导出流程
             }
           }, '*');
+          // 重置标志
+          pendingExportCacheCheck = false;
         } else if (data.type === 'switch-sync-mode-result') {
           if (data.success) {
             // 简化消息：从"储存方式已切换为 XXX"改为"已切换为 XXX方式"
@@ -6583,6 +6587,7 @@
         // ✅ 转发检查请求给 Server
         if (ws && ws.readyState === WebSocket.OPEN) {
           console.log('📤 发送缓存检查请求到 Server');
+          pendingExportCacheCheck = true; // ✅ 标记这是导出流程的缓存检查
           ws.send(JSON.stringify({
             type: 'check-cache-existence',
             files: msg.unsyncedGifs.map(g => ({
@@ -6864,6 +6869,7 @@
     let totalExports = 0;
     let completedExports = 0;
     let isExporting = false;
+    let pendingExportCacheCheck = false; // 标记是否有待处理的导出流程缓存检查
     let successTimer = null;
     let circumference = 0;
     let progressCircle = null;

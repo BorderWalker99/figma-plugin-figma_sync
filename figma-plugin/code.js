@@ -416,7 +416,7 @@ figma.ui.onmessage = async (msg) => {
       clearTimeout(serverCheckTimer);
       serverCheckTimer = null;
     }
-    console.log(`📥 收到 Server 缓存检查结果: ${msg.results.length} 个文件`);
+    console.log(`📥 收到 Server 缓存检查结果: ${msg.results.length} 个文件, fromExport: ${msg.fromExport}`);
     
     let updatedCount = 0;
     
@@ -435,11 +435,16 @@ figma.ui.onmessage = async (msg) => {
     
     console.log(`   🎉 已自动修复 ${updatedCount} 个图层的关联数据`);
     
-    // 重新触发导出，但跳过检查以避免死循环（如果有剩下的确实没找到）
-    figma.ui.postMessage({
-      type: 'trigger-export-from-code',
-      skipServerCheck: true
-    });
+    // ✅ 只有在导出流程中才触发导出，自动关联场景不触发
+    if (msg.fromExport) {
+      // 重新触发导出，但跳过检查以避免死循环（如果有剩下的确实没找到）
+      figma.ui.postMessage({
+        type: 'trigger-export-from-code',
+        skipServerCheck: true
+      });
+    } else {
+      console.log('   ℹ️  非导出流程，跳过触发导出');
+    }
     return;
   }
 
