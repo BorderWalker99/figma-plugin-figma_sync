@@ -413,15 +413,17 @@ async function installMissingDependencies() {
     const result = await ipcRenderer.invoke('install-all-dependencies', dependencyStatus);
     
     if (result.success) {
-      showToast('依赖安装命令已发送到终端', 'success');
+      // 显示后端返回的详细消息
+      showToast(result.message || '安装已启动', 'success');
       
-      // 显示重新检测按钮，让用户在终端安装完成后点击（无 icon，左右 padding 对称）
+      // 显示重新检测按钮，让用户在安装完成后点击（无 icon，左右 padding 对称）
       actionBtn.disabled = false;
       actionBtn.classList.remove('keep-raised');
       actionBtn.innerHTML = '重新检测';
       actionBtn.style.padding = '10px 20px';
       actionBtn.onclick = checkSystemRequirements;
     } else {
+      // 显示错误信息（已处理"已取消安装"的情况）
       showToast(result.error || '安装失败', 'error');
       
       // 恢复按钮状态（无 icon，左右 padding 对称）

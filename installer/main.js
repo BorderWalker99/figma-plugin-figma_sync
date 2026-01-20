@@ -591,15 +591,36 @@ ipcMain.handle('install-all-dependencies', async (event, dependencyStatus) => {
   return new Promise(async (resolve) => {
     console.log('📦 一键安装所有依赖，当前状态:', dependencyStatus);
     
-    const commandsToRun = [];
-    
-    // 根据状态构建安装命令
+    // 检查是否需要安装 Homebrew
     if (!dependencyStatus.homebrew) {
-      // Homebrew 需要特殊处理，使用官方安装脚本
-      commandsToRun.push('/bin/bash -c \\"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\\"');
+      // Homebrew 必须在 Terminal 中安装（交互式脚本）
+      const homebrewCommand = '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"';
+      
+      const appleScript = `
+        tell application "Terminal"
+          activate
+          do script "${homebrewCommand}"
+        end tell
+      `;
+      
+      console.log('Opening Terminal to install Homebrew (interactive)');
+      
+      try {
+        await runAppleScript(appleScript);
+        resolve({ 
+          success: true, 
+          message: '终端已打开安装 Homebrew。\n\n💡 提示：\n- 终端会要求输入密码\n- 输入时不会显示字符（这是正常的）\n- 输入完成后按回车键\n- 安装完成后请点击"重新检测"按钮'
+        });
+      } catch (error) {
+        resolve({ 
+          success: false, 
+          error: `无法打开终端: ${error.message}\n\n请手动在终端中运行:\n${homebrewCommand}`
+        });
+      }
+      return;
     }
     
-    // 构建 brew install 命令（将所有缺失的包合并到一条命令）
+    // 构建需要安装的包列表
     const brewPackages = [];
     if (!dependencyStatus.node) {
       brewPackages.push('node');
@@ -611,15 +632,7 @@ ipcMain.handle('install-all-dependencies', async (event, dependencyStatus) => {
       brewPackages.push('ffmpeg');
     }
     
-    if (brewPackages.length > 0) {
-      // 如果 Homebrew 需要安装，添加 && 连接符
-      if (commandsToRun.length > 0) {
-        commandsToRun.push('&&');
-      }
-      commandsToRun.push(`brew install ${brewPackages.join(' ')}`);
-    }
-    
-    if (commandsToRun.length === 0) {
+    if (brewPackages.length === 0) {
       resolve({ 
         success: false, 
         error: '所有依赖已安装，无需重复安装'
@@ -627,32 +640,57 @@ ipcMain.handle('install-all-dependencies', async (event, dependencyStatus) => {
       return;
     }
     
-    // 合并所有命令为一条终端指令
-    const finalCommand = commandsToRun.join(' ');
+    // 使用系统原生密码对话框（有回显点）
+    const installCommand = `brew install ${brewPackages.join(' ')}`;
     
-    const appleScript = `
-      tell application "Terminal"
-        activate
-        do script "${finalCommand}"
-      end tell
+    // 使用 AppleScript 的 "do shell script with administrator privileges"
+    // 这会弹出系统原生密码框，用户体验更好
+    const appleScriptWithAuth = `
+      do shell script "${installCommand}" with administrator privileges
     `;
     
-    console.log('Opening Terminal with unified install command:', finalCommand);
+    console.log('Installing packages with system auth dialog:', installCommand);
     
     try {
-      await runAppleScript(appleScript);
-      console.log('Terminal opened successfully for unified installation');
+      // 执行命令（会弹出系统密码框）
+      await runAppleScript(appleScriptWithAuth);
+      console.log('Installation completed successfully');
       resolve({ 
         success: true, 
-        message: '终端已打开，正在安装所有缺失依赖。只需输入一次密码即可。安装完成后请点击"重新检测"按钮。',
-        needsRestart: true
+        message: `已成功安装: ${brewPackages.join(', ')}\n\n请点击"重新检测"按钮确认安装。`
       });
     } catch (error) {
-      console.error('Failed to run AppleScript:', error);
-      resolve({ 
-        success: false, 
-        error: `无法打开终端: ${error.message}\n\n请手动在终端中运行:\n${finalCommand.replace(/\\"/g, '"')}`
-      });
+      console.error('Installation failed:', error);
+      
+      // 如果用户取消了密码输入
+      if (error.message.includes('User canceled')) {
+        resolve({ 
+          success: false, 
+          error: '已取消安装'
+        });
+      } else {
+        // 其他错误，回退到 Terminal 方式
+        console.log('Falling back to Terminal installation');
+        const fallbackScript = `
+          tell application "Terminal"
+            activate
+            do script "${installCommand}"
+          end tell
+        `;
+        
+        try {
+          await runAppleScript(fallbackScript);
+          resolve({ 
+            success: true, 
+            message: '终端已打开。\n\n💡 提示：输入密码时不会显示字符，这是正常的。输入完成后按回车键。'
+          });
+        } catch (fallbackError) {
+          resolve({ 
+            success: false, 
+            error: `安装失败: ${error.message}\n\n请手动在终端中运行:\n${installCommand}`
+          });
+        }
+      }
     }
   });
 });
