@@ -4,6 +4,34 @@ const { exec, spawn } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 
+// 检测 macOS 版本
+function getMacOSVersion() {
+  try {
+    const version = os.release(); // 例如: "22.6.0" 对应 macOS 13.5
+    const major = parseInt(version.split('.')[0]);
+    
+    // macOS 版本映射 (Darwin kernel version -> macOS version)
+    // 23.x = macOS 14 (Sonoma), 22.x = macOS 13 (Ventura), 21.x = macOS 12 (Monterey)
+    // 20.x = macOS 11 (Big Sur), 19.x = macOS 10.15 (Catalina), 18.x = macOS 10.14 (Mojave)
+    const versionMap = {
+      25: { version: '15', name: 'Sequoia', supported: true },
+      24: { version: '14', name: 'Sonoma', supported: true },
+      23: { version: '14', name: 'Sonoma', supported: true },
+      22: { version: '13', name: 'Ventura', supported: 'limited' },
+      21: { version: '12', name: 'Monterey', supported: 'limited' },
+      20: { version: '11', name: 'Big Sur', supported: 'limited' },
+      19: { version: '10.15', name: 'Catalina', supported: false },
+      18: { version: '10.14', name: 'Mojave', supported: false },
+      17: { version: '10.13', name: 'High Sierra', supported: false }
+    };
+    
+    return versionMap[major] || { version: 'Unknown', name: 'Unknown', supported: false };
+  } catch (e) {
+    console.error('Failed to detect macOS version:', e);
+    return { version: 'Unknown', name: 'Unknown', supported: 'unknown' };
+  }
+}
+
 // 允许在渲染进程中使用 remote
 if (process.platform === 'darwin') {
   app.allowRendererProcessReuse = false;
@@ -479,6 +507,11 @@ function runAppleScript(script) {
     });
   });
 }
+
+// 获取 macOS 版本信息
+ipcMain.handle('get-macos-version', async () => {
+  return getMacOSVersion();
+});
 
 ipcMain.handle('install-homebrew', async () => {
   return new Promise(async (resolve) => {

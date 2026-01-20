@@ -89,6 +89,7 @@ echo -e "${YELLOW}⚙️  复制配置文件...${NC}"
 cp package.json "$TEMP_DIR/项目文件/"
 cp package-lock.json "$TEMP_DIR/项目文件/"
 cp README.md "$TEMP_DIR/项目文件/"
+cp MANUAL_INSTALL_LEGACY.md "$TEMP_DIR/项目文件/" 2>/dev/null || echo "   ⚠️  MANUAL_INSTALL_LEGACY.md not found (optional)"
 
 # 3. 创建 .sync-mode 文件，默认 iCloud 模式
 echo "icloud" > "$TEMP_DIR/项目文件/.sync-mode"

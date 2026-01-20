@@ -87,11 +87,12 @@ create_package() {
     cp drive-watcher.js "$TEMP_DIR/项目文件/"
     cp com.screensync.server.plist "$TEMP_DIR/项目文件/" 2>/dev/null || true
     
-    # 2. 复制配置文件
-    echo -e "${YELLOW}⚙️  复制配置文件...${NC}"
-    cp package.json "$TEMP_DIR/项目文件/"
-    cp package-lock.json "$TEMP_DIR/项目文件/"
-    cp README.md "$TEMP_DIR/项目文件/"
+  # 2. 复制配置文件
+  echo -e "${YELLOW}⚙️  复制配置文件...${NC}"
+  cp package.json "$TEMP_DIR/项目文件/"
+  cp package-lock.json "$TEMP_DIR/项目文件/"
+  cp README.md "$TEMP_DIR/项目文件/"
+  cp MANUAL_INSTALL_LEGACY.md "$TEMP_DIR/项目文件/" 2>/dev/null || echo "   ⚠️  MANUAL_INSTALL_LEGACY.md not found (optional)"
     
     # 3. 复制对应架构的 DMG
     echo -e "${YELLOW}🖥️  复制 ${ARCH_TYPE} 安装器...${NC}"

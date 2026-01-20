@@ -255,6 +255,51 @@ async function checkSystemRequirements() {
   actionBtn.innerHTML = '<svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg> 检测中...';
   
   try {
+    // ====== 首先检查 macOS 版本 ======
+    const macosInfo = await ipcRenderer.invoke('get-macos-version');
+    console.log('macOS 版本:', macosInfo);
+    
+    // 显示 macOS 版本警告（如果需要）
+    if (macosInfo.supported === false) {
+      // macOS 10.15 或更早：完全不支持
+      const oldSystemWarning = `⚠️ 检测到 macOS ${macosInfo.version} (${macosInfo.name})
+
+Homebrew 不支持此系统版本，自动安装将会失败。
+
+📋 手动安装方案：
+1. Node.js：访问 nodejs.org 下载官方 .pkg 安装包
+2. ImageMagick：下载官方二进制包或使用 MacPorts
+3. FFmpeg：从 evermeet.cx 下载静态编译版本
+
+💡 或者，强烈建议升级到 macOS 14 (Sonoma) 或更高版本。`;
+      
+      showToast(oldSystemWarning, 'error');
+      
+      // 存储系统信息供后续使用
+      window.macosInfo = macosInfo;
+    } else if (macosInfo.supported === 'limited') {
+      // macOS 11-13：有限支持
+      const limitedWarning = `⚠️ 检测到 macOS ${macosInfo.version} (${macosInfo.name})
+
+Homebrew 对此版本仅提供有限支持。
+
+⏱️ 预期情况：
+- 依赖安装可能需要从源码编译
+- 首次安装可能需要 10-30 分钟
+- 需要安装 Xcode Command Line Tools
+
+✅ 可以继续使用 Homebrew 安装（推荐）
+📋 或查看手动安装方案（见文档）
+
+推荐升级到 macOS 14+ 以获得最佳体验。`;
+      
+      showToast(limitedWarning, 'warning');
+      
+      // 存储系统信息供后续使用
+      window.macosInfo = macosInfo;
+    }
+    // macOS 14+ 不显示警告
+    
     // 重置状态
     dependencyStatus = {
       homebrew: null,
