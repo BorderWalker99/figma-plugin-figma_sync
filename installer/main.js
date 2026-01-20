@@ -437,24 +437,43 @@ ipcMain.handle('enable-anywhere', async () => {
 // 辅助函数：运行 AppleScript
 function runAppleScript(script) {
   return new Promise((resolve, reject) => {
-    const tempScriptPath = path.join(os.tmpdir(), `temp_script_${Date.now()}.scpt`);
-    fs.writeFileSync(tempScriptPath, script, 'utf8');
+    // 使用临时文件，但使用更好的错误处理
+    const tempScriptPath = path.join(os.tmpdir(), `screensync_${Date.now()}.scpt`);
+    
+    try {
+      fs.writeFileSync(tempScriptPath, script, 'utf8');
+      console.log('AppleScript written to:', tempScriptPath);
+      console.log('AppleScript content:', script);
+    } catch (writeError) {
+      console.error('Failed to write AppleScript:', writeError);
+      reject(writeError);
+      return;
+    }
 
-    // 隐藏 stderr 以避免 Electron 显示不必要的报错弹窗（除非真的是执行错误）
-    exec(`osascript "${tempScriptPath}" 2>/dev/null`, (error, stdout, stderr) => {
+    // 执行 AppleScript，给予更长的超时时间
+    exec(`osascript "${tempScriptPath}"`, { timeout: 10000 }, (error, stdout, stderr) => {
       // 清理临时文件
-      try { fs.unlinkSync(tempScriptPath); } catch (e) {}
+      try { 
+        fs.unlinkSync(tempScriptPath);
+        console.log('Cleaned up temp script file');
+      } catch (e) {
+        console.warn('Failed to cleanup temp file:', e);
+      }
 
       if (error) {
         // 只有当 error 存在且不是用户取消时才 reject
         if (!error.message.includes('User canceled')) {
           console.error('AppleScript error:', error);
-        reject(error);
+          console.error('stderr:', stderr);
+          reject(error);
         } else {
-           // 用户取消当作成功但不执行
-           resolve('User canceled');
+          // 用户取消当作成功但不执行
+          console.log('User canceled AppleScript');
+          resolve('User canceled');
         }
       } else {
+        console.log('AppleScript executed successfully');
+        if (stdout) console.log('stdout:', stdout);
         resolve(stdout);
       }
     });
@@ -596,12 +615,11 @@ ipcMain.handle('install-all-dependencies', async (event, dependencyStatus) => {
       // Homebrew 必须在 Terminal 中安装（交互式脚本）
       const homebrewCommand = '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"';
       
-      const appleScript = `
-        tell application "Terminal"
-          activate
-          do script "${homebrewCommand}"
-        end tell
-      `;
+      // 构建 AppleScript，确保引号正确转义
+      const appleScript = `tell application "Terminal"
+  activate
+  do script "${homebrewCommand.replace(/"/g, '\\"')}"
+end tell`;
       
       console.log('Opening Terminal to install Homebrew (interactive)');
       
@@ -612,6 +630,7 @@ ipcMain.handle('install-all-dependencies', async (event, dependencyStatus) => {
           message: '终端已打开安装 Homebrew。\n\n💡 提示：\n- 终端会要求输入密码\n- 输入时不会显示字符（这是正常的）\n- 输入完成后按回车键\n- 安装完成后请点击"重新检测"按钮'
         });
       } catch (error) {
+        console.error('Error opening Terminal for Homebrew:', error);
         resolve({ 
           success: false, 
           error: `无法打开终端: ${error.message}\n\n请手动在终端中运行:\n${homebrewCommand}`
@@ -641,28 +660,32 @@ ipcMain.handle('install-all-dependencies', async (event, dependencyStatus) => {
     }
     
     // 直接打开终端运行 brew install 命令
-    // 使用 sudo 可以避免权限问题，用户只需输入一次密码
     const installCommand = `brew install ${brewPackages.join(' ')}`;
     
     // 使用 AppleScript 打开终端并运行命令
-    const appleScript = `
-      tell application "Terminal"
-        activate
-        do script "${installCommand}"
-      end tell
-    `;
+    // 使用简洁的格式，避免多余的空格和换行
+    const appleScript = `tell application "Terminal"
+  activate
+  do script "${installCommand}"
+end tell`;
     
     console.log('Opening Terminal to install packages:', installCommand);
+    console.log('AppleScript to execute:', appleScript);
     
     try {
-      await runAppleScript(appleScript);
-      console.log('Terminal opened successfully');
+      const result = await runAppleScript(appleScript);
+      console.log('Terminal opened successfully, result:', result);
       resolve({ 
         success: true, 
         message: `终端已打开，正在安装: ${brewPackages.join(', ')}\n\n💡 提示：\n- 如果提示需要密码，请输入 Mac 登录密码\n- 输入时不会显示字符（这是正常的）\n- 等待安装完成后点击"重新检测"按钮`
       });
     } catch (error) {
       console.error('Failed to open Terminal:', error);
+      console.error('Error details:', {
+        message: error.message,
+        code: error.code,
+        stack: error.stack
+      });
       resolve({ 
         success: false, 
         error: `无法打开终端: ${error.message}\n\n请手动在终端中运行:\n${installCommand}`
