@@ -640,57 +640,33 @@ ipcMain.handle('install-all-dependencies', async (event, dependencyStatus) => {
       return;
     }
     
-    // 使用系统原生密码对话框（有回显点）
+    // 直接打开终端运行 brew install 命令
+    // 使用 sudo 可以避免权限问题，用户只需输入一次密码
     const installCommand = `brew install ${brewPackages.join(' ')}`;
     
-    // 使用 AppleScript 的 "do shell script with administrator privileges"
-    // 这会弹出系统原生密码框，用户体验更好
-    const appleScriptWithAuth = `
-      do shell script "${installCommand}" with administrator privileges
+    // 使用 AppleScript 打开终端并运行命令
+    const appleScript = `
+      tell application "Terminal"
+        activate
+        do script "${installCommand}"
+      end tell
     `;
     
-    console.log('Installing packages with system auth dialog:', installCommand);
+    console.log('Opening Terminal to install packages:', installCommand);
     
     try {
-      // 执行命令（会弹出系统密码框）
-      await runAppleScript(appleScriptWithAuth);
-      console.log('Installation completed successfully');
+      await runAppleScript(appleScript);
+      console.log('Terminal opened successfully');
       resolve({ 
         success: true, 
-        message: `已成功安装: ${brewPackages.join(', ')}\n\n请点击"重新检测"按钮确认安装。`
+        message: `终端已打开，正在安装: ${brewPackages.join(', ')}\n\n💡 提示：\n- 如果提示需要密码，请输入 Mac 登录密码\n- 输入时不会显示字符（这是正常的）\n- 等待安装完成后点击"重新检测"按钮`
       });
     } catch (error) {
-      console.error('Installation failed:', error);
-      
-      // 如果用户取消了密码输入
-      if (error.message.includes('User canceled')) {
-        resolve({ 
-          success: false, 
-          error: '已取消安装'
-        });
-      } else {
-        // 其他错误，回退到 Terminal 方式
-        console.log('Falling back to Terminal installation');
-        const fallbackScript = `
-          tell application "Terminal"
-            activate
-            do script "${installCommand}"
-          end tell
-        `;
-        
-        try {
-          await runAppleScript(fallbackScript);
-          resolve({ 
-            success: true, 
-            message: '终端已打开。\n\n💡 提示：输入密码时不会显示字符，这是正常的。输入完成后按回车键。'
-          });
-        } catch (fallbackError) {
-          resolve({ 
-            success: false, 
-            error: `安装失败: ${error.message}\n\n请手动在终端中运行:\n${installCommand}`
-          });
-        }
-      }
+      console.error('Failed to open Terminal:', error);
+      resolve({ 
+        success: false, 
+        error: `无法打开终端: ${error.message}\n\n请手动在终端中运行:\n${installCommand}`
+      });
     }
   });
 });
