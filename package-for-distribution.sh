@@ -92,33 +92,44 @@ cp README.md "$TEMP_DIR/项目文件/"
 # 3. 复制 GUI 安装器（必需，放在首层）
 echo -e "${YELLOW}🖥️  复制 GUI 安装器...${NC}"
 
-# 优先复制 DMG 文件（压缩过的），如果不存在则复制 .app
-DMG_FILE=""
-# 查找最新的 arm64 DMG 文件
+# 查找 Intel (x64) 和 Apple Silicon (arm64) 两个版本的 DMG
+DMG_INTEL=""
+DMG_ARM=""
+
 if [ -n "$(find installer/dist -name "*.dmg" -type f 2>/dev/null)" ]; then
-    # 优先选择 arm64 版本
-    DMG_FILE=$(find installer/dist -name "*arm64.dmg" -type f | sort -V | tail -1)
-    # 如果没有 arm64，选择通用版本
-    if [ -z "$DMG_FILE" ]; then
-        DMG_FILE=$(find installer/dist -name "*.dmg" -type f | grep -v "arm64" | sort -V | tail -1)
-    fi
+    # 查找 Intel 版本（不含 arm64 的 DMG）
+    DMG_INTEL=$(find installer/dist -name "*.dmg" -type f | grep -v "arm64" | sort -V | tail -1)
+    # 查找 Apple Silicon 版本
+    DMG_ARM=$(find installer/dist -name "*arm64.dmg" -type f | sort -V | tail -1)
 fi
 
-if [ -n "$DMG_FILE" ] && [ -f "$DMG_FILE" ]; then
-    # 重命名 DMG 为更清晰的步骤指引
-    cp "$DMG_FILE" "$TEMP_DIR/第二步_双击安装.dmg"
-    DMG_NAME="第二步_双击安装.dmg"
-    echo "   ✅ 已包含安装器磁盘映像: $DMG_NAME (压缩版)"
+# 复制 Intel 版本
+if [ -n "$DMG_INTEL" ] && [ -f "$DMG_INTEL" ]; then
+    cp "$DMG_INTEL" "$TEMP_DIR/第二步_Intel芯片双击这个.dmg"
+    echo "   ✅ 已包含 Intel 版本安装器: 第二步_Intel芯片双击这个.dmg"
 else
+    echo -e "${YELLOW}   ⚠️  未找到 Intel 版本 DMG${NC}"
+fi
+
+# 复制 Apple Silicon 版本
+if [ -n "$DMG_ARM" ] && [ -f "$DMG_ARM" ]; then
+    cp "$DMG_ARM" "$TEMP_DIR/第二步_Apple芯片双击这个.dmg"
+    echo "   ✅ 已包含 Apple Silicon 版本安装器: 第二步_Apple芯片双击这个.dmg"
+else
+    echo -e "${YELLOW}   ⚠️  未找到 Apple Silicon 版本 DMG${NC}"
+fi
+
+# 检查至少有一个版本
+if [ -z "$DMG_INTEL" ] && [ -z "$DMG_ARM" ]; then
     # 回退到 .app 目录（如果存在）
     if [ -d "$INSTALLER_APP" ]; then
-cp -r "$INSTALLER_APP" "$TEMP_DIR/" 2>/dev/null || {
-    echo -e "${RED}❌ 复制 GUI 安装器失败${NC}"
-    exit 1
-}
-echo "   ✅ GUI 安装器已包含（首层目录）"
+        cp -r "$INSTALLER_APP" "$TEMP_DIR/" 2>/dev/null || {
+            echo -e "${RED}❌ 复制 GUI 安装器失败${NC}"
+            exit 1
+        }
+        echo "   ✅ GUI 安装器已包含（首层目录）"
     else
-        echo -e "${RED}❌ 未找到 DMG 文件或 .app 目录${NC}"
+        echo -e "${RED}❌ 未找到任何 DMG 文件或 .app 目录${NC}"
         exit 1
     fi
 fi
@@ -202,7 +213,10 @@ ScreenSync - iPhone截图自动同步到Figma
 4. 看到"✅ 准备完成！"后关闭终端
 
 步骤 2：安装软件
-1. 双击 "ScreenSync Installer.dmg" 挂载安装盘
+1. 根据您的 Mac 芯片选择对应的安装器：
+   - Intel 芯片：双击 "第二步_Intel芯片双击这个.dmg"
+   - Apple 芯片 (M1/M2/M3)：双击 "第二步_Apple芯片双击这个.dmg"
+   💡 不确定芯片类型？点击左上角  → 关于本机 → 查看处理器信息
 2. 在弹出的窗口中双击 "ScreenSync Installer"
 3. 按照图形界面提示完成配置
 
@@ -266,7 +280,9 @@ Q: 提示"ScreenSync Installer 已损坏"怎么办？
 A: 请执行步骤 1 中的脚本修复。
 
 Q: 安装器在哪里？
-A: 解压后的文件夹中，名为 "ScreenSync Installer.dmg"，双击后即可看到安装器
+A: 解压后的文件夹中，根据您的芯片选择：
+   - Intel 芯片：双击 "第二步_Intel芯片双击这个.dmg"
+   - Apple 芯片：双击 "第二步_Apple芯片双击这个.dmg"
 
 Q: 如何找到 manifest.json？
 A: 安装完成后，在安装目录下的 figma-plugin 文件夹中
@@ -425,7 +441,8 @@ echo ""
 echo -e "${GREEN}首层目录（用户直接看到）：${NC}"
 echo "   ✅ README_请先阅读.txt"
 echo "   ✅ 第一步_拖进终端回车运行.command（Gatekeeper 修复）"
-echo "   ✅ 第二步_双击安装.dmg（图形化安装器）"
+echo "   ✅ 第二步_Intel芯片双击这个.dmg（Intel Mac 安装器）"
+echo "   ✅ 第二步_Apple芯片双击这个.dmg（Apple Silicon 安装器）"
 echo ""
 echo -e "${BLUE}项目文件/目录（安装所需的所有文件）：${NC}"
 echo "   ✅ 核心服务器文件（server.js, start.js, update-manager.js）"
@@ -450,7 +467,7 @@ echo -e "${BLUE}║  1. 解压文件包                                         
 echo -e "${BLUE}║  2. 阅读 README_请先阅读.txt                               ║${NC}"
 echo -e "${BLUE}║  3. 如提示安全问题：                                       ║${NC}"
 echo -e "${BLUE}║     将"安装前:将此文件拖进终端按回车运行"拖入终端并回车   ║${NC}"
-echo -e "${BLUE}║  4. 双击 ScreenSync Installer.dmg 运行安装器              ║${NC}"
+echo -e "${BLUE}║  4. 根据芯片选择对应的 DMG 双击运行安装器                 ║${NC}"
 echo -e "${BLUE}║  5. 按照图形界面完成安装                                   ║${NC}"
 echo -e "${BLUE}║  6. 在 Figma 中导入插件：                                  ║${NC}"
 echo -e "${BLUE}║     Plugins → Development → Import plugin from manifest   ║${NC}"
