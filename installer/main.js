@@ -308,30 +308,64 @@ ipcMain.handle('select-project-root', async () => {
 
 // 辅助函数：查找可执行文件并更新 PATH
 function findExecutable(name) {
-  // 1. 检查常见路径
-  const commonPaths = [
-    `/opt/homebrew/bin/${name}`, // Apple Silicon
-    `/usr/local/bin/${name}`,    // Intel Mac
-    path.join(os.homedir(), `.nvm/versions/node/${name}`) // NVM (简化检查)
-  ];
-
-  for (const p of commonPaths) {
-    if (fs.existsSync(p)) {
-      // 如果找到了，把它的目录添加到 PATH 中，以便后续 exec 调用能找到
-      const binDir = path.dirname(p);
+  // 1. 优先使用 'which' 命令查找（最准确的方式）
+  try {
+    const output = require('child_process').execSync(`which ${name}`, { encoding: 'utf8', timeout: 3000 }).trim();
+    if (output && fs.existsSync(output)) {
+      console.log(`Found ${name} via 'which': ${output}`);
+      // 添加到 PATH
+      const binDir = path.dirname(output);
       if (!process.env.PATH.includes(binDir)) {
         console.log(`Adding ${binDir} to PATH`);
         process.env.PATH = `${binDir}:${process.env.PATH}`;
       }
-      return p;
+      return output;
+    }
+  } catch (e) {
+    console.log(`'which ${name}' failed, trying common paths...`);
+  }
+
+  // 2. 回退到检查常见路径（按优先级排序）
+  const commonPaths = [
+    `/usr/local/bin/${name}`,    // 官网安装（Intel 和 Apple Silicon 通用）
+    `/opt/homebrew/bin/${name}`, // Homebrew Apple Silicon
+    `/usr/local/Cellar`,         // Homebrew Intel（检查是否有 Cellar 目录）
+    path.join(os.homedir(), `.nvm/versions/node`), // NVM
+  ];
+
+  // 特殊处理：检查 /usr/local/bin 和 /opt/homebrew/bin
+  for (const p of ['/usr/local/bin', '/opt/homebrew/bin']) {
+    const fullPath = path.join(p, name);
+    if (fs.existsSync(fullPath)) {
+      console.log(`Found ${name} at: ${fullPath}`);
+      if (!process.env.PATH.includes(p)) {
+        console.log(`Adding ${p} to PATH`);
+        process.env.PATH = `${p}:${process.env.PATH}`;
+      }
+      return fullPath;
     }
   }
 
-  // 2. 尝试 'which'
-  try {
-    const output = require('child_process').execSync(`which ${name}`, { encoding: 'utf8' }).trim();
-    if (output) return output;
-  } catch (e) {}
+  // 3. 检查 NVM 安装的 Node.js（如果是 node）
+  if (name === 'node') {
+    const nvmDir = path.join(os.homedir(), '.nvm/versions/node');
+    if (fs.existsSync(nvmDir)) {
+      try {
+        const versions = fs.readdirSync(nvmDir);
+        if (versions.length > 0) {
+          // 使用最新版本
+          const latestVersion = versions.sort().reverse()[0];
+          const nvmNodePath = path.join(nvmDir, latestVersion, 'bin', 'node');
+          if (fs.existsSync(nvmNodePath)) {
+            console.log(`Found ${name} via NVM: ${nvmNodePath}`);
+            return nvmNodePath;
+          }
+        }
+      } catch (e) {
+        console.log('Failed to check NVM directory:', e.message);
+      }
+    }
+  }
 
   return null;
 }
@@ -1111,10 +1145,30 @@ ipcMain.handle('setup-autostart', async (event, installPath) => {
     try {
       // 使用 findExecutable 找到正确的 node 路径，确保与 install-dependencies 阶段使用的环境一致
       // 避免出现"依赖是用 Node A 安装的，但 LaunchAgent 用 Node B 启动"导致的原生模块(sharp)崩溃
-      const nodePath = findExecutable('node') || 
-        (process.platform === 'darwin' 
-        ? (process.arch === 'arm64' ? '/opt/homebrew/bin/node' : '/usr/local/bin/node')
-          : 'node');
+      let nodePath = findExecutable('node');
+      
+      // 如果 findExecutable 失败，尝试回退路径（按优先级）
+      if (!nodePath) {
+        console.warn('⚠️  findExecutable("node") 返回 null，尝试回退路径...');
+        
+        const fallbackPaths = [
+          '/usr/local/bin/node',      // 官网安装（优先，兼容所有架构）
+          '/opt/homebrew/bin/node',   // Homebrew Apple Silicon
+          'node'                      // 最后尝试直接使用命令
+        ];
+        
+        for (const fallback of fallbackPaths) {
+          if (fallback === 'node' || fs.existsSync(fallback)) {
+            nodePath = fallback;
+            console.log(`   使用回退路径: ${nodePath}`);
+            break;
+          }
+        }
+      }
+      
+      if (!nodePath) {
+        throw new Error('无法找到 Node.js 可执行文件。请确保 Node.js 已正确安装。');
+      }
       
       console.log('🚀 配置自启动，使用 Node 路径:', nodePath);
       
@@ -1132,10 +1186,25 @@ ipcMain.handle('setup-autostart', async (event, installPath) => {
       // 读取模板文件
       let plistContent = fs.readFileSync(templatePath, 'utf8');
       
+      // 构建包含所有可能 Node.js 路径的 PATH
+      const comprehensivePath = [
+        '/usr/local/bin',           // 官网安装
+        '/opt/homebrew/bin',        // Homebrew Apple Silicon
+        '/usr/bin',
+        '/bin',
+        '/usr/sbin',
+        '/sbin',
+        path.join(os.homedir(), '.nvm/versions/node/*/bin')  // NVM (glob pattern)
+      ].join(':');
+      
       // 替换占位符
       plistContent = plistContent
         .replace(/__NODE_PATH__/g, nodePath)
-        .replace(/__INSTALL_PATH__/g, installPath);
+        .replace(/__INSTALL_PATH__/g, installPath)
+        // 也更新 PATH 环境变量，确保包含所有可能的位置
+        .replace(/\/opt\/homebrew\/bin:\/usr\/local\/bin:\/usr\/bin:\/bin:\/usr\/sbin:\/sbin/g, comprehensivePath);
+      
+      console.log('📝 LaunchAgent PATH:', comprehensivePath);
       
       // 写入到 LaunchAgents 目录
       fs.writeFileSync(plistPath, plistContent, 'utf8');
