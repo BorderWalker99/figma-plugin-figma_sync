@@ -131,18 +131,30 @@ else
     exit 1
 fi
 
-# 打包服务器
+# 打包服务器（Intel 和 Apple 两个版本）
 echo -e "   ${YELLOW}正在打包服务器...${NC}"
 # 先清理日志和临时文件
 rm -f *.log 2>/dev/null || true
 rm -f .user-config.json .sync-mode 2>/dev/null || true
 if ./package-for-distribution.sh > /dev/null 2>&1; then
-    SERVER_TAR="ScreenSync-UserPackage.tar.gz"
-    if [ -f "$SERVER_TAR" ]; then
-        SERVER_SIZE=$(du -h "$SERVER_TAR" | cut -f1)
-        echo -e "   ${GREEN}✅ 服务器打包完成: ${SERVER_TAR} (${SERVER_SIZE})${NC}"
+    INTEL_TAR="ScreenSync-Intel.tar.gz"
+    APPLE_TAR="ScreenSync-Apple.tar.gz"
+    
+    # 检查 Intel 版本
+    if [ -f "$INTEL_TAR" ]; then
+        INTEL_SIZE=$(du -h "$INTEL_TAR" | cut -f1)
+        echo -e "   ${GREEN}✅ Intel 版本打包完成: ${INTEL_TAR} (${INTEL_SIZE})${NC}"
     else
-        echo -e "   ${RED}❌ 服务器打包失败：未找到 ${SERVER_TAR}${NC}"
+        echo -e "   ${RED}❌ Intel 版本打包失败：未找到 ${INTEL_TAR}${NC}"
+        exit 1
+    fi
+    
+    # 检查 Apple 版本
+    if [ -f "$APPLE_TAR" ]; then
+        APPLE_SIZE=$(du -h "$APPLE_TAR" | cut -f1)
+        echo -e "   ${GREEN}✅ Apple 版本打包完成: ${APPLE_TAR} (${APPLE_SIZE})${NC}"
+    else
+        echo -e "   ${RED}❌ Apple 版本打包失败：未找到 ${APPLE_TAR}${NC}"
         exit 1
     fi
 else
@@ -233,15 +245,20 @@ ${RELEASE_NOTES}
 ## 📦 下载说明
 
 ### 📥 下载指南 (必读)
-**请仅下载 \`ScreenSync-UserPackage.tar.gz\` (macOS)**
+**请根据你的 Mac 芯片类型下载对应的安装包**
 
-*   ✅ **ScreenSync-UserPackage.tar.gz**: 包含安装器和所有文件的完整包，新用户请下载此文件。
-*   ⚠️ **figma-plugin-v${NEW_VERSION}.zip**: 无需下载，这是供软件自动更新功能使用的内部文件。
-*   ⚠️ **Source code**: 无需下载，项目源码。
+#### 🍎 如何查看你的 Mac 芯片类型？
+点击左上角  → 关于本机 → 查看"芯片"或"处理器"信息
+
+#### 📥 选择下载：
+*   ✅ **ScreenSync-Apple.tar.gz**: Apple 芯片 Mac (M1/M2/M3/M4) 用户下载
+*   ✅ **ScreenSync-Intel.tar.gz**: Intel 芯片 Mac 用户下载
+*   ⚠️ **figma-plugin-v${NEW_VERSION}.zip**: 无需下载，供软件自动更新使用
+*   ⚠️ **Source code**: 无需下载，项目源码
 
 ### 🔄 如何更新
-*   **已有用户**: 直接在 Figma 插件设置中点击「检查更新」即可自动升级，无需手动下载任何文件。
-*   **新用户**: 下载上方的完整包，解压后运行安装器。
+*   **已有用户**: 直接在 Figma 插件设置中点击「检查更新」即可自动升级，无需手动下载任何文件
+*   **新用户**: 下载上方对应芯片类型的安装包，解压后运行安装器
 
 ---
 
@@ -253,7 +270,8 @@ echo -e "   ${YELLOW}正在上传到 GitHub Releases...${NC}"
     # 显示上传进度
 if gh release create "v${NEW_VERSION}" \
     "$PLUGIN_ZIP" \
-    "$SERVER_TAR" \
+    "$INTEL_TAR" \
+    "$APPLE_TAR" \
     --title "$RELEASE_TITLE" \
         --notes "$RELEASE_BODY"; then
     echo -e "   ${GREEN}✅ Release v${NEW_VERSION} 发布成功${NC}"
@@ -272,7 +290,8 @@ echo -e "${GREEN}╚════════════════════
 echo -e "${BLUE}📦 版本信息：${NC}"
 echo -e "   版本号: ${GREEN}v${NEW_VERSION}${NC}"
 echo -e "   插件包: ${PLUGIN_ZIP} (${PLUGIN_SIZE})"
-echo -e "   完整包: ${SERVER_TAR} (${SERVER_SIZE})"
+echo -e "   Intel 包: ${INTEL_TAR} (${INTEL_SIZE})"
+echo -e "   Apple 包: ${APPLE_TAR} (${APPLE_SIZE})"
 echo ""
 
 echo -e "${BLUE}🔗 查看 Release：${NC}"
@@ -282,8 +301,10 @@ echo ""
 
 echo -e "${BLUE}💡 后续步骤：${NC}"
 echo -e "   1. 通知用户有新版本可用"
-echo -e "   2. 用户在插件设置中点击「更新」即可自动更新"
-echo -e "   3. 新用户下载 ${SERVER_TAR} 进行安装"
+echo -e "   2. 已有用户在插件设置中点击「更新」即可自动更新"
+echo -e "   3. 新用户根据芯片类型下载对应安装包："
+echo -e "      - Apple 芯片: ${APPLE_TAR}"
+echo -e "      - Intel 芯片: ${INTEL_TAR}"
 echo ""
 
 # 清理临时文件（可选）
@@ -291,7 +312,7 @@ read -p "是否清理本地打包文件？(y/N): " CLEANUP
 CLEANUP=${CLEANUP:-N}
 
 if [[ "$CLEANUP" =~ ^[Yy]$ ]]; then
-    rm -f "$PLUGIN_ZIP" "$SERVER_TAR"
+    rm -f "$PLUGIN_ZIP" "$INTEL_TAR" "$APPLE_TAR"
     echo -e "${GREEN}✅ 本地打包文件已清理${NC}\n"
 else
     echo -e "${YELLOW}⚠️  本地打包文件已保留${NC}\n"
