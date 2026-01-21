@@ -1,6 +1,6 @@
 {
   "name": "figma-iphone-sync",
-  "version": "1.0.1",
+  "version": "11.0.1",
   "description": "Automatically sync iPhone screenshots to Figma",
   "main": "server.js",
   "scripts": {
