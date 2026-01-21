@@ -319,7 +319,7 @@ Homebrew 对此版本仅提供有限支持。
         <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
         <div class="status-content">
           <div class="status-label">Homebrew</div>
-          <div class="status-detail">已安装</div>
+          <div class="status-detail" style="color: var(--success);">已安装</div>
         </div>
       `;
     } else {
@@ -328,7 +328,7 @@ Homebrew 对此版本仅提供有限支持。
         <div class="status-icon"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
         <div class="status-content">
           <div class="status-label">Homebrew</div>
-          <div class="status-detail">未安装</div>
+          <div class="status-detail" style="color: var(--danger);">未安装</div>
         </div>
       `;
     }
@@ -344,7 +344,7 @@ Homebrew 对此版本仅提供有限支持。
         <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
         <div class="status-content">
           <div class="status-label">Node.js</div>
-          <div class="status-detail">已安装</div>
+          <div class="status-detail" style="color: var(--success);">已安装</div>
         </div>
       `;
     } else {
@@ -353,7 +353,7 @@ Homebrew 对此版本仅提供有限支持。
         <div class="status-icon"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
         <div class="status-content">
           <div class="status-label">Node.js</div>
-          <div class="status-detail">未安装</div>
+          <div class="status-detail" style="color: var(--danger);">未安装</div>
         </div>
       `;
     }
@@ -369,7 +369,7 @@ Homebrew 对此版本仅提供有限支持。
         <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
         <div class="status-content">
           <div class="status-label">ImageMagick</div>
-          <div class="status-detail">已安装</div>
+          <div class="status-detail" style="color: var(--success);">已安装</div>
         </div>
       `;
     } else {
@@ -378,7 +378,7 @@ Homebrew 对此版本仅提供有限支持。
         <div class="status-icon"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
         <div class="status-content">
           <div class="status-label">ImageMagick</div>
-          <div class="status-detail">未安装</div>
+          <div class="status-detail" style="color: var(--danger);">未安装</div>
         </div>
       `;
     }
@@ -394,7 +394,7 @@ Homebrew 对此版本仅提供有限支持。
         <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
         <div class="status-content">
           <div class="status-label">FFmpeg</div>
-          <div class="status-detail">已安装</div>
+          <div class="status-detail" style="color: var(--success);">已安装</div>
         </div>
       `;
     } else {
@@ -403,7 +403,7 @@ Homebrew 对此版本仅提供有限支持。
         <div class="status-icon"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
         <div class="status-content">
           <div class="status-label">FFmpeg</div>
-          <div class="status-detail">未安装</div>
+          <div class="status-detail" style="color: var(--danger);">未安装</div>
         </div>
       `;
     }

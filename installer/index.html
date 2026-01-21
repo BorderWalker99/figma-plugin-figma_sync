@@ -304,38 +304,44 @@
         color: var(--accent);
     }
 
-    /* Status Items - Neumorphic Cards */
+    /* Status Items - Unified Card Container */
     .status-list {
       display: flex;
       flex-direction: column;
-      gap: 16px;
+      gap: 0;
+      border-radius: var(--radius-m);
+      overflow: hidden;
+      /* Neumorphic Card */
+      background: var(--neu-face-bg);
+      box-shadow: 
+        -2px -2px 5px var(--neu-shadow-light),
+        2px 2px 5px var(--neu-shadow-dark);
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+    
+    @media (prefers-color-scheme: dark) {
+        .status-list {
+            border: 1px solid rgba(255,255,255,0.05);
+        }
     }
 
     .status-item {
       display: flex;
       align-items: center;
-      padding: 16px 20px;
-      border-radius: var(--radius-m);
+      padding: 14px 20px;
       transition: all 0.3s ease;
-      
-      /* Neumorphic Recessed/Flat look */
-      background: var(--neu-face-bg);
-      box-shadow: 
-        -2px -2px 5px var(--neu-shadow-light),
-        2px 2px 5px var(--neu-shadow-dark);
-      border: 1px solid rgba(255,255,255,0.1); /* Subtle border */
+      background: transparent;
+      border-bottom: 1px solid var(--divider);
     }
     
-    @media (prefers-color-scheme: dark) {
-        .status-item {
-            border: 1px solid rgba(255,255,255,0.05);
-        }
+    .status-item:last-child {
+      border-bottom: none;
     }
 
     .status-icon {
-      width: 24px;
-      height: 24px;
-      margin-right: 16px;
+      width: 20px;
+      height: 20px;
+      margin-right: 14px;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -343,13 +349,15 @@
 
     .status-content {
       flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
     }
 
     .status-label {
       font-size: 14px;
-      font-weight: 600;
+      font-weight: 500;
       color: var(--text-primary);
-      margin-bottom: 2px;
     }
 
     .status-detail {
