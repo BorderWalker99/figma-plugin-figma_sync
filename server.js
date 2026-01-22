@@ -1,4 +1,5 @@
 // server.js - WebSocket 服务器和 HTTP 上传接口
+//更新：拒绝上传到根目录
 
 // 全局错误处理（必须在最前面）
 process.on('uncaughtException', (error) => {
@@ -3702,6 +3703,18 @@ if (aliyunOSSEnabled && ossUploadBuffer) {
     const parseStartTime = Date.now();
     const userId = req.headers['x-user-id'] || req.body.userId || null;
     
+    // ========================================
+    // ✅ 安全检查：拒绝上传到根目录
+    //    必须提供 userId，文件只能上传到用户专属子文件夹
+    // ========================================
+    if (!userId) {
+      console.warn(`🚫 [OSS上传接口] 拒绝：未提供用户ID，不允许上传到根目录`);
+      return res.status(403).json({ 
+        error: 'User ID required. Uploads to root folder are not allowed.',
+        code: 'USER_ID_REQUIRED'
+      });
+    }
+    
     try {
       const OSS_ROOT_FOLDER = process.env.ALIYUN_ROOT_FOLDER || 'ScreenSync';
       
@@ -3795,6 +3808,18 @@ if (googleDriveEnabled && uploadBuffer) {
     const contentLength = req.headers['content-length'] ? parseInt(req.headers['content-length']) : 0;
     const contentLengthMB = (contentLength / 1024 / 1024).toFixed(2);
     console.log(`📥 [上传接口] 请求到达 - Content-Length: ${contentLengthMB}MB, 用户ID: ${userId || '未提供'}`);
+    
+    // ========================================
+    // ✅ 安全检查：拒绝上传到根目录
+    //    必须提供 userId，文件只能上传到用户专属子文件夹
+    // ========================================
+    if (!userId) {
+      console.warn(`🚫 [上传接口] 拒绝：未提供用户ID，不允许上传到根目录`);
+      return res.status(403).json({ 
+        error: 'User ID required. Uploads to root folder are not allowed.',
+        code: 'USER_ID_REQUIRED'
+      });
+    }
     
     // 检查请求体是否已解析
     if (!req.body || Object.keys(req.body).length === 0) {
@@ -3919,6 +3944,18 @@ if (googleDriveEnabled && uploadBuffer) {
 
       console.log(`🔗 [Upload URL] 请求获取上传链接: ${filename}, MIME: ${mimeType}, 用户ID: ${userId || '未提供'}`);
       
+      // ========================================
+      // ✅ 安全检查：拒绝上传到根目录
+      //    必须提供 userId，文件只能上传到用户专属子文件夹
+      // ========================================
+      if (!userId) {
+        console.warn(`🚫 [Upload URL] 拒绝：未提供用户ID，不允许上传到根目录`);
+        return res.status(403).json({ 
+          error: 'User ID required. Uploads to root folder are not allowed.',
+          code: 'USER_ID_REQUIRED'
+        });
+      }
+      
       // Token 验证 (保持与其他接口一致)
       if (UPLOAD_TOKEN) {
         const token = req.headers['x-upload-token'];
@@ -3934,33 +3971,24 @@ if (googleDriveEnabled && uploadBuffer) {
       }
 
       try {
-        // 1. 获取目标文件夹 ID
-        // 逻辑与 upload 接口一致：优先使用 userId 对应的文件夹，否则使用默认文件夹
+        // 1. 获取目标文件夹 ID（必须使用用户专属文件夹）
         let targetFolderId = null;
         
-        if (userId && initializeUserFolderForUpload) {
+        if (initializeUserFolderForUpload) {
           try {
             targetFolderId = await initializeUserFolderForUpload(userId);
           } catch (error) {
-            console.error(`⚠️  [Upload URL] 创建用户文件夹失败，尝试使用默认文件夹: ${error.message}`);
+            console.error(`❌ [Upload URL] 创建用户文件夹失败: ${error.message}`);
+            return res.status(500).json({ 
+              error: 'Failed to create user folder',
+              code: 'FOLDER_CREATION_FAILED'
+            });
           }
-        }
-        
-        if (!targetFolderId) {
-           targetFolderId = DRIVE_FOLDER_ID;
-           // 二次检查默认文件夹
-           if (!targetFolderId) {
-              try {
-                const serviceAccountKey = require('./serviceAccountKey');
-                if (serviceAccountKey && serviceAccountKey.defaultFolderId) {
-                  targetFolderId = serviceAccountKey.defaultFolderId;
-                }
-              } catch (e) {}
-           }
         }
 
         if (!targetFolderId) {
-          return res.status(500).json({ error: 'Server not configured: missing GDRIVE_FOLDER_ID' });
+          console.error(`❌ [Upload URL] 无法获取用户文件夹ID`);
+          return res.status(500).json({ error: 'Failed to get user folder ID' });
         }
 
         // 2. 调用 Google Drive API 获取上传链接

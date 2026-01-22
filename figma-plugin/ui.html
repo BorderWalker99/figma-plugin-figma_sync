@@ -3561,8 +3561,8 @@
                         <div class="card-desc">对象存储</div>
                 </div>
               </div>
-                 <!-- iCloud 模式（隐藏） -->
-                 <div class="feature-card mode-card" id="switchToIcloud" style="padding: 12px; flex-direction: column; height: 100%; display: none;">
+                 <!-- iCloud 模式 -->
+                 <div class="feature-card mode-card" id="switchToIcloud" style="padding: 12px; flex-direction: column; height: 100%;">
                      <div class="checkmark">
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
             </div>
@@ -4116,7 +4116,11 @@
             syncStarted = true;
           }
           if (data.backedUpLocally || data.keptInIcloud) {
-             gifBackupCount++;
+             // ✅ 根据文件类型分别计数
+             // 只有 GIF 才增加 gifBackupCount，图片不计入（iCloud 模式下图片保留是正常行为）
+             if (data.isGif) {
+               gifBackupCount++;
+             }
              // Don't reset state - let currentButtonState handle locking
              updateStatus('connected', '');
           }

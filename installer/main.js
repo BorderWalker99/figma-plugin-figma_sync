@@ -672,39 +672,10 @@ ipcMain.handle('install-ffmpeg', async () => {
   });
 });
 
-// 一键安装所有缺失的依赖
+// 一键安装所有缺失的依赖（合并成一条命令，用户只需输入一次密码）
 ipcMain.handle('install-all-dependencies', async (event, dependencyStatus) => {
   return new Promise(async (resolve) => {
     console.log('📦 一键安装所有依赖，当前状态:', dependencyStatus);
-    
-    // 检查是否需要安装 Homebrew
-    if (!dependencyStatus.homebrew) {
-      // Homebrew 必须在 Terminal 中安装（交互式脚本）
-      const homebrewCommand = '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"';
-      
-      // 构建 AppleScript，确保引号正确转义
-      const appleScript = `tell application "Terminal"
-  activate
-  do script "${homebrewCommand.replace(/"/g, '\\"')}"
-end tell`;
-      
-      console.log('Opening Terminal to install Homebrew (interactive)');
-      
-      try {
-        await runAppleScript(appleScript);
-        resolve({ 
-          success: true, 
-          message: '终端已打开安装 Homebrew。\n\n💡 提示：\n- 终端会要求输入密码\n- 输入时不会显示字符（这是正常的）\n- 输入完成后按回车键\n- 安装完成后请点击"重新检测"按钮'
-        });
-      } catch (error) {
-        console.error('Error opening Terminal for Homebrew:', error);
-        resolve({ 
-          success: false, 
-          error: `无法打开终端: ${error.message}\n\n请手动在终端中运行:\n${homebrewCommand}`
-        });
-      }
-      return;
-    }
     
     // 构建需要安装的包列表
     const brewPackages = [];
@@ -718,7 +689,11 @@ end tell`;
       brewPackages.push('ffmpeg');
     }
     
-    if (brewPackages.length === 0) {
+    // 检查是否需要安装任何东西
+    const needsHomebrew = !dependencyStatus.homebrew;
+    const needsPackages = brewPackages.length > 0;
+    
+    if (!needsHomebrew && !needsPackages) {
       resolve({ 
         success: false, 
         error: '所有依赖已安装，无需重复安装'
@@ -726,25 +701,64 @@ end tell`;
       return;
     }
     
-    // 直接打开终端运行 brew install 命令
-    const installCommand = `brew install ${brewPackages.join(' ')}`;
+    // 构建一体化安装脚本
+    // 使用 bash 脚本串联所有命令，一次性完成所有安装
+    let installScript = '';
+    let description = '';
     
-    // 使用 AppleScript 打开终端并运行命令
-    // 使用简洁的格式，避免多余的空格和换行
+    if (needsHomebrew && needsPackages) {
+      // 需要安装 Homebrew + 其他依赖
+      // 脚本流程：安装 Homebrew → 配置 PATH → 安装依赖包
+      description = `Homebrew, ${brewPackages.join(', ')}`;
+      
+      // 检测芯片架构，确定 Homebrew 路径
+      const isAppleSilicon = process.arch === 'arm64';
+      const brewPath = isAppleSilicon ? '/opt/homebrew/bin' : '/usr/local/bin';
+      const brewEvalCmd = isAppleSilicon 
+        ? 'eval "$(/opt/homebrew/bin/brew shellenv)"'
+        : 'eval "$(/usr/local/bin/brew shellenv)"';
+      
+      // 构建完整安装脚本
+      // 1. 显示欢迎信息
+      // 2. 安装 Homebrew（交互式，需要密码）
+      // 3. 配置 PATH（确保 brew 可用）
+      // 4. 安装所有依赖包
+      // 5. 显示完成信息
+      installScript = `echo '🚀 ScreenSync 一键安装脚本' && echo '================================' && echo '' && echo '📦 即将安装: Homebrew + ${brewPackages.join(' + ')}' && echo '💡 安装过程中需要输入一次密码' && echo '' && /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" && echo '' && echo '✅ Homebrew 安装完成，正在配置环境...' && export PATH="${brewPath}:$PATH" && ${brewEvalCmd} 2>/dev/null || true && echo '📦 正在安装依赖: ${brewPackages.join(' ')}...' && brew install ${brewPackages.join(' ')} && echo '' && echo '🎉 ================================' && echo '🎉 所有依赖安装完成！' && echo '🎉 请返回安装器点击"重新检测"' && echo '🎉 ================================'`;
+      
+    } else if (needsHomebrew) {
+      // 只需要安装 Homebrew
+      description = 'Homebrew';
+      installScript = `echo '🚀 ScreenSync 一键安装脚本' && echo '================================' && echo '' && echo '📦 即将安装: Homebrew' && echo '💡 安装过程中需要输入密码' && echo '' && /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" && echo '' && echo '🎉 ================================' && echo '🎉 Homebrew 安装完成！' && echo '🎉 请返回安装器点击"重新检测"' && echo '🎉 ================================'`;
+      
+    } else {
+      // 只需要安装依赖包（Homebrew 已存在）
+      description = brewPackages.join(', ');
+      installScript = `echo '🚀 ScreenSync 一键安装脚本' && echo '================================' && echo '' && echo '📦 即将安装: ${brewPackages.join(' + ')}' && echo '' && brew install ${brewPackages.join(' ')} && echo '' && echo '🎉 ================================' && echo '🎉 所有依赖安装完成！' && echo '🎉 请返回安装器点击"重新检测"' && echo '🎉 ================================'`;
+    }
+    
+    // 使用 AppleScript 打开终端并运行脚本
+    // 注意：需要对双引号进行转义
+    const escapedScript = installScript.replace(/"/g, '\\"');
     const appleScript = `tell application "Terminal"
   activate
-  do script "${installCommand}"
+  do script "${escapedScript}"
 end tell`;
     
-    console.log('Opening Terminal to install packages:', installCommand);
-    console.log('AppleScript to execute:', appleScript);
+    console.log('Opening Terminal to install:', description);
+    console.log('Install script length:', installScript.length);
     
     try {
       const result = await runAppleScript(appleScript);
       console.log('Terminal opened successfully, result:', result);
+      
+      const tips = needsHomebrew 
+        ? '💡 提示：\n- 终端会要求输入密码（安装 Homebrew 时）\n- 输入时不会显示字符（这是正常的）\n- 输入完成后按回车，脚本会自动继续\n- 全部完成后点击"重新检测"按钮'
+        : '💡 提示：\n- 如果提示需要密码，请输入 Mac 登录密码\n- 输入时不会显示字符（这是正常的）\n- 等待安装完成后点击"重新检测"按钮';
+      
       resolve({ 
         success: true, 
-        message: `终端已打开，正在安装: ${brewPackages.join(', ')}\n\n💡 提示：\n- 如果提示需要密码，请输入 Mac 登录密码\n- 输入时不会显示字符（这是正常的）\n- 等待安装完成后点击"重新检测"按钮`
+        message: `终端已打开，正在安装: ${description}\n\n${tips}`
       });
     } catch (error) {
       console.error('Failed to open Terminal:', error);
@@ -753,9 +767,19 @@ end tell`;
         code: error.code,
         stack: error.stack
       });
+      
+      // 提供手动安装命令
+      let manualCommands = '';
+      if (needsHomebrew) {
+        manualCommands += '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"\n';
+      }
+      if (needsPackages) {
+        manualCommands += `brew install ${brewPackages.join(' ')}`;
+      }
+      
       resolve({ 
         success: false, 
-        error: `无法打开终端: ${error.message}\n\n请手动在终端中运行:\n${installCommand}`
+        error: `无法打开终端: ${error.message}\n\n请手动在终端中运行:\n${manualCommands}`
       });
     }
   });

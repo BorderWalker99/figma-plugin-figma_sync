@@ -1,7 +1,8 @@
 #!/bin/bash
 
-# ScreenSync iCloud 专用版本打包脚本
-# 此版本默认使用 iCloud 模式，不需要 Google Cloud 相关配置
+# ScreenSync 双模式版本打包脚本
+# 此版本支持 Google Drive 和 iCloud 模式自由切换
+# 默认使用 Google Drive 模式，模式切换功能隐藏（可通过 console 开启）
 
 set -e
 
@@ -13,8 +14,8 @@ RED='\033[0;31m'
 NC='\033[0m'
 
 echo -e "${BLUE}╔════════════════════════════════════════╗${NC}"
-echo -e "${BLUE}║  ScreenSync iCloud 专用版打包脚本      ║${NC}"
-echo -e "${BLUE}║  默认 iCloud 模式，无需 Google 配置    ║${NC}"
+echo -e "${BLUE}║  ScreenSync 双模式版本打包脚本         ║${NC}"
+echo -e "${BLUE}║  支持 Google Drive / iCloud 自由切换   ║${NC}"
 echo -e "${BLUE}╚════════════════════════════════════════╝${NC}\n"
 
 # 检查 Apple 芯片版本的 DMG 是否存在
@@ -46,8 +47,13 @@ if [ ! -f "icloud-watcher.js" ]; then
     exit 1
 fi
 
-if [ ! -f "start-icloud.js" ]; then
-    echo -e "${RED}❌ 错误：start-icloud.js 不存在${NC}"
+if [ ! -f "drive-watcher.js" ]; then
+    echo -e "${RED}❌ 错误：drive-watcher.js 不存在${NC}"
+    exit 1
+fi
+
+if [ ! -f "start.js" ]; then
+    echo -e "${RED}❌ 错误：start.js 不存在${NC}"
     exit 1
 fi
 
@@ -73,16 +79,19 @@ rm -f .user-config.json 2>/dev/null || true
 rm -f .sync-mode 2>/dev/null || true
 echo "   ✅ 清理完成"
 
-# 1. 复制核心文件（仅 iCloud 模式需要的文件）
-echo -e "${YELLOW}📄 复制核心文件（iCloud 专用）...${NC}"
+# 1. 复制核心文件（支持双模式）
+echo -e "${YELLOW}📄 复制核心文件（双模式版本）...${NC}"
 cp server.js "$TEMP_DIR/项目文件/"
 cp userConfig.js "$TEMP_DIR/项目文件/"
-cp icloud-watcher.js "$TEMP_DIR/项目文件/"
-# 使用 iCloud 专用启动脚本，重命名为 start.js
-cp start-icloud.js "$TEMP_DIR/项目文件/start.js"
+cp start.js "$TEMP_DIR/项目文件/"
 cp update-manager.js "$TEMP_DIR/项目文件/"
+# Google Drive 模式需要的文件
+cp drive-watcher.js "$TEMP_DIR/项目文件/"
+cp googleDrive.js "$TEMP_DIR/项目文件/" 2>/dev/null || true
+# iCloud 模式需要的文件
+cp icloud-watcher.js "$TEMP_DIR/项目文件/"
 cp com.screensync.server.plist "$TEMP_DIR/项目文件/" 2>/dev/null || true
-echo "   ✅ 核心文件已复制（不包含 Google Drive 相关文件）"
+echo "   ✅ 核心文件已复制（支持 Google Drive 和 iCloud 双模式）"
 
 # 2. 复制配置文件
 echo -e "${YELLOW}⚙️  复制配置文件...${NC}"
@@ -91,9 +100,9 @@ cp package-lock.json "$TEMP_DIR/项目文件/"
 cp README.md "$TEMP_DIR/项目文件/"
 cp MANUAL_INSTALL_LEGACY.md "$TEMP_DIR/项目文件/" 2>/dev/null || echo "   ⚠️  MANUAL_INSTALL_LEGACY.md not found (optional)"
 
-# 3. 创建 .sync-mode 文件，默认 iCloud 模式
-echo "icloud" > "$TEMP_DIR/项目文件/.sync-mode"
-echo "   ✅ 默认模式已设置为 iCloud"
+# 3. 创建 .sync-mode 文件，默认 Google Drive 模式
+echo "drive" > "$TEMP_DIR/项目文件/.sync-mode"
+echo "   ✅ 默认模式已设置为 Google Drive"
 
 # 3. 复制 Apple Silicon DMG
 echo -e "${YELLOW}🖥️  复制 Apple Silicon 安装器...${NC}"
@@ -105,7 +114,7 @@ echo -e "${YELLOW}🔧 创建安全修复脚本...${NC}"
 cat > "$TEMP_DIR/第一步_拖进终端回车运行.command" << 'SCRIPT_EOF'
 #!/bin/bash
 
-# ScreenSync 安全修复脚本 (iCloud 专用版)
+# ScreenSync 安全修复脚本 (双模式版)
 # 此脚本用于解除 macOS Gatekeeper 对下载文件的安全限制
 
 clear
@@ -113,7 +122,7 @@ clear
 echo ""
 echo "╔════════════════════════════════════════════════════════╗"
 echo "║                                                        ║"
-echo "║       ScreenSync 安全修复工具 (iCloud 专用版)          ║"
+echo "║       ScreenSync 安全修复工具 (双模式版)               ║"
 echo "║                                                        ║"
 echo "╚════════════════════════════════════════════════════════╝"
 echo ""
@@ -150,10 +159,10 @@ echo "✅ 准备完成！"
 echo ""
 echo "现在可以双击 第二步_双击安装.dmg 开始安装了"
 echo ""
-echo "🌥️ iCloud 专用版说明："
-echo "   - 此版本默认使用 iCloud 模式，无需任何配置"
-echo "   - 截图将通过 iCloud 云盘自动同步"
-echo "   - 无需 Google Cloud 账号"
+echo "📱 双模式版说明："
+echo "   - 默认使用 Google Drive 模式"
+echo "   - 支持切换到 iCloud 模式（通过设置）"
+echo "   - 模式切换后永久保存，无需重复设置"
 echo ""
 read -p "按回车键关闭此窗口..."
 SCRIPT_EOF
@@ -202,15 +211,16 @@ echo -e "${YELLOW}📖 创建说明文档...${NC}"
 cat > "$TEMP_DIR/README_请先阅读.txt" << 'EOF'
 ╔════════════════════════════════════════════════════════╗
 ║                                                        ║
-║       ScreenSync 安装指南 (iCloud 专用版)              ║
+║       ScreenSync 安装指南 (双模式版)                   ║
 ║                                                        ║
 ╚════════════════════════════════════════════════════════╝
 
 ⚠️ 重要提示
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-此安装包是 iCloud 专用版，适用于 Apple 芯片 Mac (M1/M2/M3/M4)。
-🌥️ 默认使用 iCloud 模式，无需任何 Google Cloud 配置！
+此安装包支持 Google Drive 和 iCloud 双模式，适用于 Apple 芯片 Mac。
+📱 默认使用 Google Drive 模式
+🌥️ 可切换到 iCloud 模式（模式切换功能隐藏，见下方说明）
 
 
 📦 安装步骤
@@ -226,7 +236,6 @@ cat > "$TEMP_DIR/README_请先阅读.txt" << 'EOF'
    1. 双击 "第二步_双击安装.dmg"
    2. 在弹出的窗口中双击 "ScreenSync Installer"
    3. 按照图形界面提示完成配置
-   💡 注意：iCloud 专用版会自动配置为 iCloud 模式
 
 步骤 3：导入 Figma 插件
    1. 打开 Figma Desktop 应用
@@ -236,8 +245,24 @@ cat > "$TEMP_DIR/README_请先阅读.txt" << 'EOF'
 
 步骤 4：配置 iPhone 快捷指令
    1. 在 iPhone 上打开快捷指令 App
-   2. 扫描插件中显示的 iCloud 模式二维码
+   2. 扫描插件中显示的对应模式二维码
    3. 按照提示完成配置
+
+
+🔄 如何切换模式
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+模式切换功能默认隐藏。如需切换到 iCloud 模式：
+
+1. 在 Figma 中打开 ScreenSync 插件
+2. 打开浏览器开发者工具 (右键 → 检查 或 F12)
+3. 在 Console 中输入以下代码并回车：
+   
+   document.getElementById('modeSwitchSection').style.display = ''
+   
+4. 现在可以在设置中看到模式切换选项
+5. 点击 iCloud 图标切换到 iCloud 模式
+6. 切换后会永久保存，无需重复设置
 
 
 📱 使用方法
@@ -246,10 +271,7 @@ cat > "$TEMP_DIR/README_请先阅读.txt" << 'EOF'
 1. 在 Figma 中打开 ScreenSync 插件
 2. 点击中间的"实时同步"按钮开启监听
 3. 在 iPhone 上截图或使用快捷指令
-4. 截图会通过 iCloud 自动同步到 Figma！
-
-💡 iCloud 模式的截图会保存到：
-   ~/Library/Mobile Documents/com~apple~CloudDocs/ScreenSyncImg/
+4. 截图会自动同步到 Figma！
 
 
 📂 iCloud 模式特性
@@ -262,10 +284,10 @@ cat > "$TEMP_DIR/README_请先阅读.txt" << 'EOF'
    - 导出的 GIF 保存到 "导出的GIF" 子文件夹
 
 ✨ 选择性清理：
-   通过插件设置中的"备份到本地"选项控制哪些文件在导入后保留：
-   - "仅视频"：只保留视频文件，图片和 GIF 导入后自动清理
-   - "视频+GIF"：保留视频和 GIF 文件，图片导入后自动清理
-   - "视频+GIF+图片"：所有文件都保留，不自动清理
+   通过插件设置中的"备份到本地"选项控制哪些文件在导入后保留
+
+💡 iCloud 模式的截图保存路径：
+   ~/Library/Mobile Documents/com~apple~CloudDocs/ScreenSyncImg/
 
 
 🆘 遇到问题？
@@ -274,9 +296,8 @@ cat > "$TEMP_DIR/README_请先阅读.txt" << 'EOF'
 Q: 提示"ScreenSync Installer 已损坏"怎么办？
 A: 请确保已执行步骤 1 的安全修复脚本。
 
-Q: iCloud 同步很慢怎么办？
-A: iCloud 同步速度取决于网络和 iCloud 服务器状态，请耐心等待。
-   确保 Mac 和 iPhone 都已登录同一个 iCloud 账号。
+Q: 如何从 iCloud 切回 Google Drive？
+A: 使用同样的方法显示模式切换区域，点击 Google Cloud 图标即可。
 
 Q: 插件显示"等待连接"怎么办？
 A: 确保服务已启动。可以在终端中运行 start.js 手动启动。
@@ -286,14 +307,16 @@ EOF
 
 # 8. 创建使用说明
 cat > "$TEMP_DIR/项目文件/使用说明.txt" << 'EOF'
-ScreenSync - iPhone截图自动同步到Figma (iCloud 专用版)
+ScreenSync - iPhone截图自动同步到Figma (双模式版)
 
 ═══════════════════════════════════════════════════════
 
-🌥️ iCloud 专用版说明
+📱 双模式版说明
 
-此版本默认使用 iCloud 模式，无需任何 Google Cloud 配置！
-截图将通过 iCloud 云盘自动同步到 Figma。
+此版本支持 Google Drive 和 iCloud 两种模式自由切换！
+- 默认使用 Google Drive 模式
+- 可切换到 iCloud 模式（模式切换功能隐藏）
+- 切换后永久保存设置
 
 ═══════════════════════════════════════════════════════
 
@@ -319,7 +342,18 @@ ScreenSync - iPhone截图自动同步到Figma (iCloud 专用版)
 
 ═══════════════════════════════════════════════════════
 
-📂 文件自动分类
+🔄 如何切换模式
+
+模式切换功能默认隐藏。如需切换：
+1. 在 Figma 中打开 ScreenSync 插件
+2. 打开开发者工具 (右键 → 检查)
+3. 在 Console 中输入：
+   document.getElementById('modeSwitchSection').style.display = ''
+4. 现在可以在设置中看到模式切换选项
+
+═══════════════════════════════════════════════════════
+
+📂 iCloud 模式文件自动分类
 
 iCloud 模式会自动将文件分类到子文件夹：
 - 图片 → "图片" 文件夹
@@ -327,26 +361,18 @@ iCloud 模式会自动将文件分类到子文件夹：
 - GIF → "GIF" 文件夹
 - 导出的GIF → "导出的GIF" 文件夹
 
-═══════════════════════════════════════════════════════
-
-⚙️ 选择性清理
-
-通过插件设置中的"备份到本地"选项控制哪些文件保留：
-- "仅视频"：只保留视频文件
-- "视频+GIF"：保留视频和 GIF 文件
-- "视频+GIF+图片"：所有文件都保留
-
 EOF
 
 # 9. 创建版本信息
 cat > "$TEMP_DIR/项目文件/VERSION.txt" << EOF
-ScreenSync 用户分发包 (iCloud 专用版)
+ScreenSync 用户分发包 (双模式版)
 版本: ${VERSION}
 打包日期: $(date +"%Y-%m-%d %H:%M:%S")
 特性: 
-  - 默认 iCloud 模式，无需 Google Cloud 配置
-  - 文件自动分类（图片/视频/GIF）
-  - 选择性清理功能
+  - 支持 Google Drive / iCloud 双模式
+  - 模式切换后永久保存
+  - iCloud 模式支持文件自动分类
+  - iCloud 模式支持选择性清理
 EOF
 
 # 10. 打包
@@ -371,14 +397,14 @@ echo -e "${GREEN}╚════════════════════
 echo -e "${BLUE}📦 生成的安装包：${NC}"
 echo -e "   ${GREEN}✅ ${PACKAGE_NAME}.tar.gz${NC} (${PACKAGE_SIZE})"
 echo ""
-echo -e "${YELLOW}📋 iCloud 专用版特性：${NC}"
-echo -e "   - 🌥️  默认 iCloud 模式，无需 Google Cloud 配置"
-echo -e "   - 📂 文件自动分类到子文件夹（图片/视频/GIF/导出的GIF）"
-echo -e "   - 🧹 支持选择性清理（根据备份设置）"
-echo -e "   - ❌ 不包含 Google Drive 相关代码"
+echo -e "${YELLOW}📋 双模式版特性：${NC}"
+echo -e "   - 📱 默认 Google Drive 模式"
+echo -e "   - 🌥️  支持切换到 iCloud 模式"
+echo -e "   - 💾 模式切换后永久保存设置"
+echo -e "   - 🔒 模式切换功能隐藏（可通过 console 开启）"
 echo ""
 echo -e "${BLUE}💡 使用说明：${NC}"
-echo -e "   1. 解压后即为 iCloud 模式，无需任何配置"
-echo -e "   2. 在 iPhone 上配置 iCloud 快捷指令即可使用"
-echo -e "   3. 详见 README_请先阅读.txt"
+echo -e "   1. 解压后默认为 Google Drive 模式"
+echo -e "   2. 如需切换到 iCloud 模式，见 README_请先阅读.txt"
+echo -e "   3. 切换后永久保存，无需重复设置"
 echo ""

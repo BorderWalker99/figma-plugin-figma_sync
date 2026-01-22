@@ -115,61 +115,204 @@ function ensureSubfolders() {
 }
 
 /**
- * 根据文件类型获取目标子文件夹
+ * 获取文件夹中的下一个序号
  */
-function getTargetSubfolder(filename, isExportedGif = false) {
-  if (isExportedGif) {
-    return CONFIG.subfolders.exportedGif;
+function getNextSequenceNumber(folderPath, prefix, extensions) {
+  if (!fs.existsSync(folderPath)) {
+    return 1;
   }
   
-  const ext = path.extname(filename).toLowerCase();
+  const files = fs.readdirSync(folderPath);
+  let maxNumber = 0;
   
-  if (ext === '.mp4' || ext === '.mov') {
-    return CONFIG.subfolders.video;
-  } else if (ext === '.gif') {
-    return CONFIG.subfolders.gif;
-  } else {
-    return CONFIG.subfolders.image;
+  files.forEach(file => {
+    const ext = path.extname(file).toLowerCase();
+    if (extensions.includes(ext)) {
+      // 匹配格式：prefix_数字.ext
+      const nameWithoutExt = path.basename(file, ext);
+      const match = nameWithoutExt.match(new RegExp(`^${prefix}_(\\d+)$`));
+      if (match) {
+        const num = parseInt(match[1], 10);
+        if (num > maxNumber) {
+          maxNumber = num;
+        }
+      }
+    }
+  });
+  
+  return maxNumber + 1;
+}
+
+/**
+ * 将 HEIF/HEIC 文件转换为 JPEG
+ */
+async function convertHeifToJpeg(filePath) {
+  const filename = path.basename(filePath);
+  const ext = path.extname(filePath).toLowerCase();
+  
+  if (ext !== '.heif' && ext !== '.heic') {
+    return { converted: false, newPath: filePath };
+  }
+  
+  console.log(`   🔄 [iCloud] 检测到 HEIF 格式，正在转换为 JPEG...`);
+  
+  const tempOutputPath = path.join(os.tmpdir(), `heif-convert-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.jpg`);
+  
+  try {
+    // 使用 sips 转换 (macOS 原生支持)
+    const sipsCommand = `sips -s format jpeg "${filePath}" --out "${tempOutputPath}"`;
+    
+    await new Promise((resolve, reject) => {
+      exec(sipsCommand, { maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+        if (err) {
+          reject(new Error(`sips 转换失败: ${err.message}${stderr ? ' - ' + stderr : ''}`));
+        } else {
+          if (!fs.existsSync(tempOutputPath)) {
+            reject(new Error(`sips 转换失败: 输出文件不存在`));
+          } else {
+            resolve();
+          }
+        }
+      });
+    });
+    
+    // 读取转换后的文件并压缩
+    const convertedBuffer = fs.readFileSync(tempOutputPath);
+    const compressedBuffer = await sharp(convertedBuffer)
+      .resize(CONFIG.maxWidth, null, {
+        withoutEnlargement: true,
+        fit: 'inside'
+      })
+      .jpeg({ quality: CONFIG.quality })
+      .toBuffer();
+    
+    // 删除临时文件
+    try {
+      fs.unlinkSync(tempOutputPath);
+    } catch (e) {
+      // 忽略
+    }
+    
+    // 创建新的 JPEG 文件路径（在同一目录）
+    const newFilename = path.basename(filePath, ext) + '.jpg';
+    const newPath = path.join(path.dirname(filePath), newFilename);
+    
+    // 写入压缩后的 JPEG
+    fs.writeFileSync(newPath, compressedBuffer);
+    
+    // 删除原始 HEIF 文件
+    try {
+      fs.unlinkSync(filePath);
+      console.log(`   ✅ [iCloud] HEIF → JPEG 转换完成: ${newFilename}`);
+    } catch (e) {
+      console.log(`   ⚠️ [iCloud] 无法删除原始 HEIF 文件: ${e.message}`);
+    }
+    
+    return { converted: true, newPath: newPath };
+  } catch (error) {
+    console.error(`   ❌ [iCloud] HEIF 转换失败: ${error.message}`);
+    // 清理临时文件
+    try {
+      if (fs.existsSync(tempOutputPath)) {
+        fs.unlinkSync(tempOutputPath);
+      }
+    } catch (e) {
+      // 忽略
+    }
+    return { converted: false, newPath: filePath };
   }
 }
 
 /**
- * 将文件移动到对应的子文件夹
+ * 根据文件类型获取目标子文件夹和文件前缀
  */
-function moveFileToSubfolder(filePath, isExportedGif = false) {
-  const filename = path.basename(filePath);
-  const subfolder = getTargetSubfolder(filename, isExportedGif);
+function getTargetSubfolderAndPrefix(filename, isExportedGif = false) {
+  const ext = path.extname(filename).toLowerCase();
+  
+  if (isExportedGif) {
+    return {
+      subfolder: CONFIG.subfolders.exportedGif,
+      filePrefix: 'ScreenRecordingGIF',
+      extensions: ['.gif']
+    };
+  }
+  
+  if (ext === '.mp4' || ext === '.mov') {
+    return {
+      subfolder: CONFIG.subfolders.video,
+      filePrefix: 'ScreenRecordingVid',
+      extensions: ['.mp4', '.mov']
+    };
+  } else if (ext === '.gif') {
+    return {
+      subfolder: CONFIG.subfolders.gif,
+      filePrefix: 'ScreenRecordingGIF',
+      extensions: ['.gif']
+    };
+  } else {
+    return {
+      subfolder: CONFIG.subfolders.image,
+      filePrefix: 'ScreenShot',
+      extensions: ['.jpg', '.jpeg', '.png']
+    };
+  }
+}
+
+/**
+ * 根据文件类型获取目标子文件夹（兼容旧调用）
+ */
+function getTargetSubfolder(filename, isExportedGif = false) {
+  return getTargetSubfolderAndPrefix(filename, isExportedGif).subfolder;
+}
+
+/**
+ * 将文件移动到对应的子文件夹（带自动命名和 HEIF 转换）
+ * @returns {Object} { moved, newPath, subfolder, newFilename, heifConverted }
+ */
+async function moveFileToSubfolder(filePath, isExportedGif = false) {
+  let currentPath = filePath;
+  let filename = path.basename(currentPath);
+  let ext = path.extname(filename).toLowerCase();
+  let heifConverted = false;
+  
+  // 如果是 HEIF/HEIC，先转换为 JPEG
+  if (ext === '.heif' || ext === '.heic') {
+    const conversionResult = await convertHeifToJpeg(currentPath);
+    if (conversionResult.converted) {
+      currentPath = conversionResult.newPath;
+      filename = path.basename(currentPath);
+      ext = path.extname(filename).toLowerCase();
+      heifConverted = true;
+    }
+  }
+  
+  const { subfolder, filePrefix, extensions } = getTargetSubfolderAndPrefix(filename, isExportedGif);
   const targetDir = path.join(CONFIG.icloudPath, subfolder);
-  const targetPath = path.join(targetDir, filename);
   
   // 确保目标文件夹存在
   if (!fs.existsSync(targetDir)) {
     fs.mkdirSync(targetDir, { recursive: true });
   }
   
-  // 如果文件已经在目标文件夹中，直接返回
-  if (filePath === targetPath) {
-    return { moved: false, newPath: filePath, subfolder };
+  // 获取下一个序号并生成新文件名
+  const sequenceNumber = getNextSequenceNumber(targetDir, filePrefix, extensions);
+  const paddedNumber = sequenceNumber.toString().padStart(3, '0');
+  const newFilename = `${filePrefix}_${paddedNumber}${ext}`;
+  const targetPath = path.join(targetDir, newFilename);
+  
+  // 如果文件已经在目标位置且文件名相同，直接返回
+  if (currentPath === targetPath) {
+    return { moved: false, newPath: currentPath, subfolder, newFilename: filename, heifConverted };
   }
   
-  // 处理同名文件：直接覆盖（替换旧文件）
-  if (fs.existsSync(targetPath)) {
-    try {
-      fs.unlinkSync(targetPath);
-      console.log(`   🔄 [iCloud] 已删除旧文件: ${subfolder}/${filename}`);
-    } catch (deleteError) {
-      console.warn(`   ⚠️  [iCloud] 删除旧文件失败: ${deleteError.message}`);
-    }
-  }
-  
-  // 移动文件
+  // 移动并重命名文件
   try {
-    fs.renameSync(filePath, targetPath);
-    console.log(`   📂 [iCloud] 文件已分类: ${filename} → ${subfolder}/`);
-    return { moved: true, newPath: targetPath, subfolder };
+    fs.renameSync(currentPath, targetPath);
+    console.log(`   📂 [iCloud] 文件已分类并重命名: ${filename} → ${subfolder}/${newFilename}`);
+    return { moved: true, newPath: targetPath, subfolder, newFilename, heifConverted };
   } catch (moveError) {
     console.warn(`   ⚠️  [iCloud] 移动文件失败: ${moveError.message}`);
-    return { moved: false, newPath: filePath, subfolder };
+    return { moved: false, newPath: currentPath, subfolder, newFilename: filename, heifConverted };
   }
 }
 
@@ -365,34 +508,76 @@ function startWatching() {
   console.log(`   子文件夹: ${Object.values(CONFIG.subfolders).join(', ')}`);
   console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
   
-  // 扫描当前已存在的文件（用于日志记录）
-  try {
-    const existingFiles = fs.readdirSync(CONFIG.icloudPath).filter(file => {
-      const filePath = path.join(CONFIG.icloudPath, file);
-      const stats = fs.statSync(filePath);
-      if (stats.isDirectory()) return false;
-      const ext = path.extname(file).toLowerCase();
-      return CONFIG.supportedFormats.includes(ext);
-    });
-    console.log(`📊 [iCloud] 根目录有 ${existingFiles.length} 个待分类文件`);
-    console.log(`ℹ️  [iCloud] 实时模式将只处理新添加的文件\n`);
-
-    if (existingFiles.length > 0 && ws && ws.readyState === WebSocket.OPEN) {
-      try {
-        ws.send(JSON.stringify({
-          type: 'toast',
-          message: `实时模式已启动 (${existingFiles.length} 个现有文件，如需同步请使用"手动同步")`,
-          duration: 5000,
-          level: 'info'
-        }));
-      } catch (e) {
-        console.warn('   ⚠️ 发送通知失败:', e.message);
+  // ========================================
+  // ✅ 启动时自动整理根目录中的现有文件
+  //    （分类、重命名、HEIF 转换）
+  //    使用立即执行的异步函数，不阻塞 watcher 启动
+  // ========================================
+  (async () => {
+    try {
+      const existingFiles = fs.readdirSync(CONFIG.icloudPath).filter(file => {
+        const filePath = path.join(CONFIG.icloudPath, file);
+        try {
+          const stats = fs.statSync(filePath);
+          if (stats.isDirectory()) return false;
+          const ext = path.extname(file).toLowerCase();
+          return CONFIG.supportedFormats.includes(ext);
+        } catch (e) {
+          return false;
+        }
+      });
+      
+      if (existingFiles.length > 0) {
+        console.log(`\n📁 [自动整理] 发现根目录有 ${existingFiles.length} 个待整理文件`);
+        console.log(`   正在执行分类、重命名和格式转换...\n`);
+        
+        let organizedCount = 0;
+        let heifConvertedCount = 0;
+        
+        for (const file of existingFiles) {
+          const filePath = path.join(CONFIG.icloudPath, file);
+          try {
+            const result = await moveFileToSubfolder(filePath);
+            if (result.moved) {
+              organizedCount++;
+              console.log(`   ✅ ${file} → ${result.subfolder}/${result.newFilename}`);
+              if (result.heifConverted) {
+                heifConvertedCount++;
+              }
+            }
+          } catch (moveError) {
+            console.warn(`   ⚠️  整理失败: ${file} - ${moveError.message}`);
+          }
+        }
+        
+        console.log(`\n📊 [自动整理] 完成！`);
+        console.log(`   ✅ 已分类: ${organizedCount} 个文件`);
+        if (heifConvertedCount > 0) {
+          console.log(`   🔄 HEIF→JPEG: ${heifConvertedCount} 个文件`);
+        }
+        console.log(`   ℹ️  如需同步到 Figma，请使用"手动同步"\n`);
+        
+        // 发送通知到插件
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          try {
+            ws.send(JSON.stringify({
+              type: 'toast',
+              message: `已自动整理 ${organizedCount} 个文件，如需同步请使用"手动同步"`,
+              duration: 5000,
+              level: 'info'
+            }));
+          } catch (e) {
+            console.warn('   ⚠️ 发送通知失败:', e.message);
+          }
+        }
+      } else {
+        console.log(`📊 [iCloud] 根目录没有待整理文件\n`);
       }
-    }
 
-  } catch (error) {
-    console.warn('   ⚠️  扫描现有文件失败，继续启动监听');
-  }
+    } catch (error) {
+      console.warn('   ⚠️  扫描现有文件失败，继续启动监听:', error.message);
+    }
+  })();
   
   console.log(`\n🔧 正在创建 chokidar watcher...`);
   watcher = chokidar.watch(CONFIG.icloudPath, {
@@ -413,7 +598,7 @@ function startWatching() {
   });
   console.log(`✅ chokidar watcher 已创建\n`);
   
-  const handleFileEvent = (filePath) => {
+  const handleFileEvent = async (filePath) => {
     const filename = path.basename(filePath);
     const relativePath = path.relative(CONFIG.icloudPath, filePath);
     console.log(`\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
@@ -428,6 +613,11 @@ function startWatching() {
       return;
     }
     
+    // 忽略已经在子文件夹中的文件（避免处理已分类的文件触发的 change 事件）
+    const isInSubfolder = relativePath.startsWith(CONFIG.subfolders.image + path.sep) ||
+                          relativePath.startsWith(CONFIG.subfolders.video + path.sep) ||
+                          relativePath.startsWith(CONFIG.subfolders.gif + path.sep);
+    
     // 忽略临时文件
     const lowerFilename = filename.toLowerCase();
     if (lowerFilename.startsWith('magick-') || 
@@ -436,12 +626,6 @@ function startWatching() {
         lowerFilename.includes('.tmp')) {
         console.log(`🙈 [iCloud] 忽略临时文件: ${filename}\n`);
         return;
-    }
-
-    console.log(`   检查实时模式状态: ${isRealTimeMode ? '✅ 已开启' : '❌ 已关闭'}`);
-    if (!isRealTimeMode) {
-      console.log(`⏸️  实时模式已关闭，忽略文件\n`);
-      return;
     }
     
     // 检查文件是否有效
@@ -461,96 +645,144 @@ function startWatching() {
     }
     
     const ext = path.extname(filePath).toLowerCase();
-    if (CONFIG.supportedFormats.includes(ext)) {
-      const isGif = ext === '.gif';
-      const isVideo = ext === '.mp4' || ext === '.mov';
-      
-      // 检查是否重复处理
-      if (isFileProcessed(filePath)) {
-        console.log(`\n⏭️  [实时模式] 跳过重复文件: ${filename}`);
-        return;
-      }
-      
-      // 移动文件到对应子文件夹
-      const { moved, newPath, subfolder } = moveFileToSubfolder(filePath);
-      const finalPath = moved ? newPath : filePath;
-      
-      // 处理视频文件
-      if (isVideo) {
-        console.log(`\n🎥 [实时模式] 检测到视频文件: ${filename}`);
-        console.log(`   ⚠️  视频文件需要手动拖入 Figma`);
-        console.log(`   📂 已分类到: ${subfolder}/`);
-        
-        // 缓存视频文件
-        try {
-          const fileBuffer = fs.readFileSync(finalPath);
-          const cacheResult = userConfig.saveGifToCache(fileBuffer, filename, null);
-          if (cacheResult && cacheResult.cacheId) {
-            console.log(`   💾 [GIF Cache] 视频已自动缓存 (ID: ${cacheResult.cacheId})`);
-          }
-        } catch (cacheError) {
-          console.error(`   ⚠️  [GIF Cache] 缓存失败:`, cacheError.message);
-        }
-        
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({
-            type: 'file-skipped',
-            filename: filename,
-            reason: 'video'
-          }));
-        }
-        return;
-      }
-      
-      // 处理大GIF文件
-      if (isGif) {
-        try {
-          const stats = fs.statSync(finalPath);
-          const maxGifSize = 100 * 1024 * 1024; // 100MB
-          
-          if (stats.size > maxGifSize) {
-            console.log(`\n🎬 [实时模式] 检测到大 GIF 文件: ${filename}`);
-            console.log(`   ⚠️  GIF 文件过大，需要手动拖入`);
-            console.log(`   📂 已分类到: ${subfolder}/`);
-            
-            try {
-              const fileBuffer = fs.readFileSync(finalPath);
-              const cacheResult = userConfig.saveGifToCache(fileBuffer, filename, null);
-              if (cacheResult && cacheResult.cacheId) {
-                console.log(`   💾 [GIF Cache] 大GIF已自动缓存 (ID: ${cacheResult.cacheId})`);
-              }
-            } catch (cacheError) {
-              console.error(`   ⚠️  [GIF Cache] 缓存失败:`, cacheError.message);
-            }
-            
-            if (ws && ws.readyState === WebSocket.OPEN) {
-              ws.send(JSON.stringify({
-                type: 'file-skipped',
-                filename: filename,
-                reason: 'gif-too-large'
-              }));
-            }
-            return;
-          }
-        } catch (checkError) {
-          console.log(`   ⚠️  检查 GIF 大小失败，继续处理`);
-        }
-      }
-      
-      console.log(`\n📸 [实时模式] 检测到新截图: ${filename}`);
-      console.log(`   📂 分类到: ${subfolder}/`);
-      
-      // 尝试强制下载
-      try {
-        exec(`brctl download "${finalPath}"`);
-      } catch (e) {
-        // 忽略
-      }
-      
-      syncScreenshot(finalPath, true, subfolder).catch(err => {
-        console.error(`❌ 处理文件失败: ${filename}`, err.message);
-      });
+    if (!CONFIG.supportedFormats.includes(ext)) {
+      console.log(`⏭️  [iCloud] 跳过不支持的格式: ${ext}\n`);
+      return;
     }
+    
+    // ========================================
+    // ✅ 第一步：立即执行文件分类、重命名和 HEIF 转换
+    //    这些操作不依赖插件连接，文件一到达就执行
+    // ========================================
+    
+    // 只对根目录的文件执行分类（已在子文件夹中的文件跳过分类步骤）
+    let finalPath = filePath;
+    let displayFilename = filename;
+    let subfolder = null;
+    
+    if (!isInSubfolder) {
+      // 根目录的新文件：执行分类、HEIF 转换和重命名
+      console.log(`\n📁 [自动整理] 正在处理新文件...`);
+      
+      try {
+        const result = await moveFileToSubfolder(filePath);
+        finalPath = result.moved ? result.newPath : filePath;
+        displayFilename = result.newFilename || filename;
+        subfolder = result.subfolder;
+        
+        if (result.moved) {
+          console.log(`   ✅ 已分类到: ${subfolder}/`);
+          console.log(`   ✅ 重命名为: ${displayFilename}`);
+          if (result.heifConverted) {
+            console.log(`   ✅ HEIF → JPEG 转换完成`);
+          }
+        }
+      } catch (moveError) {
+        console.error(`   ❌ 自动整理失败: ${moveError.message}`);
+        // 失败时继续使用原路径
+        finalPath = filePath;
+        displayFilename = filename;
+      }
+    } else {
+      // 已在子文件夹中：提取子文件夹名
+      subfolder = relativePath.split(path.sep)[0];
+      console.log(`   📂 文件已在子文件夹: ${subfolder}/`);
+    }
+    
+    // 重新检测文件类型（可能已经从 HEIF 转换为 JPEG）
+    const finalExt = path.extname(finalPath).toLowerCase();
+    const isGif = finalExt === '.gif';
+    const isVideo = finalExt === '.mp4' || finalExt === '.mov';
+    
+    // ========================================
+    // ✅ 第二步：检查是否需要同步到 Figma
+    //    只有这部分需要插件连接
+    // ========================================
+    
+    console.log(`   检查实时模式状态: ${isRealTimeMode ? '✅ 已开启' : '❌ 已关闭'}`);
+    if (!isRealTimeMode) {
+      console.log(`⏸️  文件已整理完成，但实时同步未开启（插件未连接）\n`);
+      return;
+    }
+    
+    // 检查是否重复处理（同步阶段）
+    if (isFileProcessed(finalPath)) {
+      console.log(`\n⏭️  [实时模式] 跳过已同步文件: ${displayFilename}`);
+      return;
+    }
+    
+    // 处理视频文件
+    if (isVideo) {
+      console.log(`\n🎥 [实时模式] 视频文件: ${displayFilename}`);
+      console.log(`   ⚠️  视频文件需要手动拖入 Figma`);
+      
+      // 缓存视频文件
+      try {
+        const fileBuffer = fs.readFileSync(finalPath);
+        const cacheResult = userConfig.saveGifToCache(fileBuffer, displayFilename, null);
+        if (cacheResult && cacheResult.cacheId) {
+          console.log(`   💾 [GIF Cache] 视频已自动缓存 (ID: ${cacheResult.cacheId})`);
+        }
+      } catch (cacheError) {
+        console.error(`   ⚠️  [GIF Cache] 缓存失败:`, cacheError.message);
+      }
+      
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'file-skipped',
+          filename: displayFilename,
+          reason: 'video'
+        }));
+      }
+      return;
+    }
+    
+    // 处理大GIF文件
+    if (isGif) {
+      try {
+        const stats = fs.statSync(finalPath);
+        const maxGifSize = 100 * 1024 * 1024; // 100MB
+        
+        if (stats.size > maxGifSize) {
+          console.log(`\n🎬 [实时模式] 大 GIF 文件: ${displayFilename}`);
+          console.log(`   ⚠️  GIF 文件过大，需要手动拖入`);
+          
+          try {
+            const fileBuffer = fs.readFileSync(finalPath);
+            const cacheResult = userConfig.saveGifToCache(fileBuffer, displayFilename, null);
+            if (cacheResult && cacheResult.cacheId) {
+              console.log(`   💾 [GIF Cache] 大GIF已自动缓存 (ID: ${cacheResult.cacheId})`);
+            }
+          } catch (cacheError) {
+            console.error(`   ⚠️  [GIF Cache] 缓存失败:`, cacheError.message);
+          }
+          
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+              type: 'file-skipped',
+              filename: displayFilename,
+              reason: 'gif-too-large'
+            }));
+          }
+          return;
+        }
+      } catch (checkError) {
+        console.log(`   ⚠️  检查 GIF 大小失败，继续处理`);
+      }
+    }
+    
+    console.log(`\n📸 [实时模式] 准备同步: ${displayFilename}`);
+    
+    // 尝试强制下载
+    try {
+      exec(`brctl download "${finalPath}"`);
+    } catch (e) {
+      // 忽略
+    }
+    
+    syncScreenshot(finalPath, true, subfolder).catch(err => {
+      console.error(`❌ 处理文件失败: ${displayFilename}`, err.message);
+    });
   };
   
   console.log(`📝 注册事件监听器...`);
@@ -697,11 +929,11 @@ async function performManualSync() {
     return CONFIG.supportedFormats.includes(ext);
   });
   
-  // 先将根目录文件分类到子文件夹
+  // 先将根目录文件分类到子文件夹（包含 HEIF 转换和自动命名）
   console.log(`📂 [手动同步] 正在分类根目录中的 ${rootFiles.length} 个文件...`);
   for (const file of rootFiles) {
     const filePath = path.join(CONFIG.icloudPath, file);
-    const { newPath, subfolder } = moveFileToSubfolder(filePath);
+    const { newPath, subfolder } = await moveFileToSubfolder(filePath);
     allFiles.push({ filePath: newPath, subfolder });
   }
   
@@ -977,12 +1209,20 @@ async function syncScreenshot(filePath, deleteAfterSync = false, subfolder = nul
       subfolder = getTargetSubfolder(filename);
     }
     
+    // 确定文件类型（复用上面已声明的 ext、isGif、isVideo 变量）
+    const fileIsGif = isGif;
+    const fileIsVideo = isVideo;
+    const fileIsImage = !fileIsGif && !fileIsVideo;
+    
     const payload = {
       type: 'screenshot',
       bytes: base64String,
       timestamp: Date.now(),
       filename: filename,
-      keptInIcloud: !shouldCleanupFile(subfolder) // 根据备份设置判断
+      keptInIcloud: !shouldCleanupFile(subfolder), // 根据备份设置判断
+      isGif: fileIsGif,
+      isVideo: fileIsVideo,
+      isImage: fileIsImage
     };
     
     ws.send(JSON.stringify(payload));
