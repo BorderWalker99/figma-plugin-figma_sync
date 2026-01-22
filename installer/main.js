@@ -236,23 +236,31 @@ ipcMain.handle('get-project-root', async () => {
         // hdiutil info 输出包含 image-path 和 mount-point
         
         const lines = require('child_process').execSync('hdiutil info', { encoding: 'utf8' }).split('\n');
-        let currentImagePath = '';
-        let foundMountPoint = false;
+        let dmgImagePath = '';
         
-        for (const line of lines) {
-          if (line.startsWith('image-path')) {
-            currentImagePath = line.split(': ')[1].trim();
-          }
-          if (line.includes(volumePath)) {
-            foundMountPoint = true;
+        // 找到包含 volumePath 的行的索引
+        let volumeLineIndex = -1;
+        for (let i = 0; i < lines.length; i++) {
+          if (lines[i].includes(volumePath)) {
+            volumeLineIndex = i;
             break;
           }
         }
         
-        if (foundMountPoint && currentImagePath) {
-          console.log('✅ 找到 DMG 源文件路径:', currentImagePath);
+        // 从 volumePath 行向上查找最近的 image-path
+        if (volumeLineIndex !== -1) {
+          for (let i = volumeLineIndex; i >= 0; i--) {
+            if (lines[i].startsWith('image-path')) {
+              dmgImagePath = lines[i].split(': ')[1].trim();
+              break;
+            }
+          }
+        }
+        
+        if (dmgImagePath) {
+          console.log('✅ 找到 DMG 源文件路径:', dmgImagePath);
           // DMG 文件所在的目录
-          const dmgDir = path.dirname(currentImagePath);
+          const dmgDir = path.dirname(dmgImagePath);
           const projectFilesFromDmg = path.join(dmgDir, '项目文件');
           const packageJsonFromDmg = path.join(projectFilesFromDmg, 'package.json');
           
