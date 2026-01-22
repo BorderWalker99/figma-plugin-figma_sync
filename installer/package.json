@@ -14,6 +14,7 @@
     "productName": "ScreenSync Installer",
     "compression": "maximum",
     "asar": true,
+    "afterPack": "./afterPack.js",
     "dmg": {
       "background": null,
       "backgroundColor": "#ffffff",
@@ -42,7 +43,8 @@
       ],
       "icon": "icon.icns",
       "hardenedRuntime": true,
-      "gatekeeperAssess": false
+      "gatekeeperAssess": false,
+      "electronLanguages": ["en", "zh_CN", "zh_TW"]
     },
     "files": [
       "**/*",

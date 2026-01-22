@@ -147,14 +147,42 @@ fi
 echo "🔧 正在解除安全限制..."
 echo ""
 
-# 解除 DMG 的隔离属性
+# 1. 解除 DMG 文件本身的隔离属性
+echo "   [1/4] 处理 DMG 文件..."
 xattr -cr "$DMG_FILE" 2>/dev/null
 
-# 解除项目文件夹的隔离属性
+# 2. 挂载 DMG 并解除内部应用的隔离属性
+echo "   [2/4] 挂载并处理安装器应用..."
+MOUNT_OUTPUT=$(hdiutil attach "$DMG_FILE" -nobrowse -quiet 2>/dev/null)
+MOUNT_POINT=$(echo "$MOUNT_OUTPUT" | grep -o '/Volumes/.*' | head -1)
+
+# 如果挂载失败，尝试另一种方式获取挂载点
+if [ -z "$MOUNT_POINT" ]; then
+    # 等待挂载完成
+    sleep 1
+    # 查找已挂载的 ScreenSync 卷
+    MOUNT_POINT=$(df | grep -i "ScreenSync" | awk '{print $NF}')
+fi
+
+if [ -n "$MOUNT_POINT" ] && [ -d "$MOUNT_POINT" ]; then
+    # 解除安装器应用的隔离属性
+    find "$MOUNT_POINT" -name "*.app" -exec xattr -cr {} \; 2>/dev/null
+    echo "   ✅ 安装器应用已处理"
+    
+    # 卸载 DMG
+    echo "   [3/4] 卸载 DMG..."
+    hdiutil detach "$MOUNT_POINT" -quiet 2>/dev/null
+else
+    echo "   ⚠️  无法自动挂载 DMG，将在双击时自动处理"
+fi
+
+# 3. 解除项目文件夹的隔离属性
+echo "   [4/4] 处理项目文件..."
 if [ -d "$SCRIPT_DIR/项目文件" ]; then
     xattr -cr "$SCRIPT_DIR/项目文件" 2>/dev/null
 fi
 
+echo ""
 echo "✅ 准备完成！"
 echo ""
 echo "现在可以双击 第二步_双击安装.dmg 开始安装了"
