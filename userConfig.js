@@ -208,8 +208,25 @@ function getLocalDownloadFolder() {
 
   // 生产环境：优先使用用户配置
   const config = getOrCreateUserConfig();
+  const defaultPath = getDefaultDownloadFolder();
+  
   if (config.localDownloadFolder && config.localDownloadFolder.trim() !== '') {
     const customPath = config.localDownloadFolder.trim();
+    
+    // ✅ 自动检测项目是否被移动
+    // 如果配置的路径包含 ScreenSyncImg 但不在当前项目目录下，说明项目被移动了
+    if (customPath.includes('ScreenSyncImg') && !customPath.startsWith(__dirname)) {
+      // 检查配置的路径是否还存在
+      if (!fs.existsSync(customPath)) {
+        console.log(`📂 [自动检测] 项目被移动，自动更新 ScreenSyncImg 路径`);
+        console.log(`   旧路径: ${customPath}`);
+        console.log(`   新路径: ${defaultPath}`);
+        config.localDownloadFolder = defaultPath;
+        writeUserConfig(config);
+        return defaultPath;
+      }
+    }
+    
     // 验证路径是否有效（父目录必须存在）
     const parentDir = path.dirname(customPath);
     try {
@@ -217,14 +234,16 @@ function getLocalDownloadFolder() {
         return customPath;
       } else {
         console.warn(`⚠️  配置的本地文件夹路径无效（父目录不存在）: ${customPath}`);
-        console.warn(`   将使用默认路径: ${getDefaultDownloadFolder()}`);
+        console.warn(`   将使用默认路径: ${defaultPath}`);
+        config.localDownloadFolder = defaultPath;
+        writeUserConfig(config);
       }
     } catch (error) {
       console.warn(`⚠️  验证本地文件夹路径时出错: ${error.message}`);
     }
   }
   // 返回默认路径
-  return getDefaultDownloadFolder();
+  return defaultPath;
 }
 
 /**

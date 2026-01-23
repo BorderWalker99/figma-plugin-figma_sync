@@ -685,6 +685,10 @@ ipcMain.handle('install-all-dependencies', async (event, dependencyStatus) => {
   return new Promise(async (resolve) => {
     console.log('📦 一键安装所有依赖，当前状态:', dependencyStatus);
     
+    // 检测 macOS 版本
+    const darwinVersion = parseInt(os.release().split('.')[0], 10);
+    const isOldMacOS = darwinVersion < 23; // macOS 14 = Darwin 23
+    
     // 构建需要安装的包列表
     const brewPackages = [];
     if (!dependencyStatus.node) {
@@ -706,6 +710,58 @@ ipcMain.handle('install-all-dependencies', async (event, dependencyStatus) => {
         success: false, 
         error: '所有依赖已安装，无需重复安装'
       });
+      return;
+    }
+    
+    // 旧版 macOS (13 及以下) 使用手动下载方式
+    if (isOldMacOS) {
+      console.log('检测到旧版 macOS，打开 Node.js 下载页面');
+      
+      // 打开 Node.js 下载页面
+      if (!dependencyStatus.node) {
+        require('electron').shell.openExternal('https://nodejs.org');
+        resolve({
+          success: true,
+          message: '已打开 Node.js 下载页面，安装后点击"重新检测"'
+        });
+      } else {
+        // Node.js 已安装，尝试用 brew 安装其他依赖
+        // 如果 brew 不存在，提示用户
+        if (!dependencyStatus.homebrew) {
+          resolve({
+            success: false,
+            error: 'ImageMagick/FFmpeg 需要 Homebrew，建议升级系统或跳过'
+          });
+        } else {
+          // 有 brew，尝试安装
+          const pkgs = [];
+          if (!dependencyStatus.imagemagick) pkgs.push('imagemagick');
+          if (!dependencyStatus.ffmpeg) pkgs.push('ffmpeg');
+          
+          if (pkgs.length > 0) {
+            const installScript = `brew install ${pkgs.join(' ')} && echo '✅ 安装完成，请点击重新检测'`;
+            const appleScript = `tell application "Terminal"\n  activate\n  do script "${installScript}"\nend tell`;
+            
+            try {
+              await runAppleScript(appleScript);
+              resolve({
+                success: true,
+                message: '终端已打开，安装完成后点击"重新检测"'
+              });
+            } catch (e) {
+              resolve({
+                success: false,
+                error: '无法打开终端，请手动运行: brew install ' + pkgs.join(' ')
+              });
+            }
+          } else {
+            resolve({
+              success: false,
+              error: '所有依赖已安装'
+            });
+          }
+        }
+      }
       return;
     }
     
