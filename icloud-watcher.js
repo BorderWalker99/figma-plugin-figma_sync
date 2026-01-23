@@ -26,7 +26,7 @@ const CONFIG = {
   connectionId: 'sync-session-1',
   maxWidth: 1920,
   quality: 85,
-  supportedFormats: ['.png', '.jpg', '.jpeg', '.heic', '.webp', '.gif', '.mp4', '.mov'],
+  supportedFormats: ['.png', '.jpg', '.jpeg', '.heic', '.heif', '.webp', '.gif', '.mp4', '.mov'],
   // 子文件夹配置
   subfolders: {
     image: '图片',
@@ -144,6 +144,45 @@ function getNextSequenceNumber(folderPath, prefix, extensions) {
 }
 
 /**
+ * 等待 iCloud 文件完全下载
+ */
+async function waitForICloudDownload(filePath, maxWaitMs = 30000) {
+  const startTime = Date.now();
+  
+  // 先尝试触发下载
+  try {
+    await new Promise((resolve) => {
+      exec(`brctl download "${filePath}"`, { timeout: 5000 }, () => resolve());
+    });
+  } catch (e) {
+    // 忽略
+  }
+  
+  // 等待文件可读
+  while (Date.now() - startTime < maxWaitMs) {
+    try {
+      const stats = fs.statSync(filePath);
+      // 检查文件大小是否合理（占位符文件通常很小）
+      if (stats.size > 100) {
+        // 尝试读取文件头部来确认文件可读
+        const fd = fs.openSync(filePath, 'r');
+        const buffer = Buffer.alloc(16);
+        const bytesRead = fs.readSync(fd, buffer, 0, 16, 0);
+        fs.closeSync(fd);
+        if (bytesRead > 0) {
+          return true; // 文件已下载
+        }
+      }
+    } catch (e) {
+      // 文件可能还在下载中
+    }
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+  
+  return false; // 超时
+}
+
+/**
  * 将 HEIF/HEIC 文件转换为 JPEG
  */
 async function convertHeifToJpeg(filePath) {
@@ -155,6 +194,13 @@ async function convertHeifToJpeg(filePath) {
   }
   
   console.log(`   🔄 [iCloud] 检测到 HEIF 格式，正在转换为 JPEG...`);
+  
+  // 等待 iCloud 文件完全下载
+  console.log(`   ☁️  等待 iCloud 文件下载完成...`);
+  const downloaded = await waitForICloudDownload(filePath);
+  if (!downloaded) {
+    console.log(`   ⚠️  文件可能未完全下载，尝试继续转换...`);
+  }
   
   const tempOutputPath = path.join(os.tmpdir(), `heif-convert-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.jpg`);
   
@@ -176,15 +222,28 @@ async function convertHeifToJpeg(filePath) {
       });
     });
     
-    // 读取转换后的文件并压缩
-    const convertedBuffer = fs.readFileSync(tempOutputPath);
-    const compressedBuffer = await sharp(convertedBuffer)
-      .resize(CONFIG.maxWidth, null, {
-        withoutEnlargement: true,
-        fit: 'inside'
-      })
-      .jpeg({ quality: CONFIG.quality })
-      .toBuffer();
+    // 创建新的 JPEG 文件路径（在同一目录）
+    const newFilename = path.basename(filePath, ext) + '.jpg';
+    const newPath = path.join(path.dirname(filePath), newFilename);
+    
+    // 尝试使用 sharp 压缩，如果失败则直接使用 sips 转换结果
+    try {
+      const convertedBuffer = fs.readFileSync(tempOutputPath);
+      const compressedBuffer = await sharp(convertedBuffer)
+        .resize(CONFIG.maxWidth, null, {
+          withoutEnlargement: true,
+          fit: 'inside'
+        })
+        .jpeg({ quality: CONFIG.quality })
+        .toBuffer();
+      
+      // 写入压缩后的 JPEG
+      fs.writeFileSync(newPath, compressedBuffer);
+    } catch (sharpError) {
+      console.log(`   ⚠️ [iCloud] sharp 压缩失败，使用原始转换结果: ${sharpError.message}`);
+      // sharp 失败时，直接复制 sips 转换的结果
+      fs.copyFileSync(tempOutputPath, newPath);
+    }
     
     // 删除临时文件
     try {
@@ -192,13 +251,6 @@ async function convertHeifToJpeg(filePath) {
     } catch (e) {
       // 忽略
     }
-    
-    // 创建新的 JPEG 文件路径（在同一目录）
-    const newFilename = path.basename(filePath, ext) + '.jpg';
-    const newPath = path.join(path.dirname(filePath), newFilename);
-    
-    // 写入压缩后的 JPEG
-    fs.writeFileSync(newPath, compressedBuffer);
     
     // 删除原始 HEIF 文件
     try {
@@ -811,6 +863,47 @@ function startWatching() {
     } catch (e) {
       // 忽略
     }
+    
+    // ========================================
+    // ✅ 定期轮询检测新文件（补充 chokidar 可能遗漏的 iCloud 同步文件）
+    // ========================================
+    const pollInterval = setInterval(async () => {
+      try {
+        if (!fs.existsSync(CONFIG.icloudPath)) return;
+        
+        const files = fs.readdirSync(CONFIG.icloudPath).filter(file => {
+          const filePath = path.join(CONFIG.icloudPath, file);
+          try {
+            const stats = fs.statSync(filePath);
+            if (stats.isDirectory()) return false;
+            const ext = path.extname(file).toLowerCase();
+            return CONFIG.supportedFormats.includes(ext);
+          } catch (e) {
+            return false;
+          }
+        });
+        
+        if (files.length > 0) {
+          console.log(`\n🔄 [轮询检测] 发现 ${files.length} 个根目录待整理文件`);
+          for (const file of files) {
+            const filePath = path.join(CONFIG.icloudPath, file);
+            try {
+              const result = await moveFileToSubfolder(filePath);
+              if (result.moved) {
+                console.log(`   ✅ ${file} → ${result.subfolder}/${result.newFilename}`);
+              }
+            } catch (e) {
+              console.warn(`   ⚠️  整理失败: ${file} - ${e.message}`);
+            }
+          }
+        }
+      } catch (e) {
+        // 忽略轮询错误
+      }
+    }, 5000); // 每 5 秒检测一次
+    
+    // 保存定时器引用，以便停止时清理
+    watcher._pollInterval = pollInterval;
   });
   
   watcher.on('error', (error) => {
@@ -821,6 +914,12 @@ function startWatching() {
 function stopWatching() {
   if (watcher) {
     console.log('🛑 正在停止文件监听器...');
+    
+    // 清理轮询定时器
+    if (watcher._pollInterval) {
+      clearInterval(watcher._pollInterval);
+      watcher._pollInterval = null;
+    }
     
     try {
       watcher.close();
@@ -1137,6 +1236,13 @@ async function syncScreenshot(filePath, deleteAfterSync = false, subfolder = nul
       console.log(`   ✅ 使用原始 GIF 文件: ${fileSizeKB}KB`);
     } else if (isHeif && os.platform() === 'darwin') {
       console.log(`   🔄 检测到 HEIF 格式，使用 sips 转换为 JPEG...`);
+      
+      // 等待 iCloud 文件完全下载
+      console.log(`   ☁️  等待 iCloud 文件下载完成...`);
+      const downloaded = await waitForICloudDownload(filePath);
+      if (!downloaded) {
+        console.log(`   ⚠️  文件可能未完全下载，尝试继续转换...`);
+      }
       
       let tempOutputPath = path.join(os.tmpdir(), `jpeg-output-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.jpg`);
       

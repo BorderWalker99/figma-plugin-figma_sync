@@ -135,13 +135,14 @@ if [ ! -f "$DMG_FILE" ]; then
 fi
 
 echo "🔧 正在解除安全限制..."
-echo "💡 需要输入您的 Mac 登录密码（输入时不显示）"
 echo ""
 
-# 使用 sudo 删除 DMG 和项目文件夹的 quarantine 属性
-sudo xattr -d com.apple.quarantine "$DMG_FILE" 2>/dev/null
-sudo xattr -d com.apple.quarantine "$SCRIPT_DIR/项目文件" 2>/dev/null
-sudo xattr -dr com.apple.quarantine "$SCRIPT_DIR/项目文件" 2>/dev/null
+# 删除 quarantine 属性
+xattr -d com.apple.quarantine "$DMG_FILE" 2>/dev/null
+xattr -d com.apple.quarantine "$SCRIPT_DIR/项目文件" 2>/dev/null
+xattr -dr com.apple.quarantine "$SCRIPT_DIR/项目文件" 2>/dev/null
+xattr -cr "$DMG_FILE" 2>/dev/null
+xattr -cr "$SCRIPT_DIR/项目文件" 2>/dev/null
 echo "   ✅ 处理完成"
 
 echo ""
