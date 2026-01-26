@@ -1,5 +1,5 @@
 // server.js - WebSocket 服务器和 HTTP 上传接口
-//更新：拒绝上传到根目录
+//更新：拒绝上传到根目录 + 优化 GIF 导出速度
 
 // 全局错误处理（必须在最前面）
 process.on('uncaughtException', (error) => {
@@ -1129,13 +1129,13 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
     }
   }
   
-  for (let i = 0; i < gifPaths.length; i++) {
-    const item = gifPaths[i];
+  // 🚀 优化：并行处理所有视频转换任务
+  await Promise.all(gifPaths.map(async (item, i) => {
     const ext = path.extname(item.path).toLowerCase();
     
     if (ext === '.mp4' || ext === '.mov') {
       console.log(`\n   📹 检测到视频文件: ${path.basename(item.path)}`);
-      reportProgress(5 + (i / gifPaths.length) * 10, `正在转换视频 ${i + 1}/${gifPaths.length} 为高质量 GIF...`);
+      // reportProgress(5 + (i / gifPaths.length) * 10, `正在转换视频 ${i + 1}/${gifPaths.length} 为高质量 GIF...`);
       
       // 使用 FFmpeg 两步法将视频转为高质量 GIF
       const videoGifPath = path.join(tempDir, `video_${i}.gif`);
@@ -1168,9 +1168,10 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
         fs.copyFileSync(cachedGifPath, videoGifPath);
         
         // 更新 gifPaths 指向转换后的 GIF
-        gifPaths[i].path = videoGifPath;
+        item.path = videoGifPath;
+        // gifPaths[i].path = videoGifPath; // item 是引用，已修改
         console.log(`   ✅ 缓存GIF已复制，耗时: 0秒`);
-        continue; // 跳过转换，进入下一个文件
+        return; // 跳过转换
       }
       
       console.log(`   🔄 首次转换此视频（${videoW}x${videoH}），将缓存结果以加速后续导出...`);
@@ -1307,7 +1308,7 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
         
         // 更新路径为转换后的 GIF
         item.path = videoGifPath;
-        gifPaths[i].path = videoGifPath;
+        // gifPaths[i].path = videoGifPath;
         
         // 清理临时调色板文件
         try {
@@ -1343,7 +1344,7 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
         throw new Error(`视频转 GIF 失败: ${ffmpegError.message}${ffmpegError.stderr ? '\nSTDERR: ' + ffmpegError.stderr : ''}\n\n请确保已安装 FFmpeg: brew install ffmpeg`);
       }
     }
-  }
+  }));
   
   // 3. 保存 Bottom Layer（最底层 GIF 下面的图层）
   console.log(`\n🔍 检查 Bottom Layer 数据:`);
@@ -2047,16 +2048,14 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
       console.log(`   输出总帧数: ${totalOutputFrames}`);
       
       // 第二步：为每个 GIF 提取帧到单独的文件夹
-      console.log(`\n   第 2 步：提取所有 GIF 的帧...`);
+      console.log(`\n   第 2 步：提取所有 GIF 的帧 (并行处理)...`);
       reportProgress(10, '正在提取 GIF 原始帧...');
-      const gifFramesDirs = [];
+      // const gifFramesDirs = [];
       
-      for (let i = 0; i < gifPaths.length; i++) {
+      const gifFramesDirs = await Promise.all(gifPaths.map(async (gifInfo, i) => {
         checkCancelled(); // 检查是否被取消
         const progress = 10 + Math.round((i / gifPaths.length) * 20); // 10% -> 30%
         reportProgress(progress, `正在提取第 ${i + 1}/${gifPaths.length} 个 GIF 的帧...`);
-
-        const gifInfo = gifPaths[i];
         let offsetX = Math.round(gifInfo.bounds.x);
         let offsetY = Math.round(gifInfo.bounds.y);
         let gifW = Math.round(gifInfo.bounds.width);
@@ -2353,16 +2352,16 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
           throw e;
         }
         
-        gifFramesDirs.push({ 
+        console.log(`         ✅ 已提取 ${gifData.frameCount} 帧`);
+        return { 
           dir: framesDir, 
           frameCount: gifData.frameCount,
           delay: gifData.delay,
           totalDuration: gifData.totalDuration,
-          zIndex: gifPaths[i].zIndex || 0, // ✅ 保存 GIF 的 z-index
+          zIndex: gifInfo.zIndex || 0, // ✅ 保存 GIF 的 z-index
           type: 'gif' // ✅ 标记为 GIF 类型
-        });
-        console.log(`         ✅ 已提取 ${gifData.frameCount} 帧`);
-      }
+        };
+      }));
       
       // 第三步：构建完整的图层列表（按 z-index 排序）
       console.log(`\n   第 3 步：构建图层列表并按 z-index 排序...`);
@@ -2406,35 +2405,23 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
         }
       });
       
-      // 第四步：逐帧合成（按 z-index 顺序叠加所有层）
-      console.log(`\n   第 4 步：逐帧合成 ${totalOutputFrames} 帧（按正确的 z-order）...`);
+      // 第四步：逐帧合成（按 z-index 顺序叠加所有层）- 并行处理
+      console.log(`\n   第 4 步：逐帧合成 ${totalOutputFrames} 帧（并行处理）...`);
       reportProgress(30, '正在合成动态帧...');
       const compositeFramesDir = path.join(tempDir, 'composite_frames');
       if (!fs.existsSync(compositeFramesDir)) {
         fs.mkdirSync(compositeFramesDir, { recursive: true });
       }
       
-      // 调试：打印前几帧的采样信息
-      const debugFrameCount = 3;
+      // 并行处理帧合成，限制并发数
+      const PARALLEL_LIMIT = 16; // 同时处理的帧数（充分利用多核 CPU）
+      let completedFrames = 0;
       
-      for (let frameIdx = 0; frameIdx < totalOutputFrames; frameIdx++) {
-        checkCancelled(); // 检查是否被取消
+      const processFrame = async (frameIdx) => {
+        checkCancelled();
         
-        // 更新进度 (30% -> 60%)
-        if (frameIdx % 5 === 0) {
-           const progress = 30 + Math.round((frameIdx / totalOutputFrames) * 30);
-           reportProgress(progress, `正在合成帧 ${frameIdx + 1}/${totalOutputFrames}`);
-        }
-
         const outputFrame = path.join(compositeFramesDir, `frame_${String(frameIdx).padStart(4, '0')}.png`);
-        
-        // 计算当前时间点（秒）
         const currentTime = (frameIdx * outputDelay) / 100;
-        
-        if (frameIdx < debugFrameCount) {
-          console.log(`\n      [调试] 输出帧 ${frameIdx}，时间: ${currentTime.toFixed(3)}s`);
-          console.log(`         按 z-order 依次叠加 ${allLayers.length} 层...`);
-        }
         
         // 按 z-index 顺序依次叠加每一层
         let currentFrame = null;
@@ -2443,71 +2430,62 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
           const layer = allLayers[layerIdx];
           
           if (layer.type === 'gif') {
-            // GIF 图层：获取当前时间点对应的帧
             const gifInfo = layer.gifInfo;
             const gifTime = currentTime % gifInfo.totalDuration;
             const gifFrameIdx = Math.floor(gifTime / (gifInfo.delay / 100));
             const actualGifFrameIdx = Math.min(gifFrameIdx, gifInfo.frameCount - 1);
             const framePath = path.join(gifInfo.dir, `frame_${String(actualGifFrameIdx).padStart(4, '0')}.png`);
             
-            if (frameIdx < debugFrameCount) {
-              console.log(`         层 ${layerIdx + 1}: GIF ${layer.gifIndex + 1}, 帧 ${actualGifFrameIdx} [zIndex=${layer.zIndex}]`);
-            }
-            
             if (!currentFrame) {
-              // 第一层，直接使用
               currentFrame = framePath;
             } else {
-              // 叠加到当前帧上
               const tempOutput = path.join(compositeFramesDir, `temp_${frameIdx}_layer${layerIdx}.png`);
               const composeCmd = `composite -compose over "${framePath}" "${currentFrame}" "${tempOutput}"`;
               await execAsync(composeCmd, { maxBuffer: 100 * 1024 * 1024 });
-              
-              // 清理上一层的临时文件
               if (currentFrame.includes('temp_') && fs.existsSync(currentFrame)) {
                 fs.unlinkSync(currentFrame);
               }
-              
               currentFrame = tempOutput;
             }
           } else if (layer.type === 'static') {
-            // 静态图层
-            if (frameIdx < debugFrameCount) {
-              console.log(`         层 ${layerIdx + 1}: 静态图层 "${layer.name}" [zIndex=${layer.zIndex}]`);
-            }
-            
             if (!currentFrame) {
-              // 第一层，直接使用
               currentFrame = layer.path;
             } else {
-              // 叠加到当前帧上
               const tempOutput = path.join(compositeFramesDir, `temp_${frameIdx}_layer${layerIdx}.png`);
               const composeCmd = `composite -compose over "${layer.path}" "${currentFrame}" "${tempOutput}"`;
               await execAsync(composeCmd, { maxBuffer: 100 * 1024 * 1024 });
-              
-              // 清理上一层的临时文件
               if (currentFrame.includes('temp_') && fs.existsSync(currentFrame)) {
                 fs.unlinkSync(currentFrame);
               }
-              
               currentFrame = tempOutput;
             }
           }
         }
         
-        // 保存最终合成的帧
         if (currentFrame && currentFrame !== outputFrame) {
           fs.copyFileSync(currentFrame, outputFrame);
-          // 清理最后一个临时文件
           if (currentFrame.includes('temp_') && fs.existsSync(currentFrame)) {
             fs.unlinkSync(currentFrame);
           }
         }
         
-        if ((frameIdx + 1) % 10 === 0 || frameIdx === totalOutputFrames - 1) {
-          console.log(`      合成进度: ${frameIdx + 1}/${totalOutputFrames} (时间: ${currentTime.toFixed(2)}s)`);
+        completedFrames++;
+        if (completedFrames % 10 === 0 || completedFrames === totalOutputFrames) {
+          const progress = 30 + Math.round((completedFrames / totalOutputFrames) * 30);
+          reportProgress(progress, `正在合成帧 ${completedFrames}/${totalOutputFrames}`);
         }
+      };
+      
+      // 分批并行处理
+      for (let i = 0; i < totalOutputFrames; i += PARALLEL_LIMIT) {
+        const batch = [];
+        for (let j = i; j < Math.min(i + PARALLEL_LIMIT, totalOutputFrames); j++) {
+          batch.push(processFrame(j));
+        }
+        await Promise.all(batch);
       }
+      
+      console.log(`      合成进度: ${totalOutputFrames}/${totalOutputFrames}`)
       
       console.log(`   ✅ 所有帧已按正确的 z-order 合成`);
       
@@ -2538,20 +2516,16 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
         .filter(f => f.startsWith('frame_') && f.endsWith('.png'))
         .sort();
       
-      for (let i = 0; i < compositeFrames.length; i++) {
-        checkCancelled(); // 检查是否被取消
+      // 并行处理最终帧合成
+      let completedFinalFrames = 0;
+      
+      const processFinalFrame = async (i) => {
+        checkCancelled();
         
-        // 更新进度 (60% -> 80%)
-        if (i % 5 === 0) {
-           const progress = 60 + Math.round((i / compositeFrames.length) * 20);
-           reportProgress(progress, `正在合成帧 ${i + 1}/${compositeFrames.length}`);
-        }
-
         const frameFile = compositeFrames[i];
         const framePath = path.join(compositeFramesDir, frameFile);
         const outputFramePath = path.join(annotatedFramesDir, frameFile);
         
-        // 构建图层合成顺序：Background -> Bottom Layer -> Middle Layer -> GIF -> Top Layer (annotation)
         let currentLayer = null;
         
         // 步骤 1: 如果有背景，从背景开始
@@ -2561,54 +2535,54 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
         
         // 步骤 2: 如果有 Bottom Layer，叠加它
         if (bottomLayerPath) {
-          if (i === 0) console.log(`         叠加 Bottom Layer（最底层 GIF 下面的图层）...`);
           if (currentLayer) {
-            // 背景 + Bottom Layer
-            const tempWithBottom = path.join(tempDir, `temp_bottom_${frameFile}`);
+            const tempWithBottom = path.join(tempDir, `temp_bottom_${i}_${frameFile}`);
             const bottomCmd = `composite -compose over "${bottomLayerPath}" "${currentLayer}" "${tempWithBottom}"`;
             await execAsync(bottomCmd, { maxBuffer: 100 * 1024 * 1024 });
             currentLayer = tempWithBottom;
-            if (i === 0) console.log(`         ✅ 背景 + Bottom Layer 合成成功`);
           } else {
-            // 没有背景，Bottom Layer 就是第一层
             currentLayer = bottomLayerPath;
-            if (i === 0) console.log(`         ✅ Bottom Layer 作为第一层（无背景）`);
           }
-        } else {
-          if (i === 0) console.log(`         跳过 Bottom Layer（无 Bottom Layer 数据）`);
         }
         
-        // 步骤 3: 叠加已合成的 GIF+静态图层帧（第 4 步的输出）
-        if (i === 0) console.log(`         叠加已合成的 GIF+静态图层帧（按 z-order）...`);
+        // 步骤 3: 叠加已合成的 GIF+静态图层帧
         if (currentLayer) {
-          const tempWithAll = path.join(tempDir, `temp_all_${frameFile}`);
+          const tempWithAll = path.join(tempDir, `temp_all_${i}_${frameFile}`);
           const allCmd = `composite -compose over "${framePath}" "${currentLayer}" "${tempWithAll}"`;
           await execAsync(allCmd, { maxBuffer: 100 * 1024 * 1024 });
-          // 清理上一步的临时文件
           if (currentLayer !== backgroundPath && currentLayer !== bottomLayerPath && fs.existsSync(currentLayer)) {
             fs.unlinkSync(currentLayer);
           }
           currentLayer = tempWithAll;
-          if (i === 0) console.log(`         ✅ 已合成的帧已叠加`);
         } else {
-          // 没有底层，已合成的帧就是第一层
           currentLayer = framePath;
-          if (i === 0) console.log(`         ✅ 已合成的帧作为第一层（无底层）`);
         }
         
-        // 步骤 4: 叠加 Top Layer（最顶层 GIF 上面的图层）
+        // 步骤 4: 叠加 Top Layer
         const annotateCmd = `composite -compose over "${annotationPath}" "${currentLayer}" "${outputFramePath}"`;
         await execAsync(annotateCmd, { maxBuffer: 100 * 1024 * 1024 });
         
-        // 清理临时文件
         if (currentLayer !== framePath && currentLayer !== backgroundPath && currentLayer !== bottomLayerPath && fs.existsSync(currentLayer)) {
           fs.unlinkSync(currentLayer);
         }
         
-        if ((i + 1) % 10 === 0 || i === compositeFrames.length - 1) {
-          console.log(`      合成进度: ${i + 1}/${compositeFrames.length}`);
+        completedFinalFrames++;
+        if (completedFinalFrames % 10 === 0 || completedFinalFrames === compositeFrames.length) {
+          const progress = 60 + Math.round((completedFinalFrames / compositeFrames.length) * 20);
+          reportProgress(progress, `正在合成帧 ${completedFinalFrames}/${compositeFrames.length}`);
         }
+      };
+      
+      // 分批并行处理
+      for (let i = 0; i < compositeFrames.length; i += PARALLEL_LIMIT) {
+        const batch = [];
+        for (let j = i; j < Math.min(i + PARALLEL_LIMIT, compositeFrames.length); j++) {
+          batch.push(processFinalFrame(j));
+        }
+        await Promise.all(batch);
       }
+      
+      console.log(`      合成进度: ${compositeFrames.length}/${compositeFrames.length}`);
       
       console.log(`   ✅ 所有图层已按正确顺序合成到每一帧`);
       
@@ -2620,47 +2594,23 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
       console.log(`      输出时长: ${maxDuration.toFixed(2)}秒`);
       console.log(`      理论帧率: ${(100 / outputDelay).toFixed(1)} fps`);
       
-      // 改进颜色保持：使用高质量合成，不限制颜色数
-      console.log(`      正在合成 GIF（保持原始颜色质量）...`);
-      const recomposeCmd = `convert -delay ${outputDelay} -loop 0 "${annotatedFramesDir}/frame_*.png" "${outputPath}"`;
+      // 合并生成和优化为一条命令，启用多线程加速
+      console.log(`      正在生成并优化 GIF（多线程 + 帧优化）...`);
+      // -limit thread 0: 使用所有 CPU 核心
+      // -layers OptimizeFrame: 直接在生成时优化帧
+      const recomposeCmd = `convert -limit thread 0 -delay ${outputDelay} -loop 0 "${annotatedFramesDir}/frame_*.png" -layers OptimizeFrame "${outputPath}"`;
       
-      await execAsync(recomposeCmd, { maxBuffer: 200 * 1024 * 1024, timeout: 120000 });
+      await execAsync(recomposeCmd, { maxBuffer: 200 * 1024 * 1024, timeout: 180000 });
       
-      console.log(`   ✅ GIF 已生成`);
+      console.log(`   ✅ GIF 已生成并优化`);
       
-      // 获取优化前的文件大小
-      const statsBeforeOptimize = fs.statSync(outputPath);
-      const sizeBeforeMB = (statsBeforeOptimize.size / 1024 / 1024).toFixed(2);
-      console.log(`      优化前文件大小: ${sizeBeforeMB} MB`);
-      
-      // 第六步：可选的轻量级优化（不影响颜色质量）
-      console.log(`\n   第 7 步：优化 GIF（保持颜色质量）...`);
-      reportProgress(90, '正在优化 GIF...');
-      const tempOptimized = path.join(tempDir, 'optimized.gif');
-      // 只使用 -layers OptimizeFrame 进行帧优化（不压缩颜色）
-      const optimizeCmd = `convert "${outputPath}" -layers OptimizeFrame "${tempOptimized}"`;
-      
-      try {
-        await execAsync(optimizeCmd, { maxBuffer: 200 * 1024 * 1024, timeout: 120000 });
-        
-        // 比较优化前后的文件大小
-        const statsAfterOptimize = fs.statSync(tempOptimized);
-        const sizeAfterMB = (statsAfterOptimize.size / 1024 / 1024).toFixed(2);
-        const reductionPercent = ((1 - statsAfterOptimize.size / statsBeforeOptimize.size) * 100).toFixed(1);
-        
-        console.log(`      优化后文件大小: ${sizeAfterMB} MB`);
-        console.log(`      大小减少: ${reductionPercent}% (节省 ${(sizeBeforeMB - sizeAfterMB).toFixed(2)} MB)`);
-        
-        // 用优化后的替换原文件
-        fs.copyFileSync(tempOptimized, outputPath);
-        fs.unlinkSync(tempOptimized);
-        console.log(`   ✅ GIF 已优化（保持原始颜色）`);
-      } catch (e) {
-        console.log(`   ⚠️  优化失败（使用未优化版本）: ${e.message}`);
-      }
+      // 获取最终文件大小
+      const finalStats = fs.statSync(outputPath);
+      const finalSizeMB = (finalStats.size / 1024 / 1024).toFixed(2);
+      console.log(`      文件大小: ${finalSizeMB} MB`);
       
       // 清理所有临时文件
-      reportProgress(98, '正在清理临时文件...');
+      reportProgress(95, '正在清理临时文件...');
       console.log(`\n   清理临时文件...`);
       
       // 清理原始 GIF 帧

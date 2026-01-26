@@ -473,11 +473,16 @@ function connectWebSocket() {
         console.log(`   iCloud 路径: ${CONFIG.icloudPath}`);
         console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
         isRealTimeMode = true;
-        startWatching();
+        // 注意：watcher 现在在启动时就已初始化，这里不需要重新启动
+        // 但如果 watcher 意外关闭了，可以在这里重启
+        if (!watcher) {
+          startWatching();
+        }
       } else if (message.type === 'stop-realtime') {
-        console.log('\n⏸️  停止实时同步模式\n');
+        console.log('\n⏸️  停止实时同步模式（文件分类整理仍在后台运行）\n');
         isRealTimeMode = false;
-        stopWatching();
+        // 注意：不再停止 watcher，保持文件整理功能
+        // stopWatching(); 
       } else if (message.type === 'manual-sync-count-files') {
         console.log('\n📊 统计文件数量...\n');
         countFilesForManualSync();
@@ -845,10 +850,11 @@ function startWatching() {
   watcher.on('ready', () => {
     const readyTime = new Date();
     console.log(`\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-    console.log(`✅ [iCloud] 实时监听已就绪`);
+    console.log(`✅ [iCloud] 文件整理服务已就绪`);
     console.log(`   时间: ${readyTime.toISOString()}`);
     console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-    console.log(`ℹ️  从现在开始，新添加的文件将自动同步到 Figma\n`);
+    console.log(`ℹ️  自动整理：新文件将自动分类、重命名并转换 HEIF`);
+    console.log(`ℹ️  实时同步：需连接 Figma 插件\n`);
     
     // 配置 iCloud 文件夹为"始终保留下载"
     try {
@@ -1407,7 +1413,10 @@ function start() {
   
   console.log('📍 同步文件夹:', CONFIG.icloudPath);
   console.log('📂 子文件夹:', Object.values(CONFIG.subfolders).join(', '));
-  console.log('⏳ 等待Figma插件选择同步模式...\n');
+  console.log('⏳ 等待Figma插件连接...\n');
+  
+  // ✅ 无论是否连接插件，都立即启动文件监听器（用于自动整理）
+  startWatching();
   
   process.on('SIGINT', () => {
     console.log('\n\n👋 停止服务...');
