@@ -85,6 +85,7 @@ create_package() {
     cp start.js "$TEMP_DIR/项目文件/"
     cp update-manager.js "$TEMP_DIR/项目文件/"
     cp drive-watcher.js "$TEMP_DIR/项目文件/"
+    cp icloud-watcher.js "$TEMP_DIR/项目文件/" 2>/dev/null || true
     cp com.screensync.server.plist "$TEMP_DIR/项目文件/" 2>/dev/null || true
     
   # 2. 复制配置文件
@@ -170,6 +171,12 @@ SCRIPT_EOF
     
     if [ -f "figma-plugin/qr-codes.js" ]; then
         cp figma-plugin/qr-codes.js "$TEMP_DIR/项目文件/figma-plugin/"
+    fi
+    
+    # 6. 复制 images 文件夹（logo 和 QR 码）
+    if [ -d "images" ]; then
+        echo -e "${YELLOW}🖼️  复制图片资源...${NC}"
+        cp -r images "$TEMP_DIR/项目文件/"
     fi
     
     # 6. 创建 .gitignore
@@ -296,12 +303,23 @@ ScreenSync - iPhone截图自动同步到Figma
 
 EOF
 
-    # 9. 创建版本信息
-    cat > "$TEMP_DIR/项目文件/VERSION.txt" << EOF
-ScreenSync 用户分发包 (${ARCH_TYPE} 版本)
-版本: ${VERSION}
-打包日期: $(date +"%Y-%m-%d %H:%M:%S")
+    # 9. 复制版本信息（使用源目录的 VERSION.txt 保持版本一致）
+    if [ -f "VERSION.txt" ]; then
+        cp VERSION.txt "$TEMP_DIR/项目文件/"
+        echo "   ✅ 已复制 VERSION.txt"
+    else
+        # 如果没有 VERSION.txt，创建一个
+        cat > "$TEMP_DIR/项目文件/VERSION.txt" << EOF
+ScreenSync 服务器版本
+版本: ${NEW_VERSION:-1.0.0}
+更新日期: $(date +"%Y-%m-%d")
+
+更新说明:
+- 支持 Google Cloud、iCloud 两种储存方式
+- 支持插件和服务器自动更新
 EOF
+        echo "   ✅ 已创建 VERSION.txt"
+    fi
 
     # 10. 打包
     echo -e "${GREEN}📦 创建压缩包...${NC}"

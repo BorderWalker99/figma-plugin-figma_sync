@@ -6010,29 +6010,40 @@ async function handleFullUpdate(targetGroup, connectionId) {
     }));
     
     // 查找解压后的内容目录
-    // 策略：递归查找 server.js 所在的目录
-    const findServerJs = (dir) => {
-      const items = fs.readdirSync(dir);
-      // 忽略隐藏文件
-      const visibleItems = items.filter(item => !item.startsWith('.'));
+    // 策略：递归查找 server.js 所在的目录（支持深层目录结构如 项目文件/）
+    const findServerJs = (dir, depth = 0, maxDepth = 3) => {
+      if (depth > maxDepth) return null;
       
-      if (visibleItems.includes('server.js') && visibleItems.includes('package.json')) {
-        return dir;
-      }
-      
-      for (const item of visibleItems) {
-        const itemPath = path.join(dir, item);
-        if (fs.statSync(itemPath).isDirectory()) {
-          // 只查找一层子目录，避免过深
-          const subItems = fs.readdirSync(itemPath);
-          if (subItems.includes('server.js')) {
-            return itemPath;
+      try {
+        const items = fs.readdirSync(dir);
+        // 忽略隐藏文件
+        const visibleItems = items.filter(item => !item.startsWith('.'));
+        
+        // 检查当前目录是否包含 server.js 和 package.json
+        if (visibleItems.includes('server.js') && visibleItems.includes('package.json')) {
+          console.log(`   ✅ 在深度 ${depth} 找到项目文件: ${dir}`);
+          return dir;
+        }
+        
+        // 递归搜索子目录
+        for (const item of visibleItems) {
+          const itemPath = path.join(dir, item);
+          try {
+            if (fs.statSync(itemPath).isDirectory()) {
+              const result = findServerJs(itemPath, depth + 1, maxDepth);
+              if (result) return result;
+            }
+          } catch (e) {
+            // 忽略无法访问的目录
           }
         }
+      } catch (e) {
+        // 忽略无法读取的目录
       }
       return null;
     };
     
+    console.log(`   🔍 开始搜索项目文件目录...`);
     let extractedDir = findServerJs(updateDir);
     
     if (!extractedDir) {
@@ -6043,6 +6054,11 @@ async function handleFullUpdate(targetGroup, connectionId) {
         
         if (extractedItems.length === 1 && fs.statSync(path.join(updateDir, extractedItems[0])).isDirectory()) {
           extractedDir = path.join(updateDir, extractedItems[0]);
+          // 再次尝试在这个目录中查找
+          const nestedDir = findServerJs(extractedDir);
+          if (nestedDir) {
+            extractedDir = nestedDir;
+          }
         } else {
           extractedDir = updateDir;
         }
