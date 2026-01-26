@@ -1,5 +1,5 @@
 // server.js - WebSocket 服务器和 HTTP 上传接口
-//更新：优化 GIF 导出速度
+//更新：完善了一键更新功能 + 优化 GIF 导出速度
 
 // 全局错误处理（必须在最前面）
 process.on('uncaughtException', (error) => {
@@ -5270,9 +5270,28 @@ async function checkAndNotifyUpdates(targetGroup, connectionId) {
     const pluginAsset = releaseInfo.assets.find(asset => 
       asset.name.includes('figma-plugin') && asset.name.endsWith('.zip')
     );
-    const serverAsset = releaseInfo.assets.find(asset => 
-      asset.name.includes('ScreenSync-UserPackage') && asset.name.endsWith('.tar.gz')
-    );
+    
+    // 检测当前系统架构，查找对应的服务器更新包
+    const arch = process.arch; // 'arm64' for Apple Silicon, 'x64' for Intel
+    const isAppleSilicon = arch === 'arm64';
+    let serverAsset = null;
+    
+    if (isAppleSilicon) {
+      serverAsset = releaseInfo.assets.find(asset => 
+        asset.name.includes('ScreenSync-Apple') && asset.name.endsWith('.tar.gz')
+      );
+    } else {
+      serverAsset = releaseInfo.assets.find(asset => 
+        asset.name.includes('ScreenSync-Intel') && asset.name.endsWith('.tar.gz')
+      );
+    }
+    
+    // 回退到通用包（兼容旧版本）
+    if (!serverAsset) {
+      serverAsset = releaseInfo.assets.find(asset => 
+        asset.name.includes('ScreenSync-UserPackage') && asset.name.endsWith('.tar.gz')
+      );
+    }
     
     // 检查插件更新
     if (pluginAsset) {
@@ -5672,13 +5691,31 @@ async function handleServerUpdate(targetGroup, connectionId) {
     
     console.log(`   ✅ 获取到最新版本: ${releaseInfo.tag_name}`);
     
-    // 查找服务器包文件
-    const serverAsset = releaseInfo.assets.find(asset => 
-      asset.name.includes('ScreenSync-UserPackage') && asset.name.endsWith('.tar.gz')
-    );
+    // 检测当前系统架构，查找对应的服务器更新包
+    const arch = process.arch;
+    const isAppleSilicon = arch === 'arm64';
+    console.log(`   🖥️  系统架构: ${arch} (${isAppleSilicon ? 'Apple Silicon' : 'Intel'})`);
+    
+    let serverAsset = null;
+    if (isAppleSilicon) {
+      serverAsset = releaseInfo.assets.find(asset => 
+        asset.name.includes('ScreenSync-Apple') && asset.name.endsWith('.tar.gz')
+      );
+    } else {
+      serverAsset = releaseInfo.assets.find(asset => 
+        asset.name.includes('ScreenSync-Intel') && asset.name.endsWith('.tar.gz')
+      );
+    }
+    
+    // 回退到通用包
+    if (!serverAsset) {
+      serverAsset = releaseInfo.assets.find(asset => 
+        asset.name.includes('ScreenSync-UserPackage') && asset.name.endsWith('.tar.gz')
+      );
+    }
     
     if (!serverAsset) {
-      throw new Error('未找到服务器包文件，请确保 Release 中包含 ScreenSync-UserPackage.tar.gz');
+      throw new Error(`未找到适合 ${isAppleSilicon ? 'Apple Silicon' : 'Intel'} 的服务器包，请确保 Release 中包含 ScreenSync-Apple.tar.gz 或 ScreenSync-Intel.tar.gz`);
     }
     
     console.log(`   📦 找到服务器包: ${serverAsset.name} (${(serverAsset.size / 1024 / 1024).toFixed(2)} MB)`);
@@ -5744,7 +5781,45 @@ async function handleServerUpdate(targetGroup, connectionId) {
     ];
     
     // 备份并更新文件
-    const extractedDir = path.join(updateDir, 'ScreenSync-UserPackage');
+    // 动态查找解压后的目录（支持 ScreenSync-Apple、ScreenSync-Intel 或 ScreenSync-UserPackage）
+    let extractedDir = null;
+    const possibleDirs = ['ScreenSync-Apple', 'ScreenSync-Intel', 'ScreenSync-UserPackage'];
+    for (const dirName of possibleDirs) {
+      const testDir = path.join(updateDir, dirName);
+      if (fs.existsSync(testDir)) {
+        extractedDir = testDir;
+        console.log(`   📂 找到解压目录: ${dirName}`);
+        break;
+      }
+    }
+    
+    // 如果没有找到预期的目录，尝试查找包含 server.js 的目录
+    if (!extractedDir) {
+      const updateDirContents = fs.readdirSync(updateDir);
+      for (const item of updateDirContents) {
+        const itemPath = path.join(updateDir, item);
+        if (fs.statSync(itemPath).isDirectory()) {
+          // 检查是否包含 server.js
+          if (fs.existsSync(path.join(itemPath, 'server.js'))) {
+            extractedDir = itemPath;
+            console.log(`   📂 找到项目目录: ${item}`);
+            break;
+          }
+          // 检查子目录 项目文件/
+          const projectFilesDir = path.join(itemPath, '项目文件');
+          if (fs.existsSync(projectFilesDir) && fs.existsSync(path.join(projectFilesDir, 'server.js'))) {
+            extractedDir = projectFilesDir;
+            console.log(`   📂 找到项目文件目录: ${item}/项目文件`);
+            break;
+          }
+        }
+      }
+    }
+    
+    if (!extractedDir) {
+      throw new Error('无法找到解压后的项目目录');
+    }
+    
     for (const file of serverFiles) {
       const srcPath = path.join(extractedDir, file);
       const destPath = path.join(__dirname, file);
