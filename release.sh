@@ -157,12 +157,6 @@ if ./package-for-distribution.sh > /dev/null 2>&1; then
         echo -e "   ${RED}❌ Apple 版本打包失败：未找到 ${APPLE_TAR}${NC}"
         exit 1
     fi
-    
-    # 创建兼容包（用于旧版本 server.js 更新，复制 Apple 版本）
-    COMPAT_TAR="ScreenSync-UserPackage.tar.gz"
-    cp "$APPLE_TAR" "$COMPAT_TAR"
-    COMPAT_SIZE=$(du -h "$COMPAT_TAR" | cut -f1)
-    echo -e "   ${GREEN}✅ 兼容包创建完成: ${COMPAT_TAR} (${COMPAT_SIZE}) [用于旧版本更新]${NC}"
 else
     echo -e "   ${RED}❌ 服务器打包失败${NC}"
     exit 1
@@ -259,7 +253,6 @@ ${RELEASE_NOTES}
 #### 📥 选择下载：
 *   ✅ **ScreenSync-Apple.tar.gz**: Apple 芯片 Mac (M1/M2/M3/M4) 用户下载
 *   ✅ **ScreenSync-Intel.tar.gz**: Intel 芯片 Mac 用户下载
-*   ⚠️ **ScreenSync-UserPackage.tar.gz**: 无需下载，供旧版本自动更新使用
 *   ⚠️ **figma-plugin-v${NEW_VERSION}.zip**: 无需下载，供软件自动更新使用
 *   ⚠️ **Source code**: 无需下载，项目源码
 
@@ -274,12 +267,11 @@ ${RELEASE_NOTES}
 
 echo -e "   ${YELLOW}正在上传到 GitHub Releases...${NC}"
 
-    # 显示上传进度（包含兼容包供旧版本更新使用）
+    # 显示上传进度
 if gh release create "v${NEW_VERSION}" \
     "$PLUGIN_ZIP" \
     "$INTEL_TAR" \
     "$APPLE_TAR" \
-    "$COMPAT_TAR" \
     --title "$RELEASE_TITLE" \
         --notes "$RELEASE_BODY"; then
     echo -e "   ${GREEN}✅ Release v${NEW_VERSION} 发布成功${NC}"
@@ -300,7 +292,6 @@ echo -e "   版本号: ${GREEN}v${NEW_VERSION}${NC}"
 echo -e "   插件包: ${PLUGIN_ZIP} (${PLUGIN_SIZE})"
 echo -e "   Intel 包: ${INTEL_TAR} (${INTEL_SIZE})"
 echo -e "   Apple 包: ${APPLE_TAR} (${APPLE_SIZE})"
-echo -e "   兼容包: ${COMPAT_TAR} (${COMPAT_SIZE}) [用于旧版本更新]"
 echo ""
 
 echo -e "${BLUE}🔗 查看 Release：${NC}"
@@ -321,7 +312,7 @@ read -p "是否清理本地打包文件？(y/N): " CLEANUP
 CLEANUP=${CLEANUP:-N}
 
 if [[ "$CLEANUP" =~ ^[Yy]$ ]]; then
-    rm -f "$PLUGIN_ZIP" "$INTEL_TAR" "$APPLE_TAR" "$COMPAT_TAR"
+    rm -f "$PLUGIN_ZIP" "$INTEL_TAR" "$APPLE_TAR"
     echo -e "${GREEN}✅ 本地打包文件已清理${NC}\n"
 else
     echo -e "${YELLOW}⚠️  本地打包文件已保留${NC}\n"

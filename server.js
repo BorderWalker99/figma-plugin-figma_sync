@@ -1,5 +1,5 @@
 // server.js - WebSocket 服务器和 HTTP 上传接口
-//更新：拒绝上传到根目录 + 优化 GIF 导出速度
+//更新：优化 GIF 导出速度
 
 // 全局错误处理（必须在最前面）
 process.on('uncaughtException', (error) => {
