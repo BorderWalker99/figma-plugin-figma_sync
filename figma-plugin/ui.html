@@ -338,7 +338,7 @@
       color: var(--text-primary);
       font-size: 13px;
       line-height: 1.4;
-      overflow: hidden; /* Fixed height app */
+      overflow: visible; /* Fixed height app */
       user-select: none;
     }
 
@@ -375,7 +375,6 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 0 4px;
       flex-shrink: 0;
       height: 32px; /* Fixed header height */
     }
@@ -1210,6 +1209,7 @@
       justify-content: flex-end;
       padding: 24px 24px 0 0; /* Padding prevents shadow clipping */
       box-sizing: border-box;
+      overflow: visible; /* Allow close button to extend outside */
     }
     
     /* Status Pill - Convex Neumorphic Style */
@@ -3189,6 +3189,7 @@
         right: 0;
         z-index: 10;
         pointer-events: none;
+        overflow: visible; /* Allow close button to extend outside */
     }
     
     .realtime-header > * {
@@ -4392,12 +4393,23 @@
           console.log('   输出路径:', data.outputPath);
           console.log('   是否跳过:', data.skipped ? '是（文件已存在）' : '否（新导出）');
           console.log('   完成数量:', completedExports + 1, '/', totalExports);
+          
+          // ⏱️ 显示导出耗时
+          if (data.exportDurationSeconds) {
+            console.log(`   ⏱️  导出耗时: ${data.exportDurationSeconds} 秒 (${data.exportDuration} ms)`);
+          }
+          
           handleExportSuccess();
           
           // 只有在真正导出新文件时才增加计数（跳过的不计数）
           if (!data.skipped) {
             exportedGifCount++;
             console.log('   📊 导出计数增加:', exportedGifCount);
+            
+            // ⏱️ 在最后一个导出完成时显示耗时 toast
+            if (completedExports >= totalExports && data.exportDurationSeconds) {
+              showToast(`导出完成，耗时 ${data.exportDurationSeconds} 秒`, 'success');
+            }
           } else {
             console.log('   ⏭️  文件已存在，计数不变:', exportedGifCount);
           }
@@ -4718,12 +4730,10 @@
         
         // 6. Clean up after transition (match CSS transition duration: 0.3s = 300ms + buffer)
         setTimeout(() => {
-            // Only clean up if width hasn't changed again
-            if (Math.abs(element.offsetWidth - newWidth) < 2) {
-                element.style.width = '';
-                element.style.whiteSpace = '';
-                element.style.overflow = ''; // Restore to CSS value (visible)
-            }
+            // Force reset to ensure close button is visible
+            element.style.width = '';
+            element.style.whiteSpace = '';
+            element.style.overflow = 'visible'; // Explicitly set to visible to ensure close button shows
         }, 350);
     }
 

@@ -2026,56 +2026,88 @@ figma.on('documentchange', (event) => {
   
   if (nodeChanges.length === 0) return;
   
-  // 检查新创建的节点
+  // 收集需要处理的节点ID（延迟处理，避免干扰 Figma 的视频加载）
+  const nodeIdsToProcess = [];
+  
   for (const change of nodeChanges) {
     const node = change.node;
     
     // 只处理矩形节点（Video/GIF通常是矩形）
     if (node.type !== 'RECTANGLE') continue;
     
-    // 检查是否有VIDEO或IMAGE填充
-    if (!node.fills || node.fills.length === 0) continue;
-    
-    const fill = node.fills[0];
-    
-    // 只处理VIDEO和IMAGE填充（GIF也是IMAGE类型）
-    if (fill.type !== 'VIDEO' && fill.type !== 'IMAGE') continue;
-    
-    // 检查节点名称，判断是否可能是Video/GIF
+    // 先只根据节点名称判断是否可能是 Video/GIF
+    // ⚠️ 不要立即访问 fills，避免干扰 Figma 的视频处理
     const nodeName = node.name || '';
     const nameLower = nodeName.toLowerCase();
-    const isLikelyVideo = fill.type === 'VIDEO' || 
-                          nameLower.endsWith('.mov') || 
-                          nameLower.endsWith('.mp4') ||
-                          nameLower.includes('video') ||
-                          nameLower.includes('recording');
-    const isLikelyGif = fill.type === 'IMAGE' && (
-                        nameLower.endsWith('.gif') ||
-                        nameLower.includes('gif') ||
-                        nameLower.includes('recording'));
+    const mightBeVideo = nameLower.endsWith('.mov') || 
+                         nameLower.endsWith('.mp4') ||
+                         nameLower.includes('video') ||
+                         nameLower.includes('recording') ||
+                         nameLower.includes('screenrecording');
+    const mightBeGif = nameLower.endsWith('.gif') ||
+                       nameLower.includes('gif');
     
-    if (!isLikelyVideo && !isLikelyGif) continue;
-    
-    console.log(`\n🔍 [自动关联] 检测到新增的Video/GIF图层: ${nodeName}`);
-    
-    // 检查是否已有关联数据
-    const hasExistingData = node.getPluginData('driveFileId') || 
-                            node.getPluginData('ossFileId') ||
-                            node.getPluginData('gifCacheId');
-    
-    if (hasExistingData) {
-      console.log(`   ✅ 已有关联数据，跳过自动关联`);
-      continue;
+    if (mightBeVideo || mightBeGif) {
+      nodeIdsToProcess.push(node.id);
     }
-    
-    // 请求UI返回缓存的元数据
-    console.log(`   📤 请求UI返回缓存数据...`);
-    figma.ui.postMessage({
-      type: 'request-skipped-file-cache-for-node',
-      filename: nodeName,
-      nodeId: node.id
-    });
   }
+  
+  if (nodeIdsToProcess.length === 0) return;
+  
+  // ⏰ 延迟 500ms 再处理，让 Figma 完成视频/GIF 的内部加载
+  setTimeout(() => {
+    for (const nodeId of nodeIdsToProcess) {
+      try {
+        const node = figma.getNodeById(nodeId);
+        if (!node || node.type !== 'RECTANGLE') continue;
+        
+        // 现在安全地访问 fills
+        if (!node.fills || node.fills.length === 0) continue;
+        
+        const fill = node.fills[0];
+        
+        // 只处理VIDEO和IMAGE填充（GIF也是IMAGE类型）
+        if (fill.type !== 'VIDEO' && fill.type !== 'IMAGE') continue;
+        
+        const nodeName = node.name || '';
+        const nameLower = nodeName.toLowerCase();
+        const isLikelyVideo = fill.type === 'VIDEO' || 
+                              nameLower.endsWith('.mov') || 
+                              nameLower.endsWith('.mp4') ||
+                              nameLower.includes('video') ||
+                              nameLower.includes('recording');
+        const isLikelyGif = fill.type === 'IMAGE' && (
+                            nameLower.endsWith('.gif') ||
+                            nameLower.includes('gif') ||
+                            nameLower.includes('recording'));
+        
+        if (!isLikelyVideo && !isLikelyGif) continue;
+        
+        console.log(`\n🔍 [自动关联] 检测到新增的Video/GIF图层: ${nodeName}`);
+        
+        // 检查是否已有关联数据
+        const hasExistingData = node.getPluginData('driveFileId') || 
+                                node.getPluginData('ossFileId') ||
+                                node.getPluginData('gifCacheId');
+        
+        if (hasExistingData) {
+          console.log(`   ✅ 已有关联数据，跳过自动关联`);
+          continue;
+        }
+        
+        // 请求UI返回缓存的元数据
+        console.log(`   📤 请求UI返回缓存数据...`);
+        figma.ui.postMessage({
+          type: 'request-skipped-file-cache-for-node',
+          filename: nodeName,
+          nodeId: node.id
+        });
+      } catch (e) {
+        // 节点可能已被删除或无法访问，忽略错误
+        console.log(`   ⚠️ 节点处理出错，可能已被删除: ${e.message}`);
+      }
+    }
+  }, 500);
 });
 
 console.log('✅ 插件初始化完成');
