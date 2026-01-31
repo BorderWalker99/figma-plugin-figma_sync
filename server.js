@@ -1233,12 +1233,13 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
       
       console.log(`   🎬 使用 FFmpeg 快速转换...`);
       
-      // 🚀 优化版本：使用 bayer 抖动算法，速度提升 4-5 倍
-      // bayer_scale=5 平衡质量和速度，比 sierra2_4a 快 4 倍以上
-      // stats_mode=full 保证调色板质量
+      // 🚀 优化版本：
+      // -hwaccel videotoolbox: Mac 硬件加速解码，大幅减少 CPU 负载
+      // scale: 先缩放到目标尺寸再生成调色板，减少处理像素量
+      // flags=lanczos: 高质量缩放算法
       // 🎨 使用 floyd_steinberg 抖动算法，色彩过渡更自然
-// 🚀 -threads 0 使用所有 CPU 核心加速
-const ffmpegCmd = `ffmpeg -threads 0 -i "${item.path}" -vf "fps=${gifFps},split[s0][s1];[s0]palettegen=max_colors=256:stats_mode=diff[p];[s1][p]paletteuse=dither=floyd_steinberg" -threads 0 "${videoGifPath}" -y`;
+      // 🚀 -threads 0 使用所有 CPU 核心加速
+const ffmpegCmd = `ffmpeg -hwaccel videotoolbox -threads 0 -i "${item.path}" -vf "fps=${gifFps},scale=${videoW}:${videoH}:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=256:stats_mode=diff[p];[s1][p]paletteuse=dither=floyd_steinberg" -threads 0 "${videoGifPath}" -y`;
       
       console.log(`   📝 FFmpeg 命令: ${ffmpegCmd}`);
       

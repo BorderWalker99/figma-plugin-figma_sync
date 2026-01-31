@@ -238,7 +238,8 @@ let dependencyStatus = {
   homebrew: null,
   node: null,
   imagemagick: null,
-  ffmpeg: null
+  ffmpeg: null,
+  gifsicle: null
 };
 
 // Step 2: 统一的系统检查（自动开始）
@@ -305,7 +306,8 @@ Homebrew 对此版本仅提供有限支持。
       homebrew: null,
       node: null,
       imagemagick: null,
-      ffmpeg: null
+      ffmpeg: null,
+      gifsicle: null
     };
     
     // 检查 Homebrew
@@ -408,8 +410,33 @@ Homebrew 对此版本仅提供有限支持。
       `;
     }
     
+    // 检查 Gifsicle
+    const gifsicleCheck = checks.children[4];
+    const gifsicleResult = await ipcRenderer.invoke('check-gifsicle');
+    dependencyStatus.gifsicle = gifsicleResult.installed;
+    
+    if (gifsicleResult.installed) {
+      gifsicleCheck.className = 'status-item success';
+      gifsicleCheck.innerHTML = `
+        <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
+        <div class="status-content">
+          <div class="status-label">Gifsicle</div>
+          <div class="status-detail" style="color: var(--success);">已安装</div>
+        </div>
+      `;
+    } else {
+      gifsicleCheck.className = 'status-item error';
+      gifsicleCheck.innerHTML = `
+        <div class="status-icon"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
+        <div class="status-content">
+          <div class="status-label">Gifsicle</div>
+          <div class="status-detail" style="color: var(--danger);">未安装</div>
+        </div>
+      `;
+    }
+    
     // 判断是否所有依赖都已安装
-    const allInstalled = dependencyStatus.homebrew && dependencyStatus.node && dependencyStatus.imagemagick && dependencyStatus.ffmpeg;
+    const allInstalled = dependencyStatus.homebrew && dependencyStatus.node && dependencyStatus.imagemagick && dependencyStatus.ffmpeg && dependencyStatus.gifsicle;
     
     actionBtn.disabled = false;
     

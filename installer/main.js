@@ -445,6 +445,27 @@ ipcMain.handle('check-ffmpeg', async () => {
   });
 });
 
+ipcMain.handle('check-gifsicle', async () => {
+  return new Promise((resolve) => {
+    const gifsiclePath = findExecutable('gifsicle');
+    
+    if (gifsiclePath) {
+      exec('gifsicle --version', (error, output) => {
+        if (!error && output.includes('Gifsicle')) {
+          // 提取版本号
+          const versionMatch = output.match(/Gifsicle ([\d.]+)/);
+          const version = versionMatch ? versionMatch[1] : 'unknown';
+          resolve({ installed: true, version: version });
+        } else {
+          resolve({ installed: false });
+        }
+      });
+    } else {
+      resolve({ installed: false });
+    }
+  });
+});
+
 ipcMain.handle('check-icloud-space', async () => {
   const icloudPath = path.join(
     os.homedir(),
@@ -700,6 +721,9 @@ ipcMain.handle('install-all-dependencies', async (event, dependencyStatus) => {
     if (!dependencyStatus.ffmpeg) {
       brewPackages.push('ffmpeg');
     }
+    if (!dependencyStatus.gifsicle) {
+      brewPackages.push('gifsicle');
+    }
     
     // 检查是否需要安装任何东西
     const needsHomebrew = !dependencyStatus.homebrew;
@@ -737,6 +761,7 @@ ipcMain.handle('install-all-dependencies', async (event, dependencyStatus) => {
           const pkgs = [];
           if (!dependencyStatus.imagemagick) pkgs.push('imagemagick');
           if (!dependencyStatus.ffmpeg) pkgs.push('ffmpeg');
+          if (!dependencyStatus.gifsicle) pkgs.push('gifsicle');
           
           if (pkgs.length > 0) {
             const installScript = `brew install ${pkgs.join(' ')} && echo '✅ 安装完成，请点击重新检测'`;

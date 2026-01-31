@@ -3835,65 +3835,72 @@
 
     // ========== 日志函数 ==========
     function log(msg) {
-      // 只在开发模式下输出到控制台，减少 Datadog 数据量
-      if (ENABLE_CONSOLE_LOG) {
-      console.log(msg);
-      }
-      const logEl = document.getElementById('log');
-      const time = new Date().toLocaleTimeString();
-      logEl.innerHTML = `[${time}] ${msg}\n` + logEl.innerHTML;
+      // 🛡️ 防止初始化未完成时崩溃
+      try {
+        // 只在开发模式下输出到控制台，减少 Datadog 数据量
+        if (ENABLE_CONSOLE_LOG) {
+          console.log(msg);
+        }
+        const logEl = document.getElementById('log');
+        if (!logEl) return;
+        
+        const time = new Date().toLocaleTimeString();
+        logEl.innerHTML = `[${time}] ${msg}\n` + logEl.innerHTML;
 
-      const lines = logEl.innerText.split('\n');
-      if (lines.length > 200) {
-        logEl.innerText = lines.slice(0, 200).join('\n');
+        const lines = logEl.innerText.split('\n');
+        if (lines.length > 200) {
+          logEl.innerText = lines.slice(0, 200).join('\n');
+        }
+      } catch (error) {
+        // 静默处理日志错误，避免递归
       }
     }
 
     // ========== WebSocket连接 ==========
     // 重新连接功能（包含自动修复）
     let reconnectAttempts = 0;
-    const MAX_RECONNECT_ATTEMPTS = 5; // 增加重试次数，提高自动连接成功率
+    const MAX_RECONNECT_ATTEMPTS = 3; // 🚀 减少重试次数，快速失败
     let isExplicitlyDisconnected = false; // 用户是否手动断开（暂未用到，但预留）
+    let isFirstConnection = true; // 🚀 标记是否是首次连接
     
     function attemptReconnect() {
-      // 增加最大重试次数到 5 次，每次间隔稍微拉长
       reconnectAttempts++;
       log(`🔄 尝试重新连接 (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`);
       updateStatus('waiting', '正在连接');
       
-      // 🔧 关键修复：清理心跳定时器，防止干扰
+      // 清理心跳定时器
       if (heartbeatTimer) {
         clearInterval(heartbeatTimer);
         heartbeatTimer = null;
-        log('   已清理心跳定时器');
       }
       
-      // 🔧 关键修复：增加等待时间，确保旧连接完全释放（从 500ms 增加到 1500ms）
+      // 🚀 优化：缩短等待时间（从 1500ms 减少到 300ms）
       setTimeout(() => {
         connect();
         
-        // 检查连接是否成功（增加检查时间从 2s 到 3s）
+        // 🚀 优化：缩短检查时间（从 3s 减少到 1.5s）
         setTimeout(() => {
           if (!ws || ws.readyState !== WebSocket.OPEN) {
-            // 连接失败，尝试修复服务
             if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-              log('⚠️ 连接失败，尝试自动启动服务器...');
-              repairServerConnection();
+              // 🚀 只在最后一次尝试时才启动服务器修复
+              if (reconnectAttempts === MAX_RECONNECT_ATTEMPTS - 1) {
+                log('⚠️ 连接失败，尝试自动启动服务器...');
+                repairServerConnection();
+              } else {
+                // 快速重试
+                attemptReconnect();
+              }
             } else {
               log('❌ 多次重连失败，请手动操作');
               updateStatus('disconnected', '点击重连');
-              
-              // 显示友好的错误提示和解决方案
               showServerStartHelp();
             }
           } else {
-            // 连接成功，重置计数
             reconnectAttempts = 0;
             log('✅ 重新连接成功');
-            // Toast removed: status pill already shows connection state
           }
-        }, 3000);
-      }, 1500);
+        }, 1500);
+      }, 300);
     }
     
     // 修复服务器连接（自动启动服务器）
@@ -3909,12 +3916,12 @@
         }
       }, '*');
       
-      // 等待7秒让服务器完全启动
+      // 🚀 优化：缩短等待时间（从 7s 减少到 3s）
       setTimeout(() => {
         log('🔄 服务器已启动，正在连接...');
         connect();
         
-        // 等待连接建立
+        // 🚀 优化：缩短检查时间（从 3s 减少到 2s）
         setTimeout(() => {
           if (!ws || ws.readyState !== WebSocket.OPEN) {
             if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
@@ -3924,7 +3931,6 @@
             } else {
               log('❌ 自动修复失败');
               updateStatus('disconnected', '点击重连');
-              // Toast removed: status pill shows connection state, log shows details
               reconnectAttempts = 0;
             }
           } else {
@@ -3932,8 +3938,8 @@
             log('✅ 服务器已启动并连接成功');
             showToast('服务器已自动启动', 'success');
           }
-        }, 3000);
-      }, 7000);
+        }, 2000);
+      }, 3000);
     }
     
     // 显示服务器启动帮助
@@ -4011,20 +4017,35 @@
       // ✅ 用 try-catch 包裹 WebSocket 初始化，确保服务器未启动时不会阻止页面加载
       try {
         ws = new WebSocket(SERVER_URL + '?id=' + connectionId + '&type=figma');
+        
+        // 🚀 添加连接超时（2秒），避免无限等待
+        const connectionTimeout = setTimeout(() => {
+          if (ws && ws.readyState === WebSocket.CONNECTING) {
+            console.log('⏱️ 连接超时，关闭并重试...');
+            ws.close();
+          }
+        }, 2000);
+        
+        // 连接成功时清除超时
+        const originalOnOpen = ws.onopen;
+        ws.onopen = function(event) {
+          clearTimeout(connectionTimeout);
+          if (originalOnOpen) originalOnOpen.call(ws, event);
+        };
+        
       } catch (error) {
         console.error('❌ WebSocket 初始化失败:', error);
-        log('❌ 无法连接到服务器，2秒后重试...');
+        log('❌ 无法连接到服务器');
         
-        // 只有在重试次数耗尽时才显示"点击重连"
+        // 🚀 优化：缩短重试延迟（从 2s 减少到 500ms）
         if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
            updateStatus('disconnected', '点击重连');
         } else {
            updateStatus('waiting', '正在连接');
-           // 2秒后重试
            setTimeout(() => {
              reconnectAttempts++;
              connect();
-           }, 2000);
+           }, 500);
         }
         return;
       }
@@ -4074,12 +4095,34 @@
           console.log('🚀 自动进入实时模式');
           showWorkArea('realtime');
         }
+        
+        // 🚀 如果实时模式已激活，重连后自动恢复实时同步
+        if (currentMode === 'realtime' && isRealtimeActive) {
+          console.log('🔄 重连后自动恢复实时同步');
+          setTimeout(() => {
+            if (ws && ws.readyState === 1) {
+              ws.send(JSON.stringify({ type: 'start-realtime' }));
+              log('⚡ 实时同步已恢复');
+            }
+          }, 500);
+        }
       };
 
       ws.onmessage = function (event) {
-        var data = JSON.parse(event.data);
+        // 🛡️ 安全解析 JSON，防止解析失败导致错误
+        var data;
+        try {
+          data = JSON.parse(event.data);
+        } catch (parseError) {
+          console.error('❌ WebSocket 消息解析失败:', parseError);
+          return;
+        }
+        
+        if (!data || !data.type) return;
         if (data.type === 'pong') { return; }
 
+        // 🛡️ 包裹所有消息处理逻辑，防止错误导致插件崩溃
+        try {
         // 处理强制关闭（单实例限制）
         if (data.type === 'force-close') {
           log('⚠️  检测到您在其他文件中打开了插件，当前插件将自动关闭');
@@ -4557,6 +4600,11 @@
             showToast('备份设置更新失败', 'error');
           }
         }
+        } catch (msgError) {
+          // 🛡️ 捕获消息处理错误，防止插件崩溃
+          console.error('❌ WebSocket 消息处理错误:', msgError);
+          console.error('   消息类型:', (data && data.type) ? data.type : '未知');
+        }
       };
 
       ws.onerror = function (error) {
@@ -4607,12 +4655,12 @@
           manualSyncTimeoutId = null;
         }
         
-        // ✅ 智能重连逻辑
+        // ✅ 智能重连逻辑 - 🚀 优化：更短的延迟
         if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
           reconnectAttempts++;
-          // 递增延迟：每次重试间隔增加 1s (1s, 2s, 3s, ...)
-          const delay = reconnectAttempts * 1000;
-          log(`⏳ 正在重试 (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})，等待 ${delay/1000}秒...`);
+          // 🚀 优化：固定 500ms 延迟，不再递增（原来是 1s, 2s, 3s...）
+          const delay = 500;
+          log(`⏳ 正在重试 (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`);
           
           updateStatus('waiting', '正在连接');
           
@@ -4701,40 +4749,32 @@
 
     // Helper to animate width changes for smooth morphing
     function animateWidthChange(element, updateContentFn) {
-        // 1. Lock current width explicitly
+        // 🚀 修复：移除所有手动宽度计算，使用内容自适应
+        
+        // 1. 保存当前的布局状态，确保平滑过渡
         const oldWidth = element.offsetWidth;
-        element.style.width = oldWidth + 'px';
+        element.style.transition = 'none'; // 临时禁用过渡
+        element.style.width = oldWidth + 'px'; // 锁定当前宽度
         
-        // Prevent text wrapping and overflow during transition
+        // 防止文本换行（只在动画期间）
         element.style.whiteSpace = 'nowrap';
-        element.style.overflow = 'hidden';
         
-        // 2. Perform content update
+        // 2. 执行内容更新
         updateContentFn();
         
-        // 3. Measure new width
-        // Temporarily set width to auto to measure natural size
-        element.style.width = 'auto';
-        const newWidth = element.offsetWidth;
-        
-        // 4. Set back to old width immediately to start animation from there
-        element.style.width = oldWidth + 'px';
-        
-        // Force reflow to ensure transition works
-        void element.offsetHeight;
-        
-        // 5. Animate to new width using CSS transition
-        requestAnimationFrame(() => {
-            element.style.width = newWidth + 'px';
-        });
-        
-        // 6. Clean up after transition (match CSS transition duration: 0.3s = 300ms + buffer)
+        // 3. 短暂延迟，确保 DOM 更新完成
         setTimeout(() => {
-            // Force reset to ensure close button is visible
-            element.style.width = '';
-            element.style.whiteSpace = '';
-            element.style.overflow = 'visible'; // Explicitly set to visible to ensure close button shows
-        }, 350);
+            // 4. 恢复过渡动画并让内容自动撑开
+            element.style.transition = '';
+            element.style.width = ''; // 移除固定宽度，让内容自适应
+            
+            // 5. 延迟清理，确保动画完成
+            setTimeout(() => {
+                // 清理临时样式，恢复默认状态
+                element.style.whiteSpace = '';
+                element.style.overflow = 'visible'; // 确保关闭按钮可见
+            }, 350);
+        }, 50);
     }
 
     // 生成 status pill 关闭按钮的 HTML
@@ -4760,10 +4800,13 @@
     }
 
     function updateStatus(type, text) {
-      const statusEl = document.getElementById('status');
+      // 🛡️ 防止初始化未完成时崩溃
+      try {
+        const statusEl = document.getElementById('status');
+        if (!statusEl) return; // 元素不存在时直接返回
 
-      // ✅ 强制检查：如果 WebSocket 断开，清除所有锁定状态并强制显示断开
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        // ✅ 强制检查：如果 WebSocket 断开，清除所有锁定状态并强制显示断开
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
         if (type !== 'disconnected' && type !== 'waiting') {
           currentButtonState = null;
           justFinishedExport = false;
@@ -5083,89 +5126,113 @@
           `;
           statusEl.className = 'connection-pill connected';
       });
+      } catch (error) {
+        console.error('❌ updateStatus 错误:', error);
+      }
     }
 
     let isRealtimeActive = false;
 
     function showWorkArea(mode) {
-      currentMode = mode;
-      document.getElementById('modeSelection').classList.add('hidden');
-      document.getElementById('workArea').classList.add('active');
-      
-      collapseLog();
-      
-      // Legacy UI update (safeguard if elements exist)
-      const activeModeIcon = document.getElementById('activeModeIcon');
-      const activeModeTitle = document.getElementById('activeModeTitle');
-      if (activeModeIcon) activeModeIcon.style.display = 'none'; // Hide legacy icon
-      if (activeModeTitle) activeModeTitle.style.display = 'none'; // Hide legacy title
-
-      if (mode === 'realtime') {
-        // Realtime Mode Setup - Start in Idle State
-        updateStartScreenUI('idle');
+      // 🛡️ 防止初始化未完成时崩溃
+      try {
+        currentMode = mode;
+        document.getElementById('modeSelection').classList.add('hidden');
+        document.getElementById('workArea').classList.add('active');
         
-        // Update Status
-        if (ws && ws.readyState === 1) {
-          updateStatus('connected', '已连接');
+        collapseLog();
+        
+        // Legacy UI update (safeguard if elements exist)
+        const activeModeIcon = document.getElementById('activeModeIcon');
+        const activeModeTitle = document.getElementById('activeModeTitle');
+        if (activeModeIcon) activeModeIcon.style.display = 'none'; // Hide legacy icon
+        if (activeModeTitle) activeModeTitle.style.display = 'none'; // Hide legacy title
+
+        if (mode === 'realtime') {
+          // Realtime Mode Setup - Start in Idle State
+          updateStartScreenUI('idle');
+          
+          // Update Status
+          if (ws && ws.readyState === 1) {
+            updateStatus('connected', '已连接');
+          } else {
+            updateStatus('disconnected', '点击重连');
+          }
         } else {
-          updateStatus('disconnected', '点击重连');
+          // Legacy Manual Mode (should not be reached in new flow, but keep for safety)
+          if (ws && ws.readyState === 1) {
+            updateStatus('connected', '已连接');
+          }
         }
-      } else {
-        // Legacy Manual Mode (should not be reached in new flow, but keep for safety)
-        if (ws && ws.readyState === 1) {
-        updateStatus('connected', '已连接');
-        }
+      } catch (error) {
+        console.error('❌ showWorkArea 错误:', error);
       }
     }
 
     function updateStartScreenUI(state) {
-        const btn = document.getElementById('mainStartBtn');
-        const label = document.getElementById('realtimeLabel');
-        
-        // Legacy support checks
-        const oldTitle = document.getElementById('mainStatusTitle');
-        const oldSubtitle = document.getElementById('mainStatusSubtitle');
-        
-        if (!btn) return;
-        
-        if (state === 'listening') {
-            btn.classList.add('active');
-            isRealtimeActive = true;
+        // 🛡️ 防止初始化未完成时崩溃
+        try {
+            const btn = document.getElementById('mainStartBtn');
+            const label = document.getElementById('realtimeLabel');
             
-            // Label text and color remain unchanged
+            // Legacy support checks
+            const oldTitle = document.getElementById('mainStatusTitle');
+            const oldSubtitle = document.getElementById('mainStatusSubtitle');
             
-            if (oldTitle) oldTitle.textContent = '正在实时同步';
-        } else {
-            btn.classList.remove('active');
-            isRealtimeActive = false;
+            if (!btn) return;
             
-            // Label text and color remain unchanged
-            
-            if (oldTitle) {
-                oldTitle.textContent = '点击开启实时同步';
-                oldTitle.style.color = 'var(--text-primary)';
+            if (state === 'listening') {
+                btn.classList.add('active');
+                isRealtimeActive = true;
+                
+                // Label text and color remain unchanged
+                
+                if (oldTitle) oldTitle.textContent = '正在实时同步';
+            } else {
+                btn.classList.remove('active');
+                isRealtimeActive = false;
+                
+                // Label text and color remain unchanged
+                
+                if (oldTitle) {
+                    oldTitle.textContent = '点击开启实时同步';
+                    oldTitle.style.color = 'var(--text-primary)';
+                }
             }
+        } catch (error) {
+            console.error('❌ updateStartScreenUI 错误:', error);
         }
     }
 
     function toggleRealtimeSync() {
-        if (isRealtimeActive) {
-            stopRealtimeSync();
-        } else {
-            startRealtimeSync();
+        // 🛡️ 防止初始化未完成时崩溃
+        try {
+            if (isRealtimeActive) {
+                stopRealtimeSync();
+            } else {
+                startRealtimeSync();
+            }
+        } catch (error) {
+            console.error('❌ toggleRealtimeSync 错误:', error);
         }
     }
 
     function startRealtimeSync() {
-        if (ws && ws.readyState === 1) {
-            ws.send(JSON.stringify({ type: 'start-realtime' }));
-            log('⚡ 实时同步已启动');
-            updateStartScreenUI('listening');
-            updateStatus('connected', '运行中');
-        } else {
-            showToast('未连接到服务器', 'error');
-          updateStatus('disconnected', '点击重连');
-      }
+        // 🛡️ 防止初始化未完成时崩溃
+        try {
+            if (ws && ws.readyState === 1) {
+                ws.send(JSON.stringify({ type: 'start-realtime' }));
+                log('⚡ 实时同步已启动');
+                updateStartScreenUI('listening');
+                updateStatus('connected', '运行中');
+            } else {
+                showToast('未连接到服务器', 'error');
+                updateStatus('disconnected', '点击重连');
+            }
+        } catch (error) {
+            console.error('❌ startRealtimeSync 错误:', error);
+            showToast('启动失败，请稍后重试', 'error');
+        }
     }
 
 
@@ -5262,20 +5329,21 @@
     }
 
     function stopRealtimeSync() {
-      // 无论当前模式是什么，只要 WebSocket 连接存在，就发送停止命令
-      // 这样可以确保在关闭插件时，所有正在运行的监听都会被停止
-      if (ws && ws.readyState === 1) {
-        try {
-        ws.send(JSON.stringify({ type: 'stop-realtime' }));
+      // 🛡️ 防止初始化未完成时崩溃
+      try {
+        // 无论当前模式是什么，只要 WebSocket 连接存在，就发送停止命令
+        // 这样可以确保在关闭插件时，所有正在运行的监听都会被停止
+        if (ws && ws.readyState === 1) {
+          ws.send(JSON.stringify({ type: 'stop-realtime' }));
           log('⏸️  已停止同步监听');
-        } catch (error) {
-          console.error('停止同步监听失败:', error);
         }
+        
+        // Update UI to Idle
+        updateStartScreenUI('idle');
+        updateStatus('connected', '已连接');
+      } catch (error) {
+        console.error('❌ stopRealtimeSync 错误:', error);
       }
-      
-      // Update UI to Idle
-      updateStartScreenUI('idle');
-      updateStatus('connected', '已连接');
     }
 
     document.getElementById('locateFrameBtn').onclick = function () {
@@ -6009,11 +6077,13 @@
     const TOAST_DEBOUNCE_TIME = 500; // 去重时间窗口（毫秒）
     
     function showToast(message, type = 'info') {
-      // 最小化状态下不显示 toast
-      if (isMinimized) return;
-      
-      const toast = document.getElementById('toast');
-      if (!toast) return;
+      // 🛡️ 防止初始化未完成时崩溃
+      try {
+        // 最小化状态下不显示 toast
+        if (isMinimized) return;
+        
+        const toast = document.getElementById('toast');
+        if (!toast) return;
       
       const iconEl = toast.querySelector('.toast-icon');
       const messageEl = toast.querySelector('.toast-message');
@@ -6052,6 +6122,9 @@
         }, 300);
       } else {
         displayToast(toast, iconEl, messageEl, cleanMessage, type);
+      }
+      } catch (error) {
+        console.error('❌ showToast 错误:', error);
       }
     }
     
@@ -6761,12 +6834,14 @@
       });
     }
     window.onmessage = function (event) {
-      var msg = event.data.pluginMessage;
-      if (!msg) return;
+      // 🛡️ 安全处理消息，防止错误导致插件崩溃
+      try {
+        var msg = event.data && event.data.pluginMessage;
+        if (!msg) return;
 
-      if (msg.type === 'plugin-closing') {
-        stopRealtimeSync();
-      } else if (msg.type === 'request-skipped-file-cache' || msg.type === 'request-skipped-file-cache-for-node') {
+        if (msg.type === 'plugin-closing') {
+          stopRealtimeSync();
+        } else if (msg.type === 'request-skipped-file-cache' || msg.type === 'request-skipped-file-cache-for-node') {
         // ✅ code.js 请求获取跳过文件的缓存信息（用于自动关联手动拖入的Video/GIF）
         const isForNode = msg.type === 'request-skipped-file-cache-for-node';
         console.log(`📤 UI 收到缓存请求${isForNode ? '(自动关联)' : ''}，文件名:`, msg.filename);
@@ -7126,6 +7201,10 @@
       } else if (msg.type === 'plugin-version-info') {
         // 获取插件版本信息
         handlePluginVersionInfo(msg);
+      }
+      } catch (error) {
+        // 🛡️ 捕获所有错误，防止插件崩溃
+        console.error('❌ window.onmessage 处理错误:', error);
       }
     };
 

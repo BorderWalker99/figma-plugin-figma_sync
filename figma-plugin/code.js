@@ -1,6 +1,10 @@
 // code.js - 智能布局版本
 
-const PLUGIN_VERSION = '1.0.2'; // 插件版本号
+const PLUGIN_VERSION = '1.0.1'; // 插件版本号
+
+// 🛡️ 全局错误处理，防止切换文件时崩溃
+// Figma 插件没有 window.onerror，但我们可以尽量保护关键代码
+let isPluginReady = false;
 
 console.log('🚀🚀🚀 Figma插件启动 - 纯净载荷版本！🚀🚀🚀');
 console.log('📦 插件版本:', PLUGIN_VERSION);
@@ -25,45 +29,60 @@ let serverCheckTimer = null; // Server 缓存检查超时计时器
 const recentSyncedFiles = new Map();
 
 // 从画板中已有的元素初始化计数器
+// 🛡️ 使用 try-catch 保护，防止切换文件时出错
 function initializeCounters() {
-  const frame = findFrameByName("ScreenSync Screenshots");
-  if (frame && frame.children) {
-    let maxScreenshotIndex = 0;
-    let maxScreenRecordingIndex = 0;
-    
-    frame.children.forEach(child => {
-      if (child.name) {
-        // 匹配 Screenshot_XXX 格式
-        const screenshotMatch = child.name.match(/^Screenshot_(\d+)$/);
-        if (screenshotMatch) {
-          const index = parseInt(screenshotMatch[1], 10);
-          if (index > maxScreenshotIndex) {
-            maxScreenshotIndex = index;
+  try {
+    const frame = findFrameByName("ScreenSync Screenshots");
+    if (frame && frame.children) {
+      let maxScreenshotIndex = 0;
+      let maxScreenRecordingIndex = 0;
+      
+      frame.children.forEach(child => {
+        if (child.name) {
+          // 匹配 Screenshot_XXX 格式
+          const screenshotMatch = child.name.match(/^Screenshot_(\d+)$/);
+          if (screenshotMatch) {
+            const index = parseInt(screenshotMatch[1], 10);
+            if (index > maxScreenshotIndex) {
+              maxScreenshotIndex = index;
+            }
+          }
+          
+          // 匹配 ScreenRecording_XXX 格式
+          const recordingMatch = child.name.match(/^ScreenRecording_(\d+)$/);
+          if (recordingMatch) {
+            const index = parseInt(recordingMatch[1], 10);         
+            if (index > maxScreenRecordingIndex) {
+              maxScreenRecordingIndex = index;
+            }
           }
         }
-        
-        // 匹配 ScreenRecording_XXX 格式
-        const recordingMatch = child.name.match(/^ScreenRecording_(\d+)$/);
-        if (recordingMatch) {
-          const index = parseInt(recordingMatch[1], 10);         
-          if (index > maxScreenRecordingIndex) {
-            maxScreenRecordingIndex = index;
-          }
-        }
+      });
+      
+      screenshotIndex = maxScreenshotIndex;
+      screenRecordingIndex = maxScreenRecordingIndex;
+      
+      if (maxScreenshotIndex > 0 || maxScreenRecordingIndex > 0) {
+        console.log(`📊 从画板初始化计数器: Screenshot=${screenshotIndex}, ScreenRecording=${screenRecordingIndex}`);
       }
-    });
-    
-    screenshotIndex = maxScreenshotIndex;
-    screenRecordingIndex = maxScreenRecordingIndex;
-    
-    if (maxScreenshotIndex > 0 || maxScreenRecordingIndex > 0) {
-      console.log(`📊 从画板初始化计数器: Screenshot=${screenshotIndex}, ScreenRecording=${screenRecordingIndex}`);
     }
+  } catch (e) {
+    console.log('⚠️ 初始化计数器时出错（可能正在切换文件）:', e.message);
   }
 }
 
-// 插件启动时初始化计数器
-initializeCounters();
+// 🛡️ 延迟初始化，确保 Figma 文档已完全加载
+// 这可以防止在切换文件时发生的闪退
+setTimeout(() => {
+  try {
+    initializeCounters();
+    isPluginReady = true;
+    console.log('✅ 插件已准备就绪');
+  } catch (e) {
+    console.log('⚠️ 初始化时出错:', e.message);
+    isPluginReady = true; // 即使出错也标记为就绪，允许后续操作
+  }
+}, 100);
 
 // 用户自定义尺寸设置（从设置中读取）
 let customSizeSettings = {
@@ -100,6 +119,7 @@ const CONFIG = {
 };
 
 // 验证画板是否存在且在当前页面
+// 🛡️ 完全保护，防止切换文件时崩溃
 function isFrameValid() {
   if (!currentFrame) return false;
   
@@ -107,6 +127,7 @@ function isFrameValid() {
     const test = currentFrame.name;
     // 检查画板是否在当前页面
     const page = figma.currentPage;
+    if (!page || !page.children) return false;
     return page.children.includes(currentFrame);
   } catch (error) {
     console.log('画板已失效');
@@ -115,14 +136,21 @@ function isFrameValid() {
 }
 
 // 查找名为 "iPhone Screenshots" 的画板
+// 🛡️ 使用 try-catch 保护，防止切换文件时出错
 function findFrameByName(name) {
-  const page = figma.currentPage;
-  for (const node of page.children) {
-    if (node.type === 'FRAME' && node.name === name) {
-      return node;
+  try {
+    const page = figma.currentPage;
+    if (!page || !page.children) return null;
+    for (const node of page.children) {
+      if (node.type === 'FRAME' && node.name === name) {
+        return node;
+      }
     }
+    return null;
+  } catch (e) {
+    console.log('⚠️ 查找画板时出错:', e.message);
+    return null;
   }
-  return null;
 }
 
 // 确保有有效的画板
@@ -331,7 +359,15 @@ function adjustFrameSize() {
 }
 
 figma.ui.onmessage = async (msg) => {
-  console.log('📬 收到UI消息:', msg.type);
+  // 🛡️ 全局 try-catch 保护，防止任何消息处理错误导致插件崩溃
+  try {
+    // 🛡️ 检查插件是否就绪，避免在初始化期间处理消息
+    if (!msg || !msg.type) {
+      console.log('⚠️ 收到无效消息，忽略');
+      return;
+    }
+    
+    console.log('📬 收到UI消息:', msg.type);
   
   // ✅ 处理UI返回的跳过文件缓存数据
   if (msg.type === 'skipped-file-cache-response') {
@@ -2017,97 +2053,117 @@ figma.ui.onmessage = async (msg) => {
       console.error('   ❌ 清除 GIF 数据失败:', error);
     }
   }
+  
+  } catch (globalError) {
+    // 🛡️ 全局错误捕获，防止插件崩溃
+    console.error('❌ 消息处理器发生错误:', globalError.message);
+    console.error('   消息类型:', (msg && msg.type) ? msg.type : '未知');
+  }
 };
 
 // ✅ 监听文档变化，自动关联手动拖入的Video/GIF的缓存元数据
+// 🛡️ 使用 try-catch 包裹整个监听器，防止切换文件时崩溃
 figma.on('documentchange', (event) => {
-  // 只处理节点创建事件
-  const nodeChanges = event.documentChanges.filter(change => change.type === 'CREATE');
-  
-  if (nodeChanges.length === 0) return;
-  
-  // 收集需要处理的节点ID（延迟处理，避免干扰 Figma 的视频加载）
-  const nodeIdsToProcess = [];
-  
-  for (const change of nodeChanges) {
-    const node = change.node;
+  try {
+    // 只处理节点创建事件
+    const nodeChanges = event.documentChanges.filter(change => change.type === 'CREATE');
     
-    // 只处理矩形节点（Video/GIF通常是矩形）
-    if (node.type !== 'RECTANGLE') continue;
+    if (nodeChanges.length === 0) return;
     
-    // 先只根据节点名称判断是否可能是 Video/GIF
-    // ⚠️ 不要立即访问 fills，避免干扰 Figma 的视频处理
-    const nodeName = node.name || '';
-    const nameLower = nodeName.toLowerCase();
-    const mightBeVideo = nameLower.endsWith('.mov') || 
-                         nameLower.endsWith('.mp4') ||
-                         nameLower.includes('video') ||
-                         nameLower.includes('recording') ||
-                         nameLower.includes('screenrecording');
-    const mightBeGif = nameLower.endsWith('.gif') ||
-                       nameLower.includes('gif');
+    // 收集需要处理的节点ID（延迟处理，避免干扰 Figma 的视频加载）
+    const nodeIdsToProcess = [];
     
-    if (mightBeVideo || mightBeGif) {
-      nodeIdsToProcess.push(node.id);
-    }
-  }
-  
-  if (nodeIdsToProcess.length === 0) return;
-  
-  // ⏰ 延迟 500ms 再处理，让 Figma 完成视频/GIF 的内部加载
-  setTimeout(() => {
-    for (const nodeId of nodeIdsToProcess) {
+    for (const change of nodeChanges) {
       try {
-        const node = figma.getNodeById(nodeId);
-        if (!node || node.type !== 'RECTANGLE') continue;
+        const node = change.node;
         
-        // 现在安全地访问 fills
-        if (!node.fills || node.fills.length === 0) continue;
+        // 🛡️ 检查节点是否有效
+        if (!node || typeof node.type === 'undefined') continue;
         
-        const fill = node.fills[0];
+        // 只处理矩形节点（Video/GIF通常是矩形）
+        if (node.type !== 'RECTANGLE') continue;
         
-        // 只处理VIDEO和IMAGE填充（GIF也是IMAGE类型）
-        if (fill.type !== 'VIDEO' && fill.type !== 'IMAGE') continue;
-        
+        // 先只根据节点名称判断是否可能是 Video/GIF
+        // ⚠️ 不要立即访问 fills，避免干扰 Figma 的视频处理
         const nodeName = node.name || '';
         const nameLower = nodeName.toLowerCase();
-        const isLikelyVideo = fill.type === 'VIDEO' || 
-                              nameLower.endsWith('.mov') || 
-                              nameLower.endsWith('.mp4') ||
-                              nameLower.includes('video') ||
-                              nameLower.includes('recording');
-        const isLikelyGif = fill.type === 'IMAGE' && (
-                            nameLower.endsWith('.gif') ||
-                            nameLower.includes('gif') ||
-                            nameLower.includes('recording'));
+        const mightBeVideo = nameLower.endsWith('.mov') || 
+                             nameLower.endsWith('.mp4') ||
+                             nameLower.includes('video') ||
+                             nameLower.includes('recording') ||
+                             nameLower.includes('screenrecording');
+        const mightBeGif = nameLower.endsWith('.gif') ||
+                           nameLower.includes('gif');
         
-        if (!isLikelyVideo && !isLikelyGif) continue;
-        
-        console.log(`\n🔍 [自动关联] 检测到新增的Video/GIF图层: ${nodeName}`);
-        
-        // 检查是否已有关联数据
-        const hasExistingData = node.getPluginData('driveFileId') || 
-                                node.getPluginData('ossFileId') ||
-                                node.getPluginData('gifCacheId');
-        
-        if (hasExistingData) {
-          console.log(`   ✅ 已有关联数据，跳过自动关联`);
-          continue;
+        if (mightBeVideo || mightBeGif) {
+          nodeIdsToProcess.push(node.id);
         }
-        
-        // 请求UI返回缓存的元数据
-        console.log(`   📤 请求UI返回缓存数据...`);
-        figma.ui.postMessage({
-          type: 'request-skipped-file-cache-for-node',
-          filename: nodeName,
-          nodeId: node.id
-        });
       } catch (e) {
-        // 节点可能已被删除或无法访问，忽略错误
-        console.log(`   ⚠️ 节点处理出错，可能已被删除: ${e.message}`);
+        // 🛡️ 切换文件时节点可能无效，忽略错误
+        continue;
       }
     }
-  }, 500);
+    
+    if (nodeIdsToProcess.length === 0) return;
+    
+    // ⏰ 延迟 500ms 再处理，让 Figma 完成视频/GIF 的内部加载
+    setTimeout(() => {
+      for (const nodeId of nodeIdsToProcess) {
+        try {
+          const node = figma.getNodeById(nodeId);
+          if (!node || node.type !== 'RECTANGLE') continue;
+          
+          // 现在安全地访问 fills
+          if (!node.fills || node.fills.length === 0) continue;
+          
+          const fill = node.fills[0];
+          
+          // 只处理VIDEO和IMAGE填充（GIF也是IMAGE类型）
+          if (fill.type !== 'VIDEO' && fill.type !== 'IMAGE') continue;
+          
+          const nodeName = node.name || '';
+          const nameLower = nodeName.toLowerCase();
+          const isLikelyVideo = fill.type === 'VIDEO' || 
+                                nameLower.endsWith('.mov') || 
+                                nameLower.endsWith('.mp4') ||
+                                nameLower.includes('video') ||
+                                nameLower.includes('recording');
+          const isLikelyGif = fill.type === 'IMAGE' && (
+                              nameLower.endsWith('.gif') ||
+                              nameLower.includes('gif') ||
+                              nameLower.includes('recording'));
+          
+          if (!isLikelyVideo && !isLikelyGif) continue;
+          
+          console.log(`\n🔍 [自动关联] 检测到新增的Video/GIF图层: ${nodeName}`);
+          
+          // 检查是否已有关联数据
+          const hasExistingData = node.getPluginData('driveFileId') || 
+                                  node.getPluginData('ossFileId') ||
+                                  node.getPluginData('gifCacheId');
+          
+          if (hasExistingData) {
+            console.log(`   ✅ 已有关联数据，跳过自动关联`);
+            continue;
+          }
+          
+          // 请求UI返回缓存的元数据
+          console.log(`   📤 请求UI返回缓存数据...`);
+          figma.ui.postMessage({
+            type: 'request-skipped-file-cache-for-node',
+            filename: nodeName,
+            nodeId: node.id
+          });
+        } catch (e) {
+          // 节点可能已被删除或无法访问，忽略错误
+          console.log(`   ⚠️ 节点处理出错，可能已被删除: ${e.message}`);
+        }
+      }
+    }, 500);
+  } catch (e) {
+    // 🛡️ 切换文件时可能触发各种错误，忽略它们
+    console.log(`⚠️ documentchange 处理出错（可能正在切换文件）: ${e.message}`);
+  }
 });
 
 console.log('✅ 插件初始化完成');
