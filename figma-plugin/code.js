@@ -1,6 +1,6 @@
 // code.js - 智能布局版本
 
-const PLUGIN_VERSION = '1.0.1'; // 插件版本号
+const PLUGIN_VERSION = '1.0.2'; // 插件版本号
 
 // 🛡️ 全局错误处理，防止切换文件时崩溃
 // Figma 插件没有 window.onerror，但我们可以尽量保护关键代码
