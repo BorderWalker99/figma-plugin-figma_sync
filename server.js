@@ -1078,8 +1078,84 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
       }
     }
     
+    // 方法 4：单 GIF 自动匹配 - 如果 Frame 里只有一个 GIF，自动使用文件夹中的唯一视频/GIF 文件
+    if (!gifPath && gifInfos.length === 1) {
+      console.log(`      4️⃣  单 GIF 模式：尝试自动匹配文件夹中的唯一视频/GIF...`);
+      
+      // 获取 ScreenSyncImg 基础路径
+      let baseFolder;
+      if (currentMode === 'icloud') {
+        baseFolder = path.join(
+          os.homedir(),
+          'Library/Mobile Documents/com~apple~CloudDocs/ScreenSyncImg'
+        );
+      } else {
+        baseFolder = userConfig.getLocalDownloadFolder();
+      }
+      
+      // 定义要搜索的文件夹列表
+      const searchFolders = [
+        baseFolder,
+        path.join(baseFolder, '视频'),
+        path.join(baseFolder, 'GIF'),
+      ];
+      
+      // 收集所有视频/GIF 文件
+      const allVideoGifFiles = [];
+      const compatibleExts = ['.mov', '.mp4', '.gif'];
+      
+      for (const searchFolder of searchFolders) {
+        if (!fs.existsSync(searchFolder)) continue;
+        
+        const filesInFolder = fs.readdirSync(searchFolder);
+        for (const f of filesInFolder) {
+          // 跳过已导出的文件和隐藏文件
+          if (f.startsWith('.')) continue;
+          if (f.toLowerCase().includes('_exported') || f.toLowerCase().includes('导出')) continue;
+          if (f.toLowerCase().includes('exportedgif')) continue;
+          
+          const fExt = path.extname(f).toLowerCase();
+          if (compatibleExts.includes(fExt)) {
+            allVideoGifFiles.push({
+              filename: f,
+              path: path.join(searchFolder, f),
+              folder: searchFolder
+            });
+          }
+        }
+      }
+      
+      console.log(`         找到 ${allVideoGifFiles.length} 个视频/GIF 文件`);
+      
+      if (allVideoGifFiles.length === 1) {
+        // 只有一个文件，自动使用
+        gifPath = allVideoGifFiles[0].path;
+        console.log(`      ✅ 单 GIF 自动匹配成功！`);
+        console.log(`         文件夹中只有一个视频/GIF 文件，自动使用: ${allVideoGifFiles[0].filename}`);
+        console.log(`         路径: ${gifPath}`);
+      } else if (allVideoGifFiles.length > 1) {
+        // 多个文件，列出来供用户参考
+        console.log(`      ⚠️  文件夹中有多个视频/GIF 文件，无法自动匹配：`);
+        allVideoGifFiles.slice(0, 5).forEach((f, idx) => {
+          console.log(`         ${idx + 1}. ${f.filename}`);
+        });
+        if (allVideoGifFiles.length > 5) {
+          console.log(`         ... 还有 ${allVideoGifFiles.length - 5} 个文件`);
+        }
+        console.log(`      💡 提示：将源文件重命名为与 Figma 图层名一致，或删除多余文件只保留一个`);
+      } else {
+        console.log(`      ❌ 文件夹中没有找到任何视频/GIF 文件`);
+      }
+    }
+    
     if (!gifPath) {
-      throw new Error(`未找到 GIF/视频文件: ${gif.filename}\n\n已尝试：\n• GIF 缓存 (ID: ${gif.cacheId || '无'})\n• 文件名匹配缓存\n• ScreenSyncImg 文件夹: ${downloadFolder}\n\n💡 提示：\n• 请确保文件在 ScreenSyncImg 文件夹中\n• iCloud 模式下，视频文件需要手动拖入 Figma\n• 检查文件名是否正确（去掉空格或特殊字符）`);
+      // 根据情况给出不同的错误提示
+      const isSingleGif = gifInfos.length === 1;
+      const errorHint = isSingleGif
+        ? `\n\n💡 单 GIF 模式提示：\n• 将视频/GIF 文件放入 ScreenSyncImg 文件夹\n• 如果文件夹中只有一个视频/GIF，无需重命名\n• 如果有多个文件，请删除多余的或重命名为图层名`
+        : `\n\n💡 多 GIF 模式提示：\n• 请确保每个 GIF 图层都有对应的同名源文件\n• 文件名需要与 Figma 图层名一致`;
+      
+      throw new Error(`未找到 GIF/视频文件: ${gif.filename}\n\n已尝试：\n• GIF 缓存 (ID: ${gif.cacheId || '无'})\n• 文件名匹配\n• 单 GIF 自动匹配\n• ScreenSyncImg 文件夹: ${downloadFolder}${errorHint}`);
     }
     
     // 再次验证 bounds 数据完整性
@@ -1232,6 +1308,25 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
       console.log(`   📐 提取策略: 按 ${targetFps.toFixed(2)} fps 从视频中重采样`);
       
       console.log(`   🎬 使用 FFmpeg 快速转换...`);
+      console.log(`   📐 目标尺寸: ${videoW}x${videoH}`);
+      
+      // 获取原始视频尺寸用于日志
+      let originalVideoW = 0, originalVideoH = 0;
+      try {
+        const sizeCmd = `ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=s=x:p=0 "${item.path}"`;
+        const sizeResult = await execAsync(sizeCmd, { timeout: 10000 });
+        const [w, h] = sizeResult.stdout.trim().split('x').map(Number);
+        originalVideoW = w;
+        originalVideoH = h;
+        console.log(`   📹 原始视频尺寸: ${originalVideoW}x${originalVideoH}`);
+        if (originalVideoW > videoW || originalVideoH > videoH) {
+          console.log(`   🚀 缩放优化生效: ${originalVideoW}x${originalVideoH} → ${videoW}x${videoH} (减少 ${Math.round((1 - (videoW*videoH)/(originalVideoW*originalVideoH))*100)}% 像素)`);
+        } else {
+          console.log(`   ℹ️  无需缩放（目标尺寸 >= 原始尺寸）`);
+        }
+      } catch (e) {
+        console.log(`   ⚠️  无法获取原始视频尺寸`);
+      }
       
       // 🚀 优化版本：
       // -hwaccel videotoolbox: Mac 硬件加速解码，大幅减少 CPU 负载
@@ -1239,14 +1334,36 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
       // flags=lanczos: 高质量缩放算法
       // 🎨 使用 floyd_steinberg 抖动算法，色彩过渡更自然
       // 🚀 -threads 0 使用所有 CPU 核心加速
-const ffmpegCmd = `ffmpeg -hwaccel videotoolbox -threads 0 -i "${item.path}" -vf "fps=${gifFps},scale=${videoW}:${videoH}:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=256:stats_mode=diff[p];[s1][p]paletteuse=dither=floyd_steinberg" -threads 0 "${videoGifPath}" -y`;
       
-      console.log(`   📝 FFmpeg 命令: ${ffmpegCmd}`);
+      // 先尝试硬件加速，失败则回退到软解
+      const ffmpegCmdHwAccel = `ffmpeg -hwaccel videotoolbox -threads 0 -i "${item.path}" -vf "fps=${gifFps},scale=${videoW}:${videoH}:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=256:stats_mode=diff[p];[s1][p]paletteuse=dither=floyd_steinberg" -threads 0 "${videoGifPath}" -y`;
+      const ffmpegCmdSoftware = `ffmpeg -threads 0 -i "${item.path}" -vf "fps=${gifFps},scale=${videoW}:${videoH}:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=256:stats_mode=diff[p];[s1][p]paletteuse=dither=floyd_steinberg" -threads 0 "${videoGifPath}" -y`;
+      
+      let ffmpegCmd = ffmpegCmdHwAccel;
+      let usedHwAccel = true;
+      
+      console.log(`   📝 FFmpeg 命令 (硬件加速): ${ffmpegCmd}`);
+      
+      const conversionStartTime = Date.now();
       
       try {
         await execAsync(ffmpegCmd, { maxBuffer: 200 * 1024 * 1024, timeout: 600000 }); // 10分钟超时
-        
-        console.log(`   ✅ GIF 生成完成`);
+        console.log(`   ✅ 硬件加速转换成功`);
+      } catch (hwAccelError) {
+        // 硬件加速失败，回退到软解
+        console.log(`   ⚠️  硬件加速失败，回退到软件解码: ${hwAccelError.message}`);
+        usedHwAccel = false;
+        ffmpegCmd = ffmpegCmdSoftware;
+        console.log(`   📝 FFmpeg 命令 (软件解码): ${ffmpegCmd}`);
+        await execAsync(ffmpegCmd, { maxBuffer: 200 * 1024 * 1024, timeout: 600000 });
+      }
+      
+      const conversionTime = ((Date.now() - conversionStartTime) / 1000).toFixed(1);
+      console.log(`   ⏱️  转换耗时: ${conversionTime}秒 ${usedHwAccel ? '(硬件加速)' : '(软件解码)'}`);
+      
+      console.log(`   ✅ GIF 生成完成`);
+      
+      try {
         
         // 🔍 验证生成的 GIF 文件是否有效
         console.log(`   🔍 验证 GIF 文件完整性...`);

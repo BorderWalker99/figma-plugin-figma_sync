@@ -6605,56 +6605,73 @@
         console.log('🔍 开始匹配文件...');
         selectedFiles = {};
         
-        unsyncedGifs.forEach(gif => {
-          const layerName = gif.layerName;
-          const originalFilename = gif.filename || gif.layerName; // 使用原始文件名或图层名
-          
-          const matchedFile = files.find(file => {
-            const fileName = file.name.replace(/\.(gif|mov|mp4)$/i, '');
+        // 过滤出有效的视频/GIF 文件
+        const validFiles = files.filter(f => /\.(gif|mov|mp4)$/i.test(f.name));
+        console.log(`   📁 有效文件数: ${validFiles.length}, GIF图层数: ${unsyncedGifs.length}`);
+        console.log(`   📁 用户上传的文件:`, validFiles.map(f => f.name));
+        console.log(`   📁 需要匹配的图层:`, unsyncedGifs.map(g => g.layerName));
+        
+        // 🚀 单 GIF 自动匹配：如果只有一个 GIF 图层且只上传了一个文件，自动匹配
+        if (unsyncedGifs.length === 1 && validFiles.length === 1) {
+          const gif = unsyncedGifs[0];
+          selectedFiles[gif.layerId] = validFiles[0];
+          console.log(`   ✅ 单 GIF 自动匹配: ${gif.layerName} <- ${validFiles[0].name}`);
+        } else {
+          // 多 GIF 模式：使用文件名匹配
+          unsyncedGifs.forEach(gif => {
+            const layerName = gif.layerName;
+            const originalFilename = gif.filename || gif.layerName; // 使用原始文件名或图层名
             
-            // 清理图层名和原始文件名（去掉扩展名）
-            const layerNameClean = layerName.replace(/\.(gif|mov|mp4)$/i, '').replace(/\s+/g, '-').toLowerCase();
-            const originalFilenameClean = originalFilename.replace(/\.(gif|mov|mp4)$/i, '').replace(/\s+/g, '-').toLowerCase();
-            const fileNameClean = fileName.replace(/\s+/g, '-').toLowerCase();
+            const matchedFile = validFiles.find(file => {
+              const fileName = file.name.replace(/\.(gif|mov|mp4)$/i, '');
+              
+              // 清理图层名和原始文件名（去掉扩展名）
+              const layerNameClean = layerName.replace(/\.(gif|mov|mp4)$/i, '').replace(/\s+/g, '-').toLowerCase();
+              const originalFilenameClean = originalFilename.replace(/\.(gif|mov|mp4)$/i, '').replace(/\s+/g, '-').toLowerCase();
+              const fileNameClean = fileName.replace(/\s+/g, '-').toLowerCase();
+              
+              // 1. 精确匹配（原始文件名或图层名）
+              if (fileNameClean === originalFilenameClean || fileNameClean === layerNameClean) return true;
+              
+              // 2. 包含匹配
+              if (fileNameClean.includes(originalFilenameClean) || originalFilenameClean.includes(fileNameClean)) return true;
+              if (fileNameClean.includes(layerNameClean) || layerNameClean.includes(fileNameClean)) return true;
+              
+              // 3. 宽松匹配（去除所有特殊字符）
+              const originalSimple = originalFilenameClean.replace(/[^a-z0-9]/g, '');
+              const layerSimple = layerNameClean.replace(/[^a-z0-9]/g, '');
+              const fileSimple = fileNameClean.replace(/[^a-z0-9]/g, '');
+              
+              if (originalSimple && fileSimple && originalSimple.length > 2 && 
+                  (originalSimple === fileSimple || fileSimple.includes(originalSimple) || originalSimple.includes(fileSimple))) {
+                return true;
+              }
+              
+              if (layerSimple && fileSimple && layerSimple.length > 2 && 
+                  (layerSimple === fileSimple || fileSimple.includes(layerSimple) || layerSimple.includes(fileSimple))) {
+                return true;
+              }
+              
+              return false;
+            });
             
-            // 1. 精确匹配（原始文件名或图层名）
-            if (fileNameClean === originalFilenameClean || fileNameClean === layerNameClean) return true;
-            
-            // 2. 包含匹配
-            if (fileNameClean.includes(originalFilenameClean) || originalFilenameClean.includes(fileNameClean)) return true;
-            if (fileNameClean.includes(layerNameClean) || layerNameClean.includes(fileNameClean)) return true;
-            
-            // 3. 宽松匹配（去除所有特殊字符）
-            const originalSimple = originalFilenameClean.replace(/[^a-z0-9]/g, '');
-            const layerSimple = layerNameClean.replace(/[^a-z0-9]/g, '');
-            const fileSimple = fileNameClean.replace(/[^a-z0-9]/g, '');
-            
-            if (originalSimple && fileSimple && originalSimple.length > 2 && 
-                (originalSimple === fileSimple || fileSimple.includes(originalSimple) || originalSimple.includes(fileSimple))) {
-              return true;
+            if (matchedFile) {
+              selectedFiles[gif.layerId] = matchedFile;
+              console.log(`   ✅ 匹配: ${originalFilename} (图层: ${layerName}) <- ${matchedFile.name}`);
+            } else {
+              console.log(`   ❌ 未匹配: ${originalFilename} (图层: ${layerName})`);
             }
-            
-            if (layerSimple && fileSimple && layerSimple.length > 2 && 
-                (layerSimple === fileSimple || fileSimple.includes(layerSimple) || layerSimple.includes(fileSimple))) {
-              return true;
-            }
-            
-            return false;
           });
-          
-          if (matchedFile) {
-            selectedFiles[gif.layerId] = matchedFile;
-            console.log(`   ✅ 匹配: ${originalFilename} (图层: ${layerName}) <- ${matchedFile.name}`);
-          } else {
-            console.log(`   ❌ 未匹配: ${originalFilename} (图层: ${layerName})`);
-          }
-        });
+        }
         
         const matchedGifs = unsyncedGifs.filter(gif => selectedFiles[gif.layerId]);
         const totalToUpload = matchedGifs.length;
         
         if (totalToUpload === 0) {
-          showToast('未能匹配任何文件，请检查文件名是否包含在图层名中', 'warning');
+          const hint = unsyncedGifs.length === 1 
+            ? '请上传一个视频/GIF文件' 
+            : '请检查文件名是否包含在图层名中';
+          showToast(`未能匹配任何文件，${hint}`, 'warning');
           // 恢复拖拽区域
           if (dropzone) dropzone.style.display = 'flex';
           if (progressContainer) progressContainer.style.display = 'none';
