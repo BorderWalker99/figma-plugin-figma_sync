@@ -536,15 +536,19 @@
         font-display: swap;
     }
 
-    body {
+    html, body {
       margin: 0;
       padding: 0;
+      height: 100%;
+      overflow: hidden; /* 禁止页面滚动 */
+    }
+
+    body {
       font-family: 'Alibaba PuHuiTi 2.0', "SF Pro Text", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif;
       background: var(--bg-app);
       color: var(--text-primary);
       font-size: 13px;
       line-height: 1.4;
-      overflow: visible; /* Fixed height app */
       user-select: none;
     }
 
@@ -555,8 +559,9 @@
       height: 100vh;
       padding: 16px;
       gap: 8px;
+      box-sizing: border-box;
       transition: all 0.4s var(--ease-spring);
-      overflow: visible;
+      overflow: hidden; /* 禁止容器滚动 */
     }
 
     .app.minimized {
