@@ -116,7 +116,7 @@ function sanitizeFilename(filename, mimeType) {
 }
 
 /**
- * 获取文件夹中的下一个序号
+ * 获取文件夹中的下一个序号（填补空缺）
  */
 function getNextSequenceNumber(folderPath, prefix, extensions) {
   if (!fs.existsSync(folderPath)) {
@@ -124,7 +124,7 @@ function getNextSequenceNumber(folderPath, prefix, extensions) {
   }
   
   const files = fs.readdirSync(folderPath);
-  let maxNumber = 0;
+  const existingNumbers = new Set();
   
   files.forEach(file => {
     const ext = path.extname(file).toLowerCase();
@@ -134,13 +134,27 @@ function getNextSequenceNumber(folderPath, prefix, extensions) {
       const match = nameWithoutExt.match(new RegExp(`^${prefix}_(\\d+)$`));
       if (match) {
         const num = parseInt(match[1], 10);
-        if (num > maxNumber) {
-          maxNumber = num;
-        }
+        existingNumbers.add(num);
       }
     }
   });
   
+  // 如果没有文件，返回 1
+  if (existingNumbers.size === 0) {
+    return 1;
+  }
+  
+  // 找到最大编号
+  const maxNumber = Math.max(...existingNumbers);
+  
+  // 从 1 开始查找第一个空缺的编号
+  for (let i = 1; i <= maxNumber; i++) {
+    if (!existingNumbers.has(i)) {
+      return i; // 返回第一个空缺的编号
+    }
+  }
+  
+  // 如果没有空缺，返回 maxNumber + 1
   return maxNumber + 1;
 }
 

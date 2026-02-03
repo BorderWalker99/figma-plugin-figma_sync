@@ -1,14 +1,11 @@
 // code.js - 智能布局版本
 
-const PLUGIN_VERSION = '1.0.1'; // 插件版本号
+const PLUGIN_VERSION = '1.0.2'; // 插件版本号
 
 // 🛡️ 全局错误处理，防止切换文件时崩溃
 // Figma 插件没有 window.onerror，但我们可以尽量保护关键代码
 let isPluginReady = false;
 
-console.log('🚀🚀🚀 Figma插件启动 - 纯净载荷版本！🚀🚀🚀');
-console.log('📦 插件版本:', PLUGIN_VERSION);
-console.log('🔍 将输出详细的 imageTransform 检查日志');
 
 figma.showUI(__html__, { 
   width: 360, 
@@ -22,6 +19,102 @@ let screenshotIndex = 0; // 截屏图片计数器
 let screenRecordingIndex = 0; // 录屏计数器
 let cancelGifExport = false; // GIF导出取消标志
 let serverCheckTimer = null; // Server 缓存检查超时计时器
+
+// 时间线编辑器状态
+let isTimelineEditorOpen = false;
+let timelineFrameId = null;
+let lastTimelineLayerIds = []; // 用于检测图层顺序变化
+
+// 刷新时间线图层列表（用于检测到增删/重排序时）
+async function refreshTimelineLayers(frame) {
+  if (!frame || frame.type !== 'FRAME') return;
+  
+  try {
+    // 获取当前图层ID顺序
+    const currentLayerIds = frame.children.map(c => c.id);
+    
+    // 检查顺序是否变化
+    const orderChanged = lastTimelineLayerIds.length !== currentLayerIds.length ||
+      !lastTimelineLayerIds.every((id, i) => id === currentLayerIds[i]);
+    
+    if (!orderChanged) return; // 没有变化，不需要刷新
+    
+    lastTimelineLayerIds = currentLayerIds;
+    
+    // 重新导出所有图层
+    const exportPromises = frame.children.map(async (child) => {
+      try {
+        const bytes = await child.exportAsync({
+          format: 'PNG',
+          constraint: { type: 'HEIGHT', value: 800 }
+        });
+        
+        let videoId = null;
+        let isVideoLayer = false;
+        
+        try {
+          const pluginDataStr = child.getPluginData('videoId');
+          if (pluginDataStr) {
+            videoId = pluginDataStr;
+            isVideoLayer = true;
+          }
+        } catch (e) {}
+        
+        if (!isVideoLayer && 'fills' in child && Array.isArray(child.fills)) {
+          for (const fill of child.fills) {
+            if (fill.type === 'VIDEO') {
+              isVideoLayer = true;
+              break;
+            }
+          }
+        }
+        
+        if (!isVideoLayer) {
+          const lowerName = child.name.toLowerCase();
+          const videoExtensions = ['.gif', '.mp4', '.mov', '.webm', '.avi', '.mkv'];
+          const videoKeywords = ['screenrecording', 'video', 'gif'];
+          if (videoExtensions.some(ext => lowerName.endsWith(ext)) ||
+              videoKeywords.some(kw => lowerName.includes(kw))) {
+            isVideoLayer = true;
+          }
+        }
+        
+        return {
+          id: child.id,
+          name: child.name,
+          type: child.type,
+          thumbnail: figma.base64Encode(bytes),
+          width: child.width,
+          height: child.height,
+          x: child.x,
+          y: child.y,
+          isVideoLayer: isVideoLayer,
+          videoId: videoId
+        };
+      } catch (err) {
+        return {
+          id: child.id,
+          name: child.name,
+          type: child.type,
+          thumbnail: null,
+          isVideoLayer: false,
+          videoId: null
+        };
+      }
+    });
+    
+    const processedLayers = await Promise.all(exportPromises);
+    
+    figma.ui.postMessage({
+      type: 'timeline-layers-refresh',
+      layers: processedLayers,
+      frameWidth: frame.width,
+      frameHeight: frame.height
+    });
+  } catch (e) {
+    console.warn('刷新时间线图层失败:', e);
+  }
+}
 
 // 缓存最近同步的文件信息（用于 Video 手动拖入后的自动关联）
 // Map<文件名, 文件元数据>
@@ -61,25 +154,18 @@ function initializeCounters() {
       
       screenshotIndex = maxScreenshotIndex;
       screenRecordingIndex = maxScreenRecordingIndex;
-      
-      if (maxScreenshotIndex > 0 || maxScreenRecordingIndex > 0) {
-        console.log(`📊 从画板初始化计数器: Screenshot=${screenshotIndex}, ScreenRecording=${screenRecordingIndex}`);
-      }
     }
   } catch (e) {
-    console.log('⚠️ 初始化计数器时出错（可能正在切换文件）:', e.message);
+    // 初始化计数器时出错（可能正在切换文件）
   }
 }
 
 // 🛡️ 延迟初始化，确保 Figma 文档已完全加载
-// 这可以防止在切换文件时发生的闪退
 setTimeout(() => {
   try {
     initializeCounters();
     isPluginReady = true;
-    console.log('✅ 插件已准备就绪');
   } catch (e) {
-    console.log('⚠️ 初始化时出错:', e.message);
     isPluginReady = true; // 即使出错也标记为就绪，允许后续操作
   }
 }, 100);
@@ -100,11 +186,8 @@ let customSizeSettings = {
     customSizeSettings.width = width || null;
     customSizeSettings.height = height || null;
     customSizeSettings.columns = columns || null;
-    if (customSizeSettings.width || customSizeSettings.height || customSizeSettings.columns) {
-      console.log('📖 已加载保存的设置:', customSizeSettings);
-    }
   } catch (error) {
-    console.error('❌ 加载设置失败:', error);
+    // 加载设置失败
   }
 })();
 
@@ -125,12 +208,10 @@ function isFrameValid() {
   
   try {
     const test = currentFrame.name;
-    // 检查画板是否在当前页面
     const page = figma.currentPage;
     if (!page || !page.children) return false;
     return page.children.includes(currentFrame);
   } catch (error) {
-    console.log('画板已失效');
     return false;
   }
 }
@@ -148,7 +229,6 @@ function findFrameByName(name) {
     }
     return null;
   } catch (e) {
-    console.log('⚠️ 查找画板时出错:', e.message);
     return null;
   }
 }
@@ -163,13 +243,11 @@ function ensureFrame() {
   // 尝试查找已存在的画板
   const existingFrame = findFrameByName("ScreenSync Screenshots");
   if (existingFrame) {
-    console.log('✅ 找到已存在的画板: ScreenSync Screenshots');
     currentFrame = existingFrame;
     
     // 确保画板使用 Auto Layout（如果还没有设置，或者设置不完整）
     if (currentFrame.layoutMode === 'NONE' || currentFrame.layoutMode !== 'HORIZONTAL') {
       currentFrame.layoutMode = 'HORIZONTAL';
-      console.log('   🔄 为画板启用 Auto Layout（水平布局）');
     }
     
     // 确保 auto-layout 属性完整设置（无论是否刚启用）
@@ -215,8 +293,6 @@ function ensureFrame() {
   }
   
   // 如果没有找到，创建新画板
-  console.log('🖼️ 自动创建画板...');
-  
   try {
     const frame = figma.createFrame();
     frame.name = "ScreenSync Screenshots";
@@ -256,10 +332,8 @@ function ensureFrame() {
     currentFrame = frame;
     figma.currentPage.appendChild(frame);
     
-    console.log('✅ 画板自动创建成功（Auto Layout 水平布局）');
     return true;
   } catch (error) {
-    console.error('❌ 创建画板失败:', error);
     return false;
   }
 }
@@ -295,8 +369,6 @@ function findFirstEmptyPosition() {
     }
   });
   
-  console.log('📊 已占用位置:', Array.from(occupiedPositions));
-  
   // 按行优先顺序查找第一个空位
   let maxRow = Math.ceil(children.length / columns) + 1;
   
@@ -304,14 +376,11 @@ function findFirstEmptyPosition() {
     for (let col = 0; col < columns; col++) {
       const posKey = `${col},${row}`;
       if (!occupiedPositions.has(posKey)) {
-        console.log(`✅ 找到空位: 第${row + 1}行, 第${col + 1}列`);
         return { col, row };
       }
     }
   }
   
-  // 如果没有找到空位，返回新的行
-  console.log('📍 所有位置已占用，使用新行');
   return { col: 0, row: maxRow };
 }
 
@@ -361,22 +430,13 @@ function adjustFrameSize() {
 figma.ui.onmessage = async (msg) => {
   // 🛡️ 全局 try-catch 保护，防止任何消息处理错误导致插件崩溃
   try {
-    // 🛡️ 检查插件是否就绪，避免在初始化期间处理消息
     if (!msg || !msg.type) {
-      console.log('⚠️ 收到无效消息，忽略');
       return;
     }
-    
-    console.log('📬 收到UI消息:', msg.type);
   
   // ✅ 处理UI返回的跳过文件缓存数据
   if (msg.type === 'skipped-file-cache-response') {
-    console.log('📥 收到UI缓存响应:', msg.filename);
     if (msg.cacheData) {
-      console.log('   gifCacheId:', msg.cacheData.gifCacheId || '无');
-      console.log('   driveFileId:', msg.cacheData.driveFileId || '无');
-      console.log('   ossFileId:', msg.cacheData.ossFileId || '无');
-      
       // 将缓存数据添加到 recentSyncedFiles，以便导出时使用
       recentSyncedFiles.set(msg.filename, {
         originalFilename: msg.filename,
@@ -386,45 +446,28 @@ figma.ui.onmessage = async (msg) => {
         timestamp: msg.cacheData.timestamp
       });
       
-      console.log('   ✅ 已添加到 recentSyncedFiles 缓存');
-      
       // 如果有nodeId，说明是从documentchange监听器触发的，需要自动关联到节点
       if (msg.nodeId) {
-        console.log('   🔗 自动关联缓存数据到节点:', msg.nodeId);
-        
         try {
           const node = figma.getNodeById(msg.nodeId);
           
           if (node && node.type === 'RECTANGLE') {
-            // 保存文件名
             node.setPluginData('originalFilename', msg.filename);
-            console.log('      ✅ 已保存 originalFilename:', msg.filename);
             
-            // 保存driveFileId
             if (msg.cacheData.driveFileId) {
               node.setPluginData('driveFileId', msg.cacheData.driveFileId);
-              console.log('      ✅ 已保存 driveFileId:', msg.cacheData.driveFileId);
             }
             
-            // 保存ossFileId
             if (msg.cacheData.ossFileId) {
               node.setPluginData('ossFileId', msg.cacheData.ossFileId);
-              console.log('      ✅ 已保存 ossFileId:', msg.cacheData.ossFileId);
             }
             
-            // 保存gifCacheId（最重要！用于导出时查找原始文件）
             if (msg.cacheData.gifCacheId) {
               node.setPluginData('gifCacheId', msg.cacheData.gifCacheId);
-              console.log('      ✅ 已保存 gifCacheId:', msg.cacheData.gifCacheId);
-              console.log('      💡 导出时会自动从缓存读取原始Video（无需手动上传）');
             }
-            
-            console.log('   🎉 自动关联完成！此Video导出时无需手动上传');
-          } else {
-            console.warn('   ⚠️  节点不存在或类型不是RECTANGLE');
           }
         } catch (error) {
-          console.error('   ❌ 自动关联失败:', error);
+          console.error('自动关联失败:', error);
         }
       }
     }
@@ -433,14 +476,12 @@ figma.ui.onmessage = async (msg) => {
   
   // 处理强制关闭插件（单实例限制）
   if (msg.type === 'close-plugin') {
-    console.log('🔒 收到关闭插件请求（检测到其他实例）');
     figma.closePlugin();
     return;
   }
 
   // 处理取消GIF导出
   if (msg.type === 'cancel-gif-export') {
-    console.log('🛑 收到取消GIF导出请求');
     cancelGifExport = true;
     return;
   }
@@ -452,15 +493,12 @@ figma.ui.onmessage = async (msg) => {
       clearTimeout(serverCheckTimer);
       serverCheckTimer = null;
     }
-    console.log(`📥 收到 Server 缓存检查结果: ${msg.results.length} 个文件, fromExport: ${msg.fromExport}`);
-    
     let updatedCount = 0;
     
     for (const res of msg.results) {
       if (res.found && res.layerId) {
         const node = figma.getNodeById(res.layerId);
         if (node) {
-          console.log(`   ✅ 自动关联 Server 缓存: ${node.name}`);
           if (res.gifCacheId) node.setPluginData('gifCacheId', res.gifCacheId);
           if (res.driveFileId) node.setPluginData('driveFileId', res.driveFileId);
           if (res.ossFileId) node.setPluginData('ossFileId', res.ossFileId);
@@ -469,8 +507,6 @@ figma.ui.onmessage = async (msg) => {
       }
     }
     
-    console.log(`   🎉 已自动修复 ${updatedCount} 个图层的关联数据`);
-    
     // ✅ 只有在导出流程中才触发导出，自动关联场景不触发
     if (msg.fromExport) {
       // 重新触发导出，但跳过检查以避免死循环（如果有剩下的确实没找到）
@@ -478,22 +514,28 @@ figma.ui.onmessage = async (msg) => {
         type: 'trigger-export-from-code',
         skipServerCheck: true
       });
-    } else {
-      console.log('   ℹ️  非导出流程，跳过触发导出');
     }
     return;
   }
 
   // 处理导出带标注的 GIF
   if (msg.type === 'export-annotated-gif') {
-    console.log('🎬 开始导出带标注的 GIF');
-    
     // 重置取消标志
     cancelGifExport = false;
     
     try {
-      const selection = figma.currentPage.selection;
-      console.log('   选中的节点数量:', selection ? selection.length : 'selection is null/undefined');
+      let selection = figma.currentPage.selection;
+      
+      // 如果传入了 frameId（来自时间线编辑），优先使用它
+      if (msg.frameId) {
+        const frameFromId = figma.getNodeById(msg.frameId);
+        if (frameFromId && frameFromId.type === 'FRAME') {
+          selection = [frameFromId];
+          // 同时更新 Figma 的选择，确保一致性
+          figma.currentPage.selection = selection;
+          console.log('🕐 [导出] 使用时间线编辑的 Frame:', frameFromId.name);
+        }
+      }
       
       // 检查是否选中了节点
       if (!selection || selection.length === 0) {
@@ -511,14 +553,10 @@ figma.ui.onmessage = async (msg) => {
         let isManualDrag = false;
         let isGifDetected = false;
         
-        console.log(`   🔎 正在检查节点: ${node.name} (type: ${node.type})`);
-        console.log(`      originalFilename (pluginData): ${filename || '无'}`);
-        
         // ✅ 优化：即使有 originalFilename，也尝试通过字节检测确认是否是 GIF
         // 这能处理文件名没有扩展名或扩展名不正确的情况
         if (node.type === 'RECTANGLE' && node.fills && node.fills.length > 0) {
           const fill = node.fills[0];
-          console.log(`      填充类型: ${fill.type}`);
           
           // 检查 IMAGE 填充（通过字节头识别 GIF）
           if (fill.type === 'IMAGE' && fill.imageHash) {
@@ -528,7 +566,6 @@ figma.ui.onmessage = async (msg) => {
                 const bytes = await image.getBytesAsync();
                 // 检查 GIF 魔法数 (GIF89a 或 GIF87a) -> 'GIF' (0x47, 0x49, 0x46)
                 if (bytes.length >= 3 && bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) {
-                  console.log(`   🎨 [ByteCheck] 检测到 GIF 格式图片: ${node.name}`);
                   isGifDetected = true;
                   
                   // 检查是否有关联数据（用于判断是手动拖入还是手机同步）
@@ -536,10 +573,8 @@ figma.ui.onmessage = async (msg) => {
                   const ossFileId = node.getPluginData('ossFileId');
                   
                   if (driveFileId || ossFileId) {
-                    console.log(`   📱 检测到手机同步的 GIF 图层: ${node.name}`);
                     isManualDrag = false;
                   } else {
-                    console.log(`   🎬 检测到手动拖入的 GIF 图层: ${node.name}`);
                     isManualDrag = true;
                   }
                   
@@ -553,18 +588,16 @@ figma.ui.onmessage = async (msg) => {
                 }
               }
             } catch (e) {
-              console.error('Failed to read image bytes:', e);
+              // Ignore error
             }
           }
         }
         
         // 如果没有 originalFilename，且不是 GIF，继续检查是否是手动拖入的视频
         if (!filename && !isGifDetected) {
-          console.log('      没有 originalFilename，检查填充类型...');
           // 检查填充类型是否是 VIDEO 或 IMAGE
           if (node.type === 'RECTANGLE' && node.fills && node.fills.length > 0) {
             const fill = node.fills[0];
-            // 填充类型已在上面打印过
             
             // 方法 1：检查 VIDEO 填充
             if (fill.type === 'VIDEO') {
@@ -573,16 +606,11 @@ figma.ui.onmessage = async (msg) => {
               const driveFileId = node.getPluginData('driveFileId');
               const ossFileId = node.getPluginData('ossFileId');
               
-              console.log(`      检查 driveFileId: ${driveFileId || '无'}`);
-              console.log(`      检查 ossFileId: ${ossFileId || '无'}`);
-              
               if (driveFileId || ossFileId) {
                 // 这是手机同步的视频，不是手动拖入
-                console.log(`      ✅ 这是手机同步的视频（有 fileId）`);
                 isManualDrag = false;
               } else {
                 // 可能是手动拖入的视频，尝试从UI缓存中查找
-                console.log(`      🔄 可能是手动拖入的视频，尝试从UI缓存查找: ${node.name}`);
                 
                 // 请求UI返回缓存数据
                 figma.ui.postMessage({
@@ -592,11 +620,9 @@ figma.ui.onmessage = async (msg) => {
                 
                 // 注意：这里是异步的，我们需要等待UI返回数据
                 // 为了保持同步流程，我们先尝试从 recentSyncedFiles 缓存中查找
-                console.log(`      🔄 尝试在缓存中查找: ${node.name} (当前缓存 ${recentSyncedFiles.size} 个文件)`);
                 
                 // 打印所有缓存键值（仅调试用）
                 if (recentSyncedFiles.size > 0) {
-                  console.log(`         缓存列表:`, Array.from(recentSyncedFiles.keys()));
                 }
 
                 // 1. 直接匹配
@@ -610,15 +636,12 @@ figma.ui.onmessage = async (msg) => {
                     const keyName = key.toLowerCase().replace(/\.[^/.]+$/, "");
                     if (keyName === targetName) {
                       cachedInfo = info;
-                      console.log(`         ✨ 模糊匹配成功: ${key} -> ${node.name}`);
                       break;
                     }
                   }
                 }
                 
                 if (cachedInfo) {
-                  console.log(`      ✅ 匹配成功! 原始文件: ${cachedInfo.originalFilename}`);
-                  
                   // 自动关联数据
                   node.setPluginData('driveFileId', cachedInfo.driveFileId || '');
                   node.setPluginData('ossFileId', cachedInfo.ossFileId || '');
@@ -627,8 +650,6 @@ figma.ui.onmessage = async (msg) => {
                   
                   isManualDrag = false;
                 } else {
-                  // 确实是无数据的，需要手动上传
-                  console.log(`      ⚠️  未在缓存中找到匹配文件，需要手动上传`);
                   isManualDrag = true;
                 }
               }
@@ -637,11 +658,7 @@ figma.ui.onmessage = async (msg) => {
               
               // 尝试从图层名称推断扩展名
               if (!filename.toLowerCase().endsWith('.mp4') && !filename.toLowerCase().endsWith('.mov')) {
-                // 如果图层名称没有扩展名，添加 .mov（视频默认格式）
                 filename = filename + '.mov';
-                console.log(`      推断文件名（添加 .mov）: ${filename}`);
-              } else {
-                console.log(`      使用图层名称作为文件名: ${filename}`);
               }
             }
             // 注意：IMAGE 填充的 GIF 检测已在函数开头处理
@@ -649,38 +666,19 @@ figma.ui.onmessage = async (msg) => {
         }
         
         if (filename && (isGifDetected || filename.toLowerCase().endsWith('.mp4') || filename.toLowerCase().endsWith('.mov') || filename.toLowerCase().endsWith('.gif'))) {
-          console.log(`      最终 filename: ${filename}`);
-          
-          // 检查 1：文件扩展名
           const hasValidExtension = filename.toLowerCase().endsWith('.gif') || 
                                    filename.toLowerCase().endsWith('.mov') || 
                                    filename.toLowerCase().endsWith('.mp4');
-          
-          // 检查 2：图层名称（兼容没有扩展名的情况）
           const isScreenRecordingLayer = node.name && node.name.startsWith('ScreenRecording_');
-          
-          // 检查 3：文件名包含 ScreenRecording（兼容没有扩展名的情况）
           const filenameIndicatesRecording = filename.includes('ScreenRecording');
           
-          console.log(`      hasValidExtension: ${hasValidExtension}`);
-          console.log(`      isScreenRecordingLayer: ${isScreenRecordingLayer}`);
-          console.log(`      filenameIndicatesRecording: ${filenameIndicatesRecording}`);
-          
           if (hasValidExtension || isScreenRecordingLayer || filenameIndicatesRecording || isGifDetected) {
-            console.log(`      ✅ 图层符合条件，添加到结果列表`);
-            
-            // 如果是手动拖入的，保存文件名到 pluginData（以便下次识别）
             if (isManualDrag && !node.getPluginData('originalFilename')) {
               node.setPluginData('originalFilename', filename);
-              console.log(`      💾 已保存文件名到 pluginData: ${filename}`);
             }
             
             results.push({ layer: node, filename: filename });
-          } else {
-            console.log(`      ⏭️  图层不符合条件，跳过`);
           }
-        } else {
-          console.log(`      ⏭️  无 filename 或非 GIF/Video，跳过此节点`);
         }
         
         // 递归检查子节点
@@ -723,40 +721,16 @@ figma.ui.onmessage = async (msg) => {
         return;
       }
 
-      console.log(`✅ 找到 ${validTasks.length} 个可导出的 GIF 任务`);
-
       // 3. 检查是否有未同步的 GIF（缺少原始数据）
       const unsyncedGifs = [];
       for (const task of validTasks) {
         for (const gifLayer of task.gifLayers) {
           const driveFileId = gifLayer.layer.getPluginData('driveFileId');
           const ossFileId = gifLayer.layer.getPluginData('ossFileId');
-          const gifCacheId = gifLayer.layer.getPluginData('gifCacheId');
           const originalFilename = gifLayer.layer.getPluginData('originalFilename');
-          
-          // 🔍 详细调试信息
-          console.log('\n   🔍 检查图层: ' + gifLayer.layer.name);
-          console.log('      类型: ' + gifLayer.layer.type);
-          
-          // 安全地获取填充类型
-          let fillType = '无';
-          try {
-            if (gifLayer.layer.fills && gifLayer.layer.fills.length > 0) {
-              fillType = gifLayer.layer.fills[0].type || '无';
-            }
-          } catch (e) {
-            fillType = '错误';
-          }
-          console.log('      填充类型: ' + fillType);
-          
-          console.log('      originalFilename: ' + (originalFilename || '无'));
-          console.log('      driveFileId: ' + (driveFileId || '无'));
-          console.log('      ossFileId: ' + (ossFileId || '无'));
-          console.log('      gifCacheId: ' + (gifCacheId || '无'));
           
           // 如果既没有 driveFileId 也没有 ossFileId，说明这个 GIF 没有原始数据
           if (!driveFileId && !ossFileId) {
-            console.log('   ⚠️  检测到未同步的 GIF: ' + gifLayer.layer.name + ' (文件名: ' + (originalFilename || '未知') + ')');
             unsyncedGifs.push({
               layerId: gifLayer.layer.id,
               layerName: gifLayer.layer.name,
@@ -764,8 +738,6 @@ figma.ui.onmessage = async (msg) => {
               frameId: task.frame.id,
               frameName: task.frame.name
             });
-          } else {
-            console.log('   ✅ 图层有完整同步数据，可以直接导出');
           }
         }
       }
@@ -774,7 +746,6 @@ figma.ui.onmessage = async (msg) => {
       if (unsyncedGifs.length > 0) {
         // 如果是强制跳过检查（例如已经检查过一次了），则直接请求上传
         if (msg.skipServerCheck) {
-          console.log(`   🔔 发现 ${unsyncedGifs.length} 个未同步的 GIF (Server已检查)，请求用户上传`);
           figma.ui.postMessage({
             type: 'request-upload-gifs',
             unsyncedGifs: unsyncedGifs
@@ -782,16 +753,14 @@ figma.ui.onmessage = async (msg) => {
           return; // 停止导出流程，等待用户上传
         }
 
-        console.log(`   🔍 发现 ${unsyncedGifs.length} 个未同步的 GIF，先尝试从 Server 检查缓存...`);
         figma.ui.postMessage({
           type: 'check-server-cache-for-unsynced',
           unsyncedGifs: unsyncedGifs
         });
 
-        // ✅ 设置超时保护 (3秒)
+        // ✅ 设置超时保护 (2秒)
         if (serverCheckTimer) clearTimeout(serverCheckTimer);
         serverCheckTimer = setTimeout(() => {
-          console.warn('⚠️ Server 缓存检查超时 (2s)，自动切换到手动上传模式');
           serverCheckTimer = null;
           // 通知 UI 重新触发导出，并跳过 Server 检查
           figma.ui.postMessage({
@@ -813,7 +782,6 @@ figma.ui.onmessage = async (msg) => {
       for (let i = 0; i < validTasks.length; i++) {
         // 检查是否被取消
         if (cancelGifExport) {
-          console.log('🛑 检测到取消信号，停止导出');
           figma.ui.postMessage({
             type: 'export-gif-cancelled'
           });
@@ -822,13 +790,6 @@ figma.ui.onmessage = async (msg) => {
         
         const task = validTasks[i];
         const { frame, gifLayers } = task;
-        
-        console.log(`\n🚀 处理第 ${i + 1}/${validTasks.length} 个任务`);
-        console.log(`   Frame: ${frame.name}`);
-        console.log(`   包含 ${gifLayers.length} 个 GIF 图层:`);
-        gifLayers.forEach((gif, idx) => {
-          console.log(`      ${idx + 1}. ${gif.layer.name} (${gif.filename})`);
-        });
 
         // 计算图层相对于顶层 Frame 的绝对坐标
         function getAbsolutePosition(node, targetFrame) {
@@ -906,9 +867,6 @@ figma.ui.onmessage = async (msg) => {
                 }
               }
               
-              console.log(`      🔍 检测到裁切容器: ${parent.name}, 类型: ${parent.type}`);
-              console.log(`         裁切区域: (${clipBounds.x}, ${clipBounds.y}), ${clipBounds.width}x${clipBounds.height}`);
-              console.log(`         裁切圆角: ${clipCornerRadius}px`);
               break; // 只取最近的裁切容器
             }
             
@@ -928,27 +886,14 @@ figma.ui.onmessage = async (msg) => {
                    // 手动转换 Transform 对象为普通数组
                    let transformArray = null;
                    
-                   // 详细调试日志
-                   console.log(`      🔍 检查图层 "${layer.name}" 的 ${fill.type} Fill:`);
-                   console.log(`         - scaleMode: ${fill.scaleMode}`);
-                   console.log(`         - imageTransform (原始类型): ${typeof fill.imageTransform}`);
-                   
                    if (fill.imageTransform) {
-                      console.log(`         - imageTransform (原始值):`, fill.imageTransform);
                       try {
                         transformArray = [
                            [fill.imageTransform[0][0], fill.imageTransform[0][1], fill.imageTransform[0][2]],
                            [fill.imageTransform[1][0], fill.imageTransform[1][1], fill.imageTransform[1][2]]
                         ];
-                        console.log(`         - imageTransform (转换成功):`, JSON.stringify(transformArray));
                       } catch (e) {
-                        console.error(`         ❌ 转换 imageTransform 失败:`, e);
-                      }
-                   } else {
-                      console.warn(`         ⚠️ imageTransform 为空或 undefined!`);
-                      // 如果是 CROP 模式但没有 imageTransform，这很不正常
-                      if (fill.scaleMode === 'CROP' || fill.scaleMode === 'FILL') {
-                         console.warn(`         ⚠️ CROP/FILL 模式下缺少 imageTransform，尝试从 PluginData 获取...`);
+                        // Ignore transform conversion error
                       }
                    }
                    
@@ -964,29 +909,6 @@ figma.ui.onmessage = async (msg) => {
              }
           }
           
-          if (!imageFillInfo) {
-             console.error(`❌ 严重错误: GIF ${idx + 1} 没有找到 Image Fill 信息！`);
-          } else {
-             console.log(`✅ 最终 imageFillInfo (GIF ${idx + 1}):`, JSON.stringify(imageFillInfo));
-          }
-          
-          console.log(`   收集 GIF ${idx + 1} 信息:`);
-          console.log(`      图层名: ${layer.name}`);
-          console.log(`      文件名: ${gif.filename}`);
-          console.log(`      相对位置: (${layer.x}, ${layer.y})`);
-          console.log(`      绝对位置: (${bounds.x}, ${bounds.y})`);
-          console.log(`      尺寸: ${bounds.width}x${bounds.height}`);
-          console.log(`      圆角: ${cornerRadius}px`);
-          console.log(`      裁切: ${clipBounds ? '是' : '否'}`);
-          
-          // 验证数据完整性
-          if (bounds.x === undefined || bounds.y === undefined) {
-            console.error(`      ⚠️ 警告：位置数据缺失！`);
-          }
-          if (!bounds.width || !bounds.height) {
-            console.error(`      ⚠️ 警告：尺寸数据无效！`);
-          }
-          
           // 获取该 GIF 在 frame.children 中的索引（z-index）
           const zIndex = Array.from(frame.children).indexOf(layer);
           
@@ -994,10 +916,6 @@ figma.ui.onmessage = async (msg) => {
           const imageHash = layer.getPluginData('imageHash');
           const driveFileId = layer.getPluginData('driveFileId');
           const ossFileId = layer.getPluginData('ossFileId');
-          
-          console.log(`      imageHash: ${imageHash || '无'}`);
-          console.log(`      driveFileId: ${driveFileId || '无'}`);
-          console.log(`      ossFileId: ${ossFileId || '无'}`);
           
           return {
             filename: gif.filename,
@@ -1010,7 +928,8 @@ figma.ui.onmessage = async (msg) => {
             clipBounds: clipBounds,
             clipCornerRadius: clipCornerRadius, // 传递裁切容器圆角
             imageFillInfo: imageFillInfo, // 传递 Fill 信息
-            zIndex: zIndex // ✅ 添加 z-index，用于正确的图层顺序合成
+            zIndex: zIndex, // ✅ 添加 z-index，用于正确的图层顺序合成
+            layerId: layer.id // ✅ Pass layerId
           };
         });
         
@@ -1025,7 +944,6 @@ figma.ui.onmessage = async (msg) => {
               b: Math.round(fill.color.b * 255),
               a: fill.opacity !== undefined ? fill.opacity : 1
             };
-            console.log(`   📋 Frame背景色: rgba(${frameBackground.r}, ${frameBackground.g}, ${frameBackground.b}, ${frameBackground.a})`);
           }
         }
         
@@ -1036,13 +954,11 @@ figma.ui.onmessage = async (msg) => {
         // 找到所有 GIF 图层在 Frame.children 中的索引
         const gifIndices = gifLayers.map(gif => {
           const index = Array.from(frame.children).indexOf(gif.layer);
-          console.log(`   📌 GIF图层 "${gif.layer.name}" 在 Frame.children 中的索引: ${index}`);
           return index;
         }).filter(idx => idx !== -1);
         
         // 找到最底层的 GIF（索引最小）
         const lowestGifIndex = Math.min(...gifIndices);
-        console.log(`   📌 最底层 GIF 索引: ${lowestGifIndex}`);
         
         // 保存所有图层的原始可见性
         const allLayersVisibility = new Map();
@@ -1050,35 +966,11 @@ figma.ui.onmessage = async (msg) => {
           allLayersVisibility.set(child.id, child.visible);
         });
         
-        // ========== 1. 导出 Bottom Layer（最底层 GIF 下面的图层）==========
-        console.log('   🔽 开始导出 Bottom Layer（最底层 GIF 下面的图层）...');
-        console.log(`   📊 最底层 GIF 下面有 ${lowestGifIndex} 个图层`);
-        console.log(`   💡 提示：frame.children[0] 是最底层，frame.children[${frame.children.length - 1}] 是最顶层`);
-        
-        // 打印所有图层的顺序（便于调试）
-        console.log('   📋 Frame 的所有图层（从底到顶）:');
-        frame.children.forEach((child, index) => {
-          const isGif = gifIndices.includes(index);
-          console.log(`      [${index}] ${child.name} (${child.type})${isGif ? ' ← GIF' : ''}`);
-        });
-        
         const highestGifIndex = Math.max(...gifIndices);
-        console.log(`   📌 GIF 索引范围: [${lowestGifIndex}, ${highestGifIndex}]`);
-        
-        if (lowestGifIndex === 0) {
-          console.log('   ⚠️  没有图层在最底层 GIF 下面');
-        }
         
         // 只有当 GIF 下面有图层时才导出 Bottom Layer
         let bottomLayerBytes = null;
         if (lowestGifIndex > 0) {
-          console.log('   ✅ 将导出以下图层作为 Bottom Layer:');
-          frame.children.forEach((child, index) => {
-            if (index < lowestGifIndex) {
-              console.log(`      - 索引${index}: "${child.name}" (${child.type})`);
-            }
-          });
-          
           // 隐藏 >= lowestGifIndex 的所有图层（包括 GIF 和 GIF 上面的）
           frame.children.forEach((child, index) => {
             if (index >= lowestGifIndex) {
@@ -1091,28 +983,34 @@ figma.ui.onmessage = async (msg) => {
             constraint: { type: 'SCALE', value: 1 }
           });
           
-          console.log(`   ✅ Bottom Layer 已导出 (${(bottomLayerBytes.length / 1024).toFixed(2)} KB)`);
-          
           // 恢复所有图层的可见性
           frame.children.forEach(child => {
             child.visible = allLayersVisibility.get(child.id);
           });
-        } else {
-          console.log(`   ⏭️  跳过 Bottom Layer 导出（最底层 GIF 是最底层图层）`);
         }
         
-        // ========== 2. 导出每个非 GIF 图层（用于正确的 z-order 合成）==========
-        console.log('   🔄 开始导出非 GIF 图层（用于正确的 z-order 合成）...');
-        
         // 收集所有非 GIF 图层的信息（包括它们的 z-index）
+        // staticLayers: GIF 之间的图层
+        // annotationLayers: GIF 之上的图层（支持时间线控制）
         const staticLayers = [];
+        const annotationLayers = [];
         frame.children.forEach((child, index) => {
           const isGif = gifIndices.includes(index);
           if (!isGif && index >= lowestGifIndex && index <= highestGifIndex) {
+            // GIF 之间的静态图层
             staticLayers.push({
               index: index,
               name: child.name,
-              type: child.type
+              type: child.type,
+              layerId: child.id // ✅ Pass layerId
+            });
+          } else if (!isGif && index > highestGifIndex) {
+            // GIF 之上的标注图层（新增：支持时间线）
+            annotationLayers.push({
+              index: index,
+              name: child.name,
+              type: child.type,
+              layerId: child.id // ✅ Pass layerId
             });
           }
         });
@@ -1120,8 +1018,6 @@ figma.ui.onmessage = async (msg) => {
         // 导出每个静态图层
         const staticLayerExports = [];
         for (const layerInfo of staticLayers) {
-          console.log(`   📤 导出静态图层 [${layerInfo.index}]: "${layerInfo.name}" (${layerInfo.type})`);
-          
           // 只显示当前图层，隐藏其他所有图层
           frame.children.forEach((child, index) => {
             child.visible = (index === layerInfo.index);
@@ -1135,10 +1031,9 @@ figma.ui.onmessage = async (msg) => {
           staticLayerExports.push({
             index: layerInfo.index,
             name: layerInfo.name,
-            bytes: Array.from(layerBytes)
+            bytes: Array.from(layerBytes),
+            layerId: layerInfo.layerId // ✅ Pass layerId
           });
-          
-          console.log(`      ✅ 已导出 (${(layerBytes.length / 1024).toFixed(2)} KB)`);
           
           // 恢复所有图层的可见性
           frame.children.forEach(child => {
@@ -1146,28 +1041,47 @@ figma.ui.onmessage = async (msg) => {
           });
         }
         
-        if (staticLayerExports.length > 0) {
-          console.log(`   ✅ 共导出 ${staticLayerExports.length} 个静态图层用于正确的 z-order 合成`);
-        } else {
-          console.log(`   ⏭️  没有需要导出的静态图层（GIF 之间没有其他图层）`);
+        // 导出每个标注图层（GIF 之上的图层，支持时间线控制）
+        const annotationLayerExports = [];
+        for (const layerInfo of annotationLayers) {
+          // 只显示当前图层，隐藏其他所有图层
+          frame.children.forEach((child, index) => {
+            child.visible = (index === layerInfo.index);
+          });
+          
+          const layerBytes = await frame.exportAsync({
+            format: 'PNG',
+            constraint: { type: 'SCALE', value: 1 }
+          });
+          
+          annotationLayerExports.push({
+            index: layerInfo.index,
+            name: layerInfo.name,
+            bytes: Array.from(layerBytes),
+            layerId: layerInfo.layerId // ✅ Pass layerId
+          });
+          
+          // 恢复所有图层的可见性
+          frame.children.forEach(child => {
+            child.visible = allLayersVisibility.get(child.id);
+          });
         }
         
-        // ========== 3. 导出 Top Layer（最顶层 GIF 上面的图层）==========
-        console.log('   🔼 开始导出 Top Layer（最顶层 GIF 上面的图层）...');
-        
-        // 隐藏 <= 最高 GIF 索引的所有图层（包括 GIF 和 GIF 下面的）
-        frame.children.forEach((child, index) => {
-          if (index <= highestGifIndex) {
-            child.visible = false;
-          }
-        });
-        
-        const annotationBytes = await frame.exportAsync({
-          format: 'PNG',
-          constraint: { type: 'SCALE', value: 1 }
-        });
-        
-        console.log(`   ✅ Top Layer 已导出 (${(annotationBytes.length / 1024).toFixed(2)} KB)`);
+        // 如果没有单独的标注图层，则使用传统的合成方式导出
+        let annotationBytes = null;
+        if (annotationLayerExports.length === 0) {
+          // 隐藏 <= 最高 GIF 索引的所有图层（包括 GIF 和 GIF 下面的）
+          frame.children.forEach((child, index) => {
+            if (index <= highestGifIndex) {
+              child.visible = false;
+            }
+          });
+          
+          annotationBytes = await frame.exportAsync({
+            format: 'PNG',
+            constraint: { type: 'SCALE', value: 1 }
+          });
+        }
         
         // 恢复Frame的背景填充
         frame.fills = originalFills;
@@ -1183,31 +1097,18 @@ figma.ui.onmessage = async (msg) => {
           frameName: frame.name,
           bottomLayerBytes: bottomLayerBytes ? Array.from(bottomLayerBytes) : null,     // 最底层 GIF 下面的图层
           staticLayers: staticLayerExports,                                              // 静态图层（按 z-index 排序）
-          annotationBytes: Array.from(annotationBytes),                                  // 最顶层 GIF 上面的图层
+          annotationLayers: annotationLayerExports,                                      // ✅ 标注图层（GIF 之上，支持时间线）
+          annotationBytes: annotationBytes ? Array.from(annotationBytes) : null,         // 兼容：如果没有单独标注图层则使用合成
           frameBounds: {
             width: frame.width,
             height: frame.height
           },
           frameBackground: frameBackground, // Frame的背景色
           gifInfos: gifInfos, // 所有 GIF 的信息（包含每个 GIF 的 index）
+          timelineData: msg.timelineData, // ✅ Pass timeline data
           batchIndex: i,
           batchTotal: validTasks.length
         };
-        
-        console.log(`   ✅ Payload ready (${gifInfos.length} GIFs), sending to UI`);
-        if (payload.bottomLayerBytes) {
-          console.log(`   🔍 Payload.bottomLayerBytes 长度: ${payload.bottomLayerBytes.length}`);
-        } else {
-          console.log(`   🔍 Payload.bottomLayerBytes: null（无底层图层）`);
-        }
-        if (payload.staticLayers && payload.staticLayers.length > 0) {
-          console.log(`   🔍 Payload.staticLayers: ${payload.staticLayers.length} 个静态图层`);
-          payload.staticLayers.forEach(layer => {
-            console.log(`      - [${layer.index}] ${layer.name}: ${layer.bytes.length} bytes`);
-          });
-        } else {
-          console.log(`   🔍 Payload.staticLayers: []（无静态图层）`);
-        }
         
         // 关键修复：确保 payload 是纯净的 JSON 对象，去除任何可能的 Figma 内部引用
         const cleanPayload = JSON.parse(JSON.stringify(payload));
@@ -1228,33 +1129,21 @@ figma.ui.onmessage = async (msg) => {
   
   // 处理服务器修复请求
   if (msg.type === 'repair-server') {
-    console.log('🔧 收到服务器修复请求');
-    
-    // 尝试通过 AppleScript 启动服务器
     try {
       const { exec } = require('child_process');
       const installPath = msg.installPath || '/Applications/ScreenSync - SourceCode';
       
-      console.log('   📂 安装路径:', installPath);
-      console.log('   🚀 尝试启动服务器...');
-      
-      // 方法 1: 尝试使用 launchctl 启动 LaunchAgent
       exec('launchctl start com.screensync.server 2>&1', (error, stdout, stderr) => {
         if (error) {
-          console.log('   ⚠️  LaunchAgent 启动失败，尝试直接启动...');
-          
-          // 方法 2: 直接启动 Node.js 进程
           const startCommand = `cd "${installPath}" && npm start > /dev/null 2>&1 &`;
           exec(startCommand, (error2, stdout2, stderr2) => {
             if (error2) {
-              console.log('   ❌ 直接启动失败:', error2.message);
               figma.ui.postMessage({
                 type: 'repair-server-response',
                 success: false,
                 message: '自动启动失败，请手动启动服务器'
               });
             } else {
-              console.log('   ✅ 服务器启动成功');
               figma.ui.postMessage({
                 type: 'repair-server-response',
                 success: true,
@@ -1263,7 +1152,6 @@ figma.ui.onmessage = async (msg) => {
             }
           });
         } else {
-          console.log('   ✅ LaunchAgent 启动成功');
           figma.ui.postMessage({
             type: 'repair-server-response',
             success: true,
@@ -1272,7 +1160,6 @@ figma.ui.onmessage = async (msg) => {
         }
       });
     } catch (error) {
-      console.error('   ❌ 修复失败:', error);
       figma.ui.postMessage({
         type: 'repair-server-response',
         success: false,
@@ -1295,9 +1182,8 @@ figma.ui.onmessage = async (msg) => {
   if (msg.type === 'save-plugin-version') {
     try {
       await figma.clientStorage.setAsync('pluginVersion', msg.version);
-      console.log('✅ 插件版本已保存:', msg.version);
     } catch (error) {
-      console.error('❌ 保存插件版本失败:', error);
+      // 保存失败
     }
     return;
   }
@@ -1306,13 +1192,11 @@ figma.ui.onmessage = async (msg) => {
   if (msg.type === 'update-size-settings') {
     customSizeSettings.width = msg.width;
     customSizeSettings.height = msg.height;
-    // 保存到 clientStorage
     try {
       await figma.clientStorage.setAsync('imageWidth', msg.width);
       await figma.clientStorage.setAsync('imageHeight', msg.height);
-      console.log('✅ 尺寸设置已更新并保存:', customSizeSettings);
     } catch (error) {
-      console.error('❌ 保存尺寸设置失败:', error);
+      // 保存失败
     }
     figma.ui.postMessage({
       type: 'size-settings-updated',
@@ -1328,14 +1212,12 @@ figma.ui.onmessage = async (msg) => {
       const height = await figma.clientStorage.getAsync('imageHeight');
       customSizeSettings.width = width || null;
       customSizeSettings.height = height || null;
-      console.log('📖 读取尺寸设置:', customSizeSettings);
       figma.ui.postMessage({
         type: 'size-settings-loaded',
         width: customSizeSettings.width,
         height: customSizeSettings.height
       });
     } catch (error) {
-      console.error('❌ 读取尺寸设置失败:', error);
       figma.ui.postMessage({
         type: 'size-settings-loaded',
         width: null,
@@ -1348,45 +1230,36 @@ figma.ui.onmessage = async (msg) => {
   // 处理布局设置更新
   if (msg.type === 'update-layout-settings') {
     customSizeSettings.columns = msg.columns;
-    // 保存到 clientStorage
     try {
       await figma.clientStorage.setAsync('frameColumns', msg.columns);
-      console.log('✅ 布局设置已更新并保存:', customSizeSettings);
       
-      // 更新现有画板的布局设置
       if (isFrameValid()) {
         if (customSizeSettings.columns && customSizeSettings.columns > 0) {
           currentFrame.layoutWrap = 'WRAP';
           currentFrame.counterAxisSizingMode = 'AUTO';
           
-          // 根据实际子元素宽度计算画板宽度，避免右边空隙
           let frameWidth = 0;
           if (currentFrame.children.length > 0) {
-            // 使用第一个子元素的实际宽度
             const firstChild = currentFrame.children[0];
             const itemWidth = firstChild.width;
             const itemSpacing = currentFrame.itemSpacing || 10;
             frameWidth = (itemWidth * customSizeSettings.columns) + (itemSpacing * (customSizeSettings.columns - 1));
           } else {
-            // 如果没有子元素，使用估算值
             const estimatedItemWidth = CONFIG.imageWidth || 440;
             frameWidth = (estimatedItemWidth * customSizeSettings.columns) + (10 * (customSizeSettings.columns - 1));
           }
           
           currentFrame.layoutSizingHorizontal = 'FIXED';
           currentFrame.resize(frameWidth, currentFrame.height || 800);
-          console.log(`   🔄 画板已设置为每行 ${customSizeSettings.columns} 张，宽度 ${frameWidth}px`);
         } else {
           currentFrame.layoutWrap = 'NO_WRAP';
           currentFrame.layoutSizingHorizontal = 'HUG';
-          console.log('   🔄 画板已设置为不换行（一直横着排）');
         }
         
-        // 确保移除填充颜色
         currentFrame.fills = [];
       }
     } catch (error) {
-      console.error('❌ 保存布局设置失败:', error);
+      // 保存失败
     }
     figma.ui.postMessage({
       type: 'layout-settings-updated',
@@ -1400,13 +1273,11 @@ figma.ui.onmessage = async (msg) => {
     try {
       const columns = await figma.clientStorage.getAsync('frameColumns');
       customSizeSettings.columns = columns || null;
-      console.log('📖 读取布局设置:', customSizeSettings);
       figma.ui.postMessage({
         type: 'layout-settings-loaded',
         columns: customSizeSettings.columns
       });
     } catch (error) {
-      console.error('❌ 读取布局设置失败:', error);
       figma.ui.postMessage({
         type: 'layout-settings-loaded',
         columns: null
@@ -1420,10 +1291,9 @@ figma.ui.onmessage = async (msg) => {
     try {
       if (msg.path) {
         await figma.clientStorage.setAsync('serverPath', msg.path);
-        console.log('✅ 服务器路径已保存:', msg.path);
       }
     } catch (error) {
-      console.error('❌ 保存服务器路径失败:', error);
+      // 保存失败
     }
     return;
   }
@@ -1432,13 +1302,11 @@ figma.ui.onmessage = async (msg) => {
   if (msg.type === 'get-server-path') {
     try {
       const path = await figma.clientStorage.getAsync('serverPath');
-      console.log('📖 读取服务器路径:', path);
       figma.ui.postMessage({
         type: 'server-path-loaded',
         path: path || null
       });
     } catch (error) {
-      console.error('❌ 读取服务器路径失败:', error);
       figma.ui.postMessage({
         type: 'server-path-loaded',
         path: null
@@ -1449,23 +1317,18 @@ figma.ui.onmessage = async (msg) => {
   
   // 处理打开更新URL请求
   if (msg.type === 'open-update-url') {
-    // Figma 插件无法直接打开外部链接，但可以显示提示
     figma.notify(`请访问以下地址下载最新版本：\n${msg.url}`, { timeout: 10000 });
-    console.log('🔗 更新地址:', msg.url);
     return;
   }
   
   // 处理窗口大小调整（用于最小化/恢复功能）
   if (msg.type === 'resize') {
     try {
-      // 允许最小宽度为 80px（用于最小化状态），最大宽度为 880px
       const width = Math.max(80, Math.min(880, msg.width || 480));
-      // 增加最大高度限制，以适应 update banner
       const height = Math.max(40, Math.min(1200, msg.height || 700));
       figma.ui.resize(width, height);
-      console.log(`🪟 已调整UI尺寸: ${width}x${height}`);
     } catch (e) {
-      console.warn('调整UI尺寸失败:', e);
+      // 调整尺寸失败
     }
     return;
   }
@@ -1493,11 +1356,9 @@ figma.ui.onmessage = async (msg) => {
     const frame = findFrameByName(frameName);
     
     if (frame) {
-      // 找到画板，选中并滚动到视图中心
       currentFrame = frame;
       figma.currentPage.selection = [frame];
       figma.viewport.scrollAndZoomIntoView([frame]);
-      console.log('✅ 已定位到画板: ScreenSync Screenshots');
       
       figma.ui.postMessage({
         type: 'frame-located',
@@ -1505,14 +1366,11 @@ figma.ui.onmessage = async (msg) => {
         message: '已定位到画板'
       });
     } else {
-      // 没有找到画板，尝试创建
-      console.log('📍 当前页面未找到画板，尝试创建...');
       const success = ensureFrame();
       
       if (success && currentFrame) {
         figma.currentPage.selection = [currentFrame];
         figma.viewport.scrollAndZoomIntoView([currentFrame]);
-        console.log('✅ 已创建并定位到画板: ScreenSync Screenshots');
         
         figma.ui.postMessage({
           type: 'frame-located',
@@ -1520,8 +1378,6 @@ figma.ui.onmessage = async (msg) => {
           message: '已创建并定位到画板'
         });
       } else {
-        console.error('❌ 无法定位画板：创建失败');
-        
         figma.ui.postMessage({
           type: 'frame-located',
           success: false,
@@ -1532,10 +1388,6 @@ figma.ui.onmessage = async (msg) => {
   }
   
   if (msg.type === 'add-screenshot') {
-    console.log('📸 开始处理媒体文件...');
-    console.log('   文件名:', msg.filename || '未命名');
-    console.log('   时间戳:', msg.timestamp || '未提供');
-    
     try {
       const { bytes, timestamp, filename, driveFileId, ossFileId, gifCacheId } = msg;
       
@@ -1560,41 +1412,30 @@ figma.ui.onmessage = async (msg) => {
           });
         }
         
-        console.log(`   💾 已缓存同步文件信息: ${filename} (Cache Size: ${recentSyncedFiles.size})`);
       }
       
       if (!bytes) {
         throw new Error('缺少 bytes 数据');
       }
       
-      // 检测文件类型（根据文件名）
       const filenameLower = filename ? filename.toLowerCase() : '';
       const isVideo = filenameLower.endsWith('.mp4') || filenameLower.endsWith('.mov');
       const isGif = filenameLower.endsWith('.gif');
-      const isScreenRecording = isVideo || isGif; // 录屏：视频文件或 GIF 文件
+      const isScreenRecording = isVideo || isGif;
       
       let uint8Array;
       
-      // 支持两种格式：base64 字符串（新）或数组（旧）
       if (typeof bytes === 'string') {
-        // 新格式：base64 字符串
-        console.log('   1️⃣ 解码 base64 字符串...');
-        console.log('      base64 长度:', bytes.length);
         try {
           uint8Array = figma.base64Decode(bytes);
-          console.log('      Uint8Array 长度:', uint8Array.length);
         } catch (error) {
           throw new Error('base64 解码失败: ' + error.message);
         }
       } else if (Array.isArray(bytes)) {
-        // 旧格式：数组
-        console.log('   1️⃣ 转换字节数组...');
-        console.log('      数组长度:', bytes.length);
         if (bytes.length === 0) {
           throw new Error('bytes 数组为空');
         }
         uint8Array = new Uint8Array(bytes);
-        console.log('      Uint8Array 长度:', uint8Array.length);
       } else {
         throw new Error('bytes 必须是字符串（base64）或数组，实际类型: ' + typeof bytes);
       }
@@ -1603,48 +1444,32 @@ figma.ui.onmessage = async (msg) => {
       let mediaHash;
       
       if (isVideo) {
-        // Figma 插件 API 目前不支持视频文件
-        // 跳过视频文件并给出提示
-        console.log('   ⚠️  检测到视频文件，但 Figma 插件 API 不支持视频');
-        console.log('   💡 提示：请通过 Figma 界面直接拖放视频文件，或使用 GIF 格式');
         throw new Error('Figma 插件 API 不支持视频文件。请通过 Figma 界面直接拖放视频文件，或使用 GIF 格式。');
       } else {
-        // 图片文件
-        console.log('   2️⃣ 创建Figma图片...');
         const image = figma.createImage(uint8Array);
         
-        // 检查 image 是否为 undefined 或 null
         if (!image) {
           throw new Error('figma.createImage() 返回 undefined，可能是 GIF 格式不支持或文件损坏');
         }
         
-        // 检查 image.hash 是否存在
         if (!image.hash) {
           throw new Error('图片哈希值未生成，可能是 GIF 格式不支持或文件损坏');
         }
         
-        console.log('      图片哈希:', image.hash);
         mediaHash = image.hash;
         
-        // 获取图片实际尺寸
-        console.log('   2.5️⃣ 获取图片实际尺寸...');
         try {
           mediaSize = await image.getSizeAsync();
           
-          // 检查 mediaSize 是否为 undefined 或 null
           if (!mediaSize) {
             throw new Error('image.getSizeAsync() 返回 undefined，可能是 GIF 格式不支持或文件损坏');
           }
           
-          // 检查尺寸值是否有效
           if (typeof mediaSize.width !== 'number' || typeof mediaSize.height !== 'number' || 
               mediaSize.width <= 0 || mediaSize.height <= 0) {
             throw new Error(`图片尺寸无效: ${mediaSize.width}x${mediaSize.height}，可能是 GIF 格式不支持或文件损坏`);
           }
-          
-          console.log('      原始尺寸:', mediaSize.width, 'x', mediaSize.height);
         } catch (sizeError) {
-          // getSizeAsync 失败，可能是 GIF 格式问题
           const errorMsg = sizeError && sizeError.message ? sizeError.message : String(sizeError);
           if (isGif) {
             throw new Error(`GIF 文件无法获取尺寸: ${errorMsg}。可能是 GIF 格式不支持或文件损坏，请尝试手动拖入或使用其他格式`);
@@ -1654,44 +1479,31 @@ figma.ui.onmessage = async (msg) => {
         }
       }
       
-      // 计算最终尺寸
       let finalWidth, finalHeight;
       
-      // 如果用户设置了自定义尺寸，使用自定义尺寸
       if (customSizeSettings.width || customSizeSettings.height) {
         if (customSizeSettings.width && customSizeSettings.height) {
-          // 两个都设置了，直接使用
           finalWidth = customSizeSettings.width;
           finalHeight = customSizeSettings.height;
-          console.log('      使用自定义尺寸:', finalWidth, 'x', finalHeight);
         } else if (customSizeSettings.width) {
-          // 只设置了宽度，高度按比例计算
           const aspectRatio = mediaSize.height / mediaSize.width;
           finalWidth = customSizeSettings.width;
           finalHeight = Math.round(finalWidth * aspectRatio);
-          console.log('      使用自定义宽度，高度自动计算:', finalWidth, 'x', finalHeight);
         } else if (customSizeSettings.height) {
-          // 只设置了高度，宽度按比例计算
           const aspectRatio = mediaSize.width / mediaSize.height;
           finalHeight = customSizeSettings.height;
           finalWidth = Math.round(finalHeight * aspectRatio);
-          console.log('      使用自定义高度，宽度自动计算:', finalWidth, 'x', finalHeight);
         }
       } else {
-        // 没有自定义设置，使用实际尺寸的1/3
         finalWidth = Math.round(mediaSize.width / 3);
         finalHeight = Math.round(mediaSize.height / 3);
-        
-        console.log('      使用实际尺寸的1/3:', finalWidth, 'x', finalHeight);
       }
       
-      console.log('   3️⃣ 创建容器...');
       const rect = figma.createRectangle();
       
       rect.resize(finalWidth, finalHeight);
       
       if (isVideo) {
-        // 视频填充 - 检查 API 是否支持
         try {
           rect.fills = [{
             type: 'VIDEO',
@@ -1699,10 +1511,6 @@ figma.ui.onmessage = async (msg) => {
             scaleMode: 'FIT'
           }];
         } catch (fillError) {
-          // 如果 VIDEO 类型不支持，尝试使用图片方式（显示视频的第一帧）
-          console.log('      ⚠️  VIDEO 填充类型不支持，尝试使用图片方式');
-          // 注意：这不会真正显示视频，但至少不会报错
-          // 用户需要通过 Figma 界面手动拖放视频文件
           throw new Error('Figma 插件 API 不支持视频填充。请通过 Figma 界面直接拖放视频文件。');
         }
       } else {
@@ -1726,68 +1534,34 @@ figma.ui.onmessage = async (msg) => {
         rectName = `Screenshot_${String(screenshotIndex).padStart(3, '0')}`;
       }
       rect.name = rectName;
-      console.log('      命名:', rectName);
       
       // 保存文件名到 pluginData，用于后续识别
       if (msg.filename) {
         rect.setPluginData('originalFilename', msg.filename);
         
-        // 只有当文件名包含 ScreenRecording 或 .gif/.mov/.mp4 时才认为是 GIF 录屏
         const filenameLower = msg.filename.toLowerCase();
         const isGifOrVideo = filenameLower.endsWith('.gif') || 
                              filenameLower.endsWith('.mov') || 
                              filenameLower.endsWith('.mp4');
         const filenameIndicatesRecording = msg.filename.includes('ScreenRecording');
         
-        // 🔍 调试信息：显示接收到的所有数据
-        console.log('      📦 接收到的消息数据:');
-        console.log('         filename:', msg.filename);
-        console.log('         driveFileId:', msg.driveFileId || '无');
-        console.log('         ossFileId:', msg.ossFileId || '无');
-        console.log('         gifCacheId:', msg.gifCacheId || '无');
-        console.log('         isGifOrVideo:', isGifOrVideo);
-        console.log('         filenameIndicatesRecording:', filenameIndicatesRecording);
-        
-        // 额外的判断：如果是 GIF 或视频，保存更详细的信息
         if (isGifOrVideo || filenameIndicatesRecording) {
-          console.log('      🎥 检测到 GIF/视频文件，保存元数据...');
-          
-          // 保存文件ID，用于回溯源文件（如果存在）
           if (msg.driveFileId) {
             rect.setPluginData('driveFileId', msg.driveFileId);
-            console.log('      ✅ 已保存 driveFileId:', msg.driveFileId);
-          } else {
-            console.log('      ⚠️  msg.driveFileId 为空，未保存');
           }
           if (msg.ossFileId) {
             rect.setPluginData('ossFileId', msg.ossFileId);
-            console.log('      ✅ 已保存 ossFileId:', msg.ossFileId);
-          } else {
-            console.log('      ⚠️  msg.ossFileId 为空，未保存');
           }
-          
-          // 保存 gifCacheId (MD5 Hash)，用于在本地缓存查找
-          // 这个 ID 应该由 drive-watcher.js 在处理文件时生成并传递过来
           if (msg.gifCacheId) {
             rect.setPluginData('gifCacheId', msg.gifCacheId);
-            console.log('      ✅ 已保存 gifCacheId:', msg.gifCacheId);
-            console.log('      💡 导出时会自动从缓存读取原始 GIF（无需本地文件）');
-          } else {
-            console.log('      ⚠️  msg.gifCacheId 为空，未保存');
           }
         }
       }
       
-      console.log('   4️⃣ 查找最佳位置...');
-      
-      // 确保画板存在
       const frameCreated = ensureFrame();
-      console.log('      画板状态:', frameCreated ? '已创建/存在' : '创建失败');
       
       if (isFrameValid()) {
-        // 确保 frame 有 auto-layout（如果还没有）
         if (currentFrame.layoutMode === 'NONE') {
-          console.log('   🔄 为画板启用 Auto Layout...');
           currentFrame.layoutMode = 'HORIZONTAL';
           currentFrame.itemSpacing = 10;
           currentFrame.paddingLeft = 0;
@@ -1830,17 +1604,11 @@ figma.ui.onmessage = async (msg) => {
               }
             }
           } catch (layoutError) {
-            // 如果设置 layoutSizing 失败，记录错误但继续执行
-            console.warn('   ⚠️  设置 layoutSizing 属性失败（可能 frame 的 auto-layout 未完全初始化）:', layoutError.message);
-            // 不抛出错误，让图片正常添加
+            // 如果设置 layoutSizing 失败，不抛出错误，让图片正常添加
           }
         }
         
-        console.log(`   📍 已添加到画板（Auto Layout 自动排列）`);
-        
       } else {
-        console.log('   ⚠️  画板无效，添加到页面中心');
-        // 没有画板，直接添加到页面
         rect.x = figma.viewport.center.x;
         rect.y = figma.viewport.center.y;
         figma.currentPage.appendChild(rect);
@@ -1848,12 +1616,8 @@ figma.ui.onmessage = async (msg) => {
       
       screenshotCount++;
       
-      console.log('   5️⃣ 选中并居中显示...');
       figma.currentPage.selection = [rect];
       figma.viewport.scrollAndZoomIntoView([rect]);
-      
-      console.log('✅ 截图添加成功！(总数: ' + screenshotCount + ')');
-      console.log('');
       
       figma.ui.postMessage({ 
         type: 'screenshot-added',
@@ -1865,21 +1629,6 @@ figma.ui.onmessage = async (msg) => {
       });
       
     } catch (error) {
-      console.error('❌ 添加截图失败:');
-      console.error('   错误类型:', (error && error.name) || typeof error);
-      console.error('   错误消息:', (error && error.message) || String(error));
-      console.error('   错误堆栈:', (error && error.stack) || '无堆栈信息');
-      console.error('   接收到的数据:', {
-        hasBytes: !!msg.bytes,
-        bytesType: typeof msg.bytes,
-        bytesIsArray: Array.isArray(msg.bytes),
-        bytesLength: msg.bytes ? msg.bytes.length : 0,
-        filename: msg.filename,
-        timestamp: msg.timestamp
-      });
-      console.error('');
-      
-      // 检查是否是 undefined 错误或 GIF 格式问题
       const errorMessage = (error && error.message) ? error.message : String(error || '未知错误');
       const isUndefinedError = !error || 
                                error.message === undefined || 
@@ -1893,8 +1642,6 @@ figma.ui.onmessage = async (msg) => {
                                ));
       
       if (isUndefinedError) {
-        // undefined 错误或 GIF 格式问题：需要手动拖入，保留源文件
-        console.error('   ⚠️  检测到 undefined 错误或 GIF 格式问题，文件需要手动拖入');
         const isGif = msg.filename && msg.filename.toLowerCase().endsWith('.gif');
         const errorText = isGif 
           ? 'GIF 文件导入失败（可能是格式不支持或文件损坏），需要手动拖入'
@@ -1922,12 +1669,9 @@ figma.ui.onmessage = async (msg) => {
   }
   
   if (msg.type === 'cancel') {
-    console.log('👋 关闭插件');
-    // 通知UI停止实时同步（如果正在运行）
     figma.ui.postMessage({ 
       type: 'plugin-closing'
     });
-    // 延迟关闭，确保停止命令有时间发送
     setTimeout(() => {
     figma.closePlugin('已同步 ' + screenshotCount + ' 张截图');
     }, 200);
@@ -1936,18 +1680,13 @@ figma.ui.onmessage = async (msg) => {
   if (msg.type === 'stop-realtime') {
     // 这个消息由UI发送，用于停止实时同步
     // 实际停止逻辑在服务器端，这里只是确认收到
-    console.log('⏸️  收到停止实时同步请求');
   }
   
   // 处理上传完成后关联 GIF 数据
   if (msg.type === 'associate-uploaded-gif') {
-    console.log('🔗 关联上传的 GIF 数据:', msg.layerId);
-    
     try {
-      // 查找图层
       const layer = figma.getNodeById(msg.layerId);
       if (!layer) {
-        console.error('   ❌ 未找到图层:', msg.layerId);
         figma.ui.postMessage({
           type: 'associate-gif-error',
           layerId: msg.layerId,
@@ -1956,26 +1695,20 @@ figma.ui.onmessage = async (msg) => {
         return;
       }
       
-      // 保存数据到 pluginData
       if (msg.driveFileId) {
         layer.setPluginData('driveFileId', msg.driveFileId);
-        console.log('   ✅ 已保存 driveFileId:', msg.driveFileId);
       }
       if (msg.ossFileId) {
         layer.setPluginData('ossFileId', msg.ossFileId);
-        console.log('   ✅ 已保存 ossFileId:', msg.ossFileId);
       }
       if (msg.originalFilename) {
         layer.setPluginData('originalFilename', msg.originalFilename);
-        console.log('   ✅ 已保存 originalFilename:', msg.originalFilename);
       }
       if (msg.imageHash) {
         layer.setPluginData('imageHash', msg.imageHash);
-        console.log('   ✅ 已保存 imageHash:', msg.imageHash);
       }
       if (msg.gifCacheId) {
         layer.setPluginData('gifCacheId', msg.gifCacheId);
-        console.log('   ✅ 已保存 gifCacheId:', msg.gifCacheId);
       }
       
       figma.ui.postMessage({
@@ -1984,7 +1717,6 @@ figma.ui.onmessage = async (msg) => {
       });
       
     } catch (error) {
-      console.error('   ❌ 关联失败:', error);
       figma.ui.postMessage({
         type: 'associate-gif-error',
         layerId: msg.layerId,
@@ -1993,20 +1725,137 @@ figma.ui.onmessage = async (msg) => {
     }
   }
   
+  // Handle frame selection check (before showing export modal)
+  if (msg.type === 'check-frame-selection') {
+    const selection = figma.currentPage.selection;
+    const hasValidFrame = selection && selection.length > 0 && selection[0].type === 'FRAME';
+    figma.ui.postMessage({
+      type: 'frame-selection-result',
+      hasValidFrame: hasValidFrame
+    });
+    return;
+  }
+  
+  // Handle timeline layers request
+  if (msg.type === 'request-timeline-layers') {
+    try {
+      const selection = figma.currentPage.selection;
+      if (!selection || selection.length === 0 || selection[0].type !== 'FRAME') {
+        return; // Or send error
+      }
+      
+      const frame = selection[0];
+      
+      // 标记时间线编辑器已打开，记录 Frame ID
+      isTimelineEditorOpen = true;
+      timelineFrameId = frame.id;
+      lastTimelineLayerIds = frame.children.map(c => c.id); // 初始化图层顺序
+      
+      // Parallel export for performance
+      const exportPromises = frame.children.map(async (child) => {
+        try {
+          // Export thumbnail for preview (higher resolution for fullscreen clarity)
+          const bytes = await child.exportAsync({
+            format: 'PNG',
+            constraint: { type: 'HEIGHT', value: 800 }
+          });
+          
+          // Check if this is a video/GIF layer
+          let videoId = null;
+          let isVideoLayer = false;
+          
+          try {
+            const pluginDataStr = child.getPluginData('videoId');
+            if (pluginDataStr) {
+              videoId = pluginDataStr;
+              isVideoLayer = true;
+            }
+          } catch (e) {
+            // No video data
+          }
+          
+          // Also check fills for video type
+          if (!isVideoLayer && 'fills' in child && Array.isArray(child.fills)) {
+            for (const fill of child.fills) {
+              if (fill.type === 'VIDEO') {
+                isVideoLayer = true;
+                break;
+              }
+            }
+          }
+          
+          // Also check by name pattern (GIF, video extensions)
+          if (!isVideoLayer) {
+            const lowerName = child.name.toLowerCase();
+            const videoExtensions = ['.gif', '.mp4', '.mov', '.webm', '.avi', '.mkv'];
+            const videoKeywords = ['screenrecording', 'video', 'gif'];
+            
+            if (videoExtensions.some(ext => lowerName.endsWith(ext)) ||
+                videoKeywords.some(kw => lowerName.includes(kw))) {
+              isVideoLayer = true;
+            }
+          }
+          
+          const hasVideoFill = child.fills && Array.isArray(child.fills) && child.fills.some(f => f.type === 'VIDEO');
+          console.log('Timeline layer: ' + child.name + ', isVideoLayer: ' + isVideoLayer + ', hasVideoFill: ' + hasVideoFill + ', videoId: ' + videoId);
+          
+          return {
+            id: child.id,
+            name: child.name,
+            type: child.type,
+            thumbnail: figma.base64Encode(bytes),
+            width: child.width,
+            height: child.height,
+            x: child.x,
+            y: child.y,
+            isVideoLayer: isVideoLayer,
+            videoId: videoId
+          };
+        } catch (err) {
+          console.error(`Failed to export layer ${child.name}:`, err);
+          return {
+            id: child.id,
+            name: child.name,
+            type: child.type,
+            thumbnail: null,
+            isVideoLayer: false,
+            videoId: null
+          };
+        }
+      });
+      
+      const processedLayers = await Promise.all(exportPromises);
+      
+      figma.ui.postMessage({
+        type: 'timeline-layers-response',
+        layers: processedLayers,
+        frameWidth: frame.width,
+        frameHeight: frame.height,
+        frameId: frame.id // 传递 Frame ID 供导出时使用
+      });
+    } catch (e) {
+      // ignore
+    }
+    return;
+  }
+
+  // 处理时间线编辑器关闭
+  if (msg.type === 'timeline-editor-closed') {
+    isTimelineEditorOpen = false;
+    timelineFrameId = null;
+    lastTimelineLayerIds = []; // 重置图层顺序缓存
+    return;
+  }
+
   // 处理文件未找到错误，清除 GIF 的 pluginData 并重新触发检测
   if (msg.type === 'clear-gif-data-and-retry') {
-    console.log('🔄 收到清除 GIF 数据并重试的请求');
-    
     try {
       const selection = figma.currentPage.selection;
       if (!selection || selection.length === 0) {
-        console.warn('   ⚠️  没有选中的节点');
         return;
       }
       
-      // 递归查找所有 GIF 图层并清除它们的 pluginData
       function clearGifPluginData(node) {
-        // 检查是否是 GIF/视频图层
         const originalFilename = node.getPluginData('originalFilename');
         if (originalFilename) {
           const hasValidExtension = originalFilename.toLowerCase().endsWith('.gif') || 
@@ -2014,7 +1863,6 @@ figma.ui.onmessage = async (msg) => {
                                    originalFilename.toLowerCase().endsWith('.mp4');
           
           if (hasValidExtension) {
-            // 清除与文件关联相关的 pluginData，保留 originalFilename
             const hadDriveFileId = node.getPluginData('driveFileId');
             const hadOssFileId = node.getPluginData('ossFileId');
             
@@ -2022,12 +1870,10 @@ figma.ui.onmessage = async (msg) => {
               node.setPluginData('driveFileId', '');
               node.setPluginData('ossFileId', '');
               node.setPluginData('imageHash', '');
-              console.log(`   🗑️  已清除 GIF 图层的关联数据: ${node.name} (文件: ${originalFilename})`);
             }
           }
         }
         
-        // 递归检查子节点
         if ('children' in node) {
           for (const child of node.children) {
             clearGifPluginData(child);
@@ -2039,10 +1885,6 @@ figma.ui.onmessage = async (msg) => {
         clearGifPluginData(node);
       }
       
-      console.log('   ✅ 已清除所有 GIF 图层的关联数据');
-      console.log('   🔄 重新触发导出流程...');
-      
-      // 延迟一点，然后重新触发导出（这次会检测到未同步的 GIF）
       setTimeout(() => {
         figma.ui.postMessage({
           type: 'trigger-export-from-code'
@@ -2050,7 +1892,7 @@ figma.ui.onmessage = async (msg) => {
       }, 500);
       
     } catch (error) {
-      console.error('   ❌ 清除 GIF 数据失败:', error);
+      // 清除失败
     }
   }
   
@@ -2061,16 +1903,219 @@ figma.ui.onmessage = async (msg) => {
   }
 };
 
-// ✅ 监听文档变化，自动关联手动拖入的Video/GIF的缓存元数据
+// 🎯 自动缩放节点到设置的尺寸
+function autoResizeNode(node) {
+  try {
+    // 获取用户设置的尺寸
+    const targetWidth = customSizeSettings.width ? parseInt(customSizeSettings.width) : null;
+    const targetHeight = customSizeSettings.height ? parseInt(customSizeSettings.height) : null;
+    
+    // 如果没有设置任何尺寸，不做调整
+    if (!targetWidth && !targetHeight) return;
+    
+    // 获取节点当前尺寸
+    const currentWidth = node.width;
+    const currentHeight = node.height;
+    
+    if (currentWidth <= 0 || currentHeight <= 0) return;
+    
+    // 计算宽高比
+    const aspectRatio = currentWidth / currentHeight;
+    
+    let newWidth, newHeight;
+    
+    if (targetWidth && targetHeight) {
+      // 如果同时设置了宽高，保持宽高比，以较小的缩放比例为准
+      const scaleByWidth = targetWidth / currentWidth;
+      const scaleByHeight = targetHeight / currentHeight;
+      const scale = Math.min(scaleByWidth, scaleByHeight);
+      newWidth = currentWidth * scale;
+      newHeight = currentHeight * scale;
+    } else if (targetWidth) {
+      // 只设置了宽度，按宽度等比缩放
+      newWidth = targetWidth;
+      newHeight = targetWidth / aspectRatio;
+    } else {
+      // 只设置了高度，按高度等比缩放
+      newHeight = targetHeight;
+      newWidth = targetHeight * aspectRatio;
+    }
+    
+    // 执行缩放
+    node.resize(newWidth, newHeight);
+  } catch (e) {
+    // 缩放失败，忽略
+  }
+}
+
+// 🎯 记录拖入的原始文件名，用于修复 Figma 的重命名问题
+let pendingDroppedFiles = []; // { filename, timestamp }
+
+// ✅ 监听拖放事件，记录原始文件名
+figma.on('drop', (event) => {
+  try {
+    if (event.files && event.files.length > 0) {
+      for (const file of event.files) {
+        const filename = file.name;
+        const ext = filename.toLowerCase().split('.').pop();
+        
+        if (['mov', 'mp4', 'gif'].includes(ext)) {
+          pendingDroppedFiles.push({
+            filename: filename,
+            timestamp: Date.now()
+          });
+        }
+      }
+    }
+  } catch (e) {
+    // 拖放处理出错
+  }
+});
+
+// ✅ 监听文档变化，自动关联手动拖入的 GIF 的缓存元数据
+// ⚠️ 重要：不要处理 VIDEO 类型！访问视频节点的属性可能导致 Figma 报错 "An invalid video was removed"
 // 🛡️ 使用 try-catch 包裹整个监听器，防止切换文件时崩溃
 figma.on('documentchange', (event) => {
   try {
+    // 🎬 时间线编辑器：检测图层位置变化并实时更新预览
+    if (isTimelineEditorOpen && timelineFrameId) {
+      // 位置变化 - 只更新位置
+      const positionOnlyProperties = ['x', 'y'];
+      // 尺寸变化 - 需要更新位置和缩略图（缩放会改变外观）
+      const sizeProperties = ['width', 'height'];
+      // 样式变化 - 需要重新导出缩略图
+      const styleProperties = ['fills', 'strokes', 'effects', 'opacity', 'blendMode', 'cornerRadius', 'rotation', 'visible'];
+      // 所有需要监听的属性
+      const allProperties = [...positionOnlyProperties, ...sizeProperties, ...styleProperties];
+      
+      const propertyChanges = event.documentChanges.filter(change => 
+        change.type === 'PROPERTY_CHANGE' && 
+        change.properties.some(p => allProperties.includes(p))
+      );
+      
+      if (propertyChanges.length > 0) {
+        // 检查是否是时间线编辑中的 Frame 的子图层
+        const frame = figma.getNodeById(timelineFrameId);
+        if (frame && frame.type === 'FRAME') {
+          const childIds = new Set(frame.children.map(c => c.id));
+          const relevantChanges = propertyChanges.filter(change => childIds.has(change.id));
+          
+          if (relevantChanges.length > 0) {
+            // 收集更新的图层位置信息
+            const updates = [];
+            const thumbnailUpdates = [];
+            
+            for (const change of relevantChanges) {
+              try {
+                const node = figma.getNodeById(change.id);
+                if (node && 'x' in node) {
+                  updates.push({
+                    id: node.id,
+                    x: node.x,
+                    y: node.y,
+                    width: node.width,
+                    height: node.height
+                  });
+                  
+                  // 检查是否有样式或尺寸变化，需要更新缩略图
+                  const needsThumbnailUpdate = change.properties.some(p => 
+                    styleProperties.includes(p) || sizeProperties.includes(p)
+                  );
+                  if (needsThumbnailUpdate && 'exportAsync' in node) {
+                    thumbnailUpdates.push({
+                      id: node.id,
+                      node: node
+                    });
+                  }
+                }
+              } catch (e) {
+                // 忽略无法访问的节点
+              }
+            }
+            
+            if (updates.length > 0) {
+              figma.ui.postMessage({
+                type: 'timeline-layer-positions-updated',
+                updates: updates,
+                frameWidth: frame.width,
+                frameHeight: frame.height
+              });
+            }
+            
+            // 异步更新缩略图
+            if (thumbnailUpdates.length > 0) {
+              (async () => {
+                const thumbResults = [];
+                for (const item of thumbnailUpdates) {
+                  try {
+                    const bytes = await item.node.exportAsync({
+                      format: 'PNG',
+                      constraint: { type: 'HEIGHT', value: 800 }
+                    });
+                    thumbResults.push({
+                      id: item.id,
+                      thumbnail: figma.base64Encode(bytes)
+                    });
+                  } catch (e) {
+                    console.warn('缩略图导出失败:', item.id, e);
+                  }
+                }
+                if (thumbResults.length > 0) {
+                  figma.ui.postMessage({
+                    type: 'timeline-layer-thumbnails-updated',
+                    updates: thumbResults
+                  });
+                }
+              })();
+            }
+          }
+        }
+      }
+      
+      // 🎬 时间线编辑器：检测图层增删和重排序
+      const structuralChanges = event.documentChanges.filter(change => 
+        change.type === 'CREATE' || change.type === 'DELETE'
+      );
+      
+      if (structuralChanges.length > 0) {
+        const frame = figma.getNodeById(timelineFrameId);
+        if (frame && frame.type === 'FRAME') {
+          // 检查是否有涉及此 Frame 子图层的变化
+          let needsRefresh = false;
+          
+          for (const change of structuralChanges) {
+            try {
+              if (change.type === 'CREATE') {
+                // 新建的节点如果父级是此 Frame，则需要刷新
+                const node = change.node;
+                if (node && node.parent && node.parent.id === timelineFrameId) {
+                  needsRefresh = true;
+                  break;
+                }
+              } else if (change.type === 'DELETE') {
+                // 删除事件：通知 UI 检查并移除对应图层
+                needsRefresh = true;
+                break;
+              }
+            } catch (e) {
+              // 节点可能已被删除，忽略
+            }
+          }
+          
+          if (needsRefresh) {
+            // 重新获取当前图层列表并发送给 UI
+            refreshTimelineLayers(frame);
+          }
+        }
+      }
+    }
+    
     // 只处理节点创建事件
     const nodeChanges = event.documentChanges.filter(change => change.type === 'CREATE');
     
     if (nodeChanges.length === 0) return;
     
-    // 收集需要处理的节点ID（延迟处理，避免干扰 Figma 的视频加载）
+    // 收集需要处理的节点ID（延迟处理，避免干扰 Figma 的加载）
     const nodeIdsToProcess = [];
     
     for (const change of nodeChanges) {
@@ -2080,22 +2125,115 @@ figma.on('documentchange', (event) => {
         // 🛡️ 检查节点是否有效
         if (!node || typeof node.type === 'undefined') continue;
         
-        // 只处理矩形节点（Video/GIF通常是矩形）
+        // 只处理矩形节点（GIF 通常是矩形）
         if (node.type !== 'RECTANGLE') continue;
         
-        // 先只根据节点名称判断是否可能是 Video/GIF
-        // ⚠️ 不要立即访问 fills，避免干扰 Figma 的视频处理
+        // ⚠️ 只处理 GIF 文件，完全跳过视频文件
+        // 访问视频节点可能导致 Figma 内部验证失败
         const nodeName = node.name || '';
         const nameLower = nodeName.toLowerCase();
-        const mightBeVideo = nameLower.endsWith('.mov') || 
-                             nameLower.endsWith('.mp4') ||
-                             nameLower.includes('video') ||
-                             nameLower.includes('recording') ||
-                             nameLower.includes('screenrecording');
-        const mightBeGif = nameLower.endsWith('.gif') ||
-                           nameLower.includes('gif');
         
-        if (mightBeVideo || mightBeGif) {
+        // 如果名称看起来像视频文件，完全跳过
+        const looksLikeVideo = nameLower.endsWith('.mov') || 
+                              nameLower.endsWith('.mp4') ||
+                              nameLower.includes('screenrecording');
+        
+        if (looksLikeVideo) {
+          // 视频文件：只记录原始文件名，不做任何其他处理
+          if (pendingDroppedFiles.length > 0) {
+            const now = Date.now();
+            pendingDroppedFiles = pendingDroppedFiles.filter(f => now - f.timestamp < 5000);
+            if (pendingDroppedFiles.length > 0) {
+              // 🔑 智能匹配：根据文件名相似度找到最佳匹配，而不是简单取队列头部
+              const nodeNameClean = nodeName.replace(/\.(mov|mp4|gif)$/i, '').replace(/[^a-z0-9]/gi, '').toLowerCase();
+              
+              let bestMatch = null;
+              let bestMatchIndex = -1;
+              let bestScore = 0;
+              
+              for (let i = 0; i < pendingDroppedFiles.length; i++) {
+                const f = pendingDroppedFiles[i];
+                const fileNameClean = f.filename.replace(/\.(mov|mp4|gif)$/i, '').replace(/[^a-z0-9]/gi, '').toLowerCase();
+                
+                // 计算相似度分数
+                let score = 0;
+                
+                // 完全匹配
+                if (fileNameClean === nodeNameClean) {
+                  score = 100;
+                }
+                // 包含匹配
+                else if (fileNameClean.includes(nodeNameClean) || nodeNameClean.includes(fileNameClean)) {
+                  score = 50;
+                }
+                // 提取数字序号匹配（如 ScreenRecording_003 vs ScreenRecordingVid_003）
+                else {
+                  const nodeNumbers = nodeNameClean.match(/\d+/g);
+                  const fileNumbers = fileNameClean.match(/\d+/g);
+                  if (nodeNumbers && fileNumbers) {
+                    // 检查最后一个数字是否匹配（通常是序号）
+                    const nodeLastNum = nodeNumbers[nodeNumbers.length - 1];
+                    const fileLastNum = fileNumbers[fileNumbers.length - 1];
+                    if (nodeLastNum === fileLastNum) {
+                      score = 30;
+                    }
+                  }
+                }
+                
+                if (score > bestScore) {
+                  bestScore = score;
+                  bestMatch = f;
+                  bestMatchIndex = i;
+                }
+              }
+              
+              // 如果找到匹配，使用它；否则使用队列第一个（兼容单文件情况）
+              const droppedFile = bestMatch || pendingDroppedFiles[0];
+              const removeIndex = bestMatchIndex >= 0 ? bestMatchIndex : 0;
+              pendingDroppedFiles.splice(removeIndex, 1);
+              
+              // 延迟更久再修改节点，给 Figma 充足时间加载视频
+              const nodeId = node.id;
+              const originalFilename = droppedFile.filename;
+              setTimeout(() => {
+                try {
+                  const n = figma.getNodeById(nodeId);
+                  if (n && n.type === 'RECTANGLE') {
+                    // 只保存文件名，不做其他操作
+                    n.setPluginData('originalFilename', originalFilename);
+                    // 重命名图层（帮助用户识别）
+                    if (n.name !== originalFilename) {
+                      n.name = originalFilename;
+                    }
+                    // 🎯 自动缩放到设置的尺寸
+                    autoResizeNode(n);
+                  }
+                } catch (e) {
+                  // 忽略错误
+                }
+              }, 1500); // 延迟 1.5 秒
+            }
+          } else {
+            // 没有 pendingDroppedFiles，但仍需自动缩放
+            const nodeId = node.id;
+            setTimeout(() => {
+              try {
+                const n = figma.getNodeById(nodeId);
+                if (n && n.type === 'RECTANGLE') {
+                  autoResizeNode(n);
+                }
+              } catch (e) {
+                // 忽略错误
+              }
+            }, 1500);
+          }
+          continue; // 跳过后续处理
+        }
+        
+        // 只处理 GIF 文件
+        const mightBeGif = nameLower.endsWith('.gif') || nameLower.includes('gif');
+        
+        if (mightBeGif) {
           nodeIdsToProcess.push(node.id);
         }
       } catch (e) {
@@ -2106,36 +2244,92 @@ figma.on('documentchange', (event) => {
     
     if (nodeIdsToProcess.length === 0) return;
     
-    // ⏰ 延迟 500ms 再处理，让 Figma 完成视频/GIF 的内部加载
+    // ⏰ 延迟 1 秒再处理 GIF，让 Figma 完成内部加载
     setTimeout(() => {
       for (const nodeId of nodeIdsToProcess) {
         try {
           const node = figma.getNodeById(nodeId);
           if (!node || node.type !== 'RECTANGLE') continue;
           
-          // 现在安全地访问 fills
-          if (!node.fills || node.fills.length === 0) continue;
+          // 再次检查节点是否有效（可能已被删除）
+          let fills;
+          try {
+            fills = node.fills;
+          } catch (e) {
+            continue; // 无法访问 fills，跳过
+          }
           
-          const fill = node.fills[0];
+          if (!fills || fills.length === 0) continue;
           
-          // 只处理VIDEO和IMAGE填充（GIF也是IMAGE类型）
-          if (fill.type !== 'VIDEO' && fill.type !== 'IMAGE') continue;
+          const fill = fills[0];
+          
+          // ⚠️ 只处理 IMAGE 填充（GIF 是 IMAGE 类型）
+          // 如果是 VIDEO 填充，完全跳过
+          if (fill.type !== 'IMAGE') continue;
           
           const nodeName = node.name || '';
-          const nameLower = nodeName.toLowerCase();
-          const isLikelyVideo = fill.type === 'VIDEO' || 
-                                nameLower.endsWith('.mov') || 
-                                nameLower.endsWith('.mp4') ||
-                                nameLower.includes('video') ||
-                                nameLower.includes('recording');
-          const isLikelyGif = fill.type === 'IMAGE' && (
-                              nameLower.endsWith('.gif') ||
-                              nameLower.includes('gif') ||
-                              nameLower.includes('recording'));
           
-          if (!isLikelyVideo && !isLikelyGif) continue;
+          // 🔑 检查是否有待处理的拖入文件（使用智能匹配）
+          let originalFilename = nodeName;
           
-          console.log(`\n🔍 [自动关联] 检测到新增的Video/GIF图层: ${nodeName}`);
+          const now = Date.now();
+          pendingDroppedFiles = pendingDroppedFiles.filter(f => now - f.timestamp < 5000);
+          
+          if (pendingDroppedFiles.length > 0) {
+            // 🔑 智能匹配：根据文件名相似度找到最佳匹配
+            const nodeNameClean = nodeName.replace(/\.(mov|mp4|gif)$/i, '').replace(/[^a-z0-9]/gi, '').toLowerCase();
+            
+            let bestMatch = null;
+            let bestMatchIndex = -1;
+            let bestScore = 0;
+            
+            for (let i = 0; i < pendingDroppedFiles.length; i++) {
+              const f = pendingDroppedFiles[i];
+              const fileNameClean = f.filename.replace(/\.(mov|mp4|gif)$/i, '').replace(/[^a-z0-9]/gi, '').toLowerCase();
+              
+              let score = 0;
+              if (fileNameClean === nodeNameClean) {
+                score = 100;
+              } else if (fileNameClean.includes(nodeNameClean) || nodeNameClean.includes(fileNameClean)) {
+                score = 50;
+              } else {
+                const nodeNumbers = nodeNameClean.match(/\d+/g);
+                const fileNumbers = fileNameClean.match(/\d+/g);
+                if (nodeNumbers && fileNumbers) {
+                  const nodeLastNum = nodeNumbers[nodeNumbers.length - 1];
+                  const fileLastNum = fileNumbers[fileNumbers.length - 1];
+                  if (nodeLastNum === fileLastNum) {
+                    score = 30;
+                  }
+                }
+              }
+              
+              if (score > bestScore) {
+                bestScore = score;
+                bestMatch = f;
+                bestMatchIndex = i;
+              }
+            }
+            
+            const droppedFile = bestMatch || pendingDroppedFiles[0];
+            const removeIndex = bestMatchIndex >= 0 ? bestMatchIndex : 0;
+            pendingDroppedFiles.splice(removeIndex, 1);
+            
+            originalFilename = droppedFile.filename;
+            
+            if (nodeName !== originalFilename) {
+              node.name = originalFilename;
+            }
+          }
+          
+          // 🔑 自动保存原始文件名
+          const existingFilename = node.getPluginData('originalFilename');
+          if (!existingFilename && originalFilename) {
+            node.setPluginData('originalFilename', originalFilename);
+          }
+          
+          // 🎯 自动缩放到设置的尺寸
+          autoResizeNode(node);
           
           // 检查是否已有关联数据
           const hasExistingData = node.getPluginData('driveFileId') || 
@@ -2143,12 +2337,10 @@ figma.on('documentchange', (event) => {
                                   node.getPluginData('gifCacheId');
           
           if (hasExistingData) {
-            console.log(`   ✅ 已有关联数据，跳过自动关联`);
             continue;
           }
           
           // 请求UI返回缓存的元数据
-          console.log(`   📤 请求UI返回缓存数据...`);
           figma.ui.postMessage({
             type: 'request-skipped-file-cache-for-node',
             filename: nodeName,
@@ -2156,16 +2348,10 @@ figma.on('documentchange', (event) => {
           });
         } catch (e) {
           // 节点可能已被删除或无法访问，忽略错误
-          console.log(`   ⚠️ 节点处理出错，可能已被删除: ${e.message}`);
         }
       }
-    }, 500);
+    }, 1000); // GIF 延迟 1 秒
   } catch (e) {
     // 🛡️ 切换文件时可能触发各种错误，忽略它们
-    console.log(`⚠️ documentchange 处理出错（可能正在切换文件）: ${e.message}`);
   }
 });
-
-console.log('✅ 插件初始化完成');
-console.log('📡 文档变化监听器已启动，将自动关联Video/GIF元数据');
-console.log('');
