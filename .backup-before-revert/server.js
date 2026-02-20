@@ -69,33 +69,6 @@ function getEffectiveDriveFolderId(envFolderId) {
   return null;
 }
 
-// ─── Shared validation / resolution helpers ──────────────────────────────────
-// Deduplicated from HTTP upload routes (/upload, /upload-oss, /upload-url)
-
-function validateUserId(userId, res) {
-  if (!userId) {
-    console.warn('🚫 拒绝：未提供用户ID');
-    res.status(403).json({ error: 'User ID required.', code: 'USER_ID_REQUIRED' });
-    return false;
-  }
-  return true;
-}
-
-function validateUploadToken(token, res) {
-  if (UPLOAD_TOKEN && token !== UPLOAD_TOKEN) {
-    res.status(401).json({ error: 'Invalid upload token', code: 'INVALID_TOKEN' });
-    return false;
-  }
-  return true;
-}
-
-function resolveDefaultFolderId(useOSS) {
-  if (useOSS) {
-    return process.env.ALIYUN_ROOT_FOLDER || 'ScreenSync';
-  }
-  return getEffectiveDriveFolderId(DRIVE_FOLDER_ID);
-}
-
 // ✅ 跟踪每个连接的活动子进程，用于取消时终止
 const activeProcesses = new Map(); // connectionId -> Set<ChildProcess>
 
@@ -337,7 +310,7 @@ function recursiveDownload(folderPath) {
       }
     }
   } catch (e) {
-
+    // console.error(`[iCloud维护] 遍历失败: ${folderPath}`, e.message);
   }
 }
 
@@ -761,6 +734,7 @@ app.use((req, res, next) => {
   const contentLength = req.headers['content-length'] ? parseInt(req.headers['content-length']) : 0;
   const contentLengthMB = (contentLength / 1024 / 1024).toFixed(2);
   const contentType = req.headers['content-type'] || 'unknown';
+  console.log(`🔍 [Network] 收到请求: ${req.method} ${req.url} (Type: ${contentType}, Size: ${contentLengthMB}MB)`);
   next();
 });
 
@@ -970,6 +944,9 @@ class UploadQueue {
               reject(new Error(errorMsg));
             }, timeoutMs);
             
+            if (base64Length > 10 * 1024 * 1024) {
+            }
+            
             // 监控内存使用（如果可用）
             let initialMemoryUsage = null;
             try {
@@ -1007,7 +984,9 @@ class UploadQueue {
                   try {
                     const finalMemory = process.memoryUsage();
                     const memoryUsedMB = ((finalMemory.heapUsed - (initialMemoryUsage?.heapUsed || 0)) / 1024 / 1024).toFixed(2);
+                    console.log(`   ✅ [Base64解码] 解码完成: ${(buffer.length / 1024 / 1024).toFixed(2)}MB, 耗时: ${decodeTime}ms, 内存使用: ${memoryUsedMB}MB`);
                   } catch (e) {
+                    console.log(`   ✅ [Base64解码] 解码完成: ${(buffer.length / 1024 / 1024).toFixed(2)}MB, 耗时: ${decodeTime}ms`);
                   }
                 }
                 
@@ -1024,7 +1003,11 @@ class UploadQueue {
                     
                     if (!isValidMOV) {
                       console.log(`   ⚠️  [Base64解码] 警告：解码后的 MOV 文件可能无效`);
+                      console.log(`   ⚠️  文件头（hex）: ${buffer.slice(0, 16).toString('hex')}`);
+                      console.log(`   ⚠️  文件头（ASCII）: ${fileHeader}`);
+                      console.log(`   ⚠️  文件大小: ${(buffer.length / 1024).toFixed(2)}KB`);
                     } else {
+                      console.log(`   ✅ [Base64解码] MOV 文件格式验证通过`);
                     }
                   }
                   
@@ -1035,7 +1018,10 @@ class UploadQueue {
                     
                     if (!isValidMP4) {
                       console.log(`   ⚠️  [Base64解码] 警告：解码后的 MP4 文件可能无效`);
+                      console.log(`   ⚠️  文件头（hex）: ${buffer.slice(0, 16).toString('hex')}`);
+                      console.log(`   ⚠️  文件头（ASCII）: ${fileHeader}`);
                     } else {
+                      console.log(`   ✅ [Base64解码] MP4 文件格式验证通过`);
                     }
                   }
                 }
@@ -1070,7 +1056,12 @@ class UploadQueue {
           targetFolderId = folderResult.value;
         } else {
           console.error(`   ❌ [上传] 获取文件夹ID失败: ${folderResult.reason?.message || folderResult.reason}`);
-          targetFolderId = resolveDefaultFolderId(useOSS);
+          // 尝试获取默认文件夹ID
+          if (useOSS) {
+            targetFolderId = process.env.ALIYUN_ROOT_FOLDER || 'ScreenSync';
+          } else {
+            targetFolderId = getEffectiveDriveFolderId(DRIVE_FOLDER_ID);
+          }
         }
         
         // 处理Base64解码结果
@@ -1088,7 +1079,11 @@ class UploadQueue {
         if (typeof targetFolderId === 'undefined' || targetFolderId === null) {
           // 尝试获取默认文件夹ID
           try {
-            targetFolderId = resolveDefaultFolderId(useOSS);
+            if (useOSS) {
+              targetFolderId = process.env.ALIYUN_ROOT_FOLDER || 'ScreenSync';
+            } else {
+              targetFolderId = getEffectiveDriveFolderId(DRIVE_FOLDER_ID);
+            }
             // 如果仍然没有值，使用默认值
             if (typeof targetFolderId === 'undefined' || targetFolderId === null) {
               targetFolderId = useOSS ? 'ScreenSync' : '未知';
@@ -1144,7 +1139,9 @@ class UploadQueue {
           const compressedSize = finalBuffer.length;
           if (compressedSize < originalSize) {
             const savedKB = ((originalSize - compressedSize) / 1024).toFixed(1);
+            console.log(`   🖼️  [格式转换] HEIF → JPEG: ${(originalSize / 1024).toFixed(1)}KB → ${(compressedSize / 1024).toFixed(1)}KB (节省 ${savedKB}KB)`);
           } else {
+            console.log(`   🖼️  [格式转换] HEIF → JPEG: ${(originalSize / 1024).toFixed(1)}KB → ${(compressedSize / 1024).toFixed(1)}KB`);
           }
           
           // 释放原始 buffer 内存
@@ -1166,6 +1163,7 @@ class UploadQueue {
       );
       
       if (isVideo) {
+        console.log(`🎥 [上传] 检测到视频文件: ${filename} (${(finalBuffer.length / 1024 / 1024).toFixed(2)}MB, MIME: ${finalMimeType})`);
       }
 
       // 确保文件名包含正确的扩展名（对 Google Drive 和 OSS 都适用）
@@ -1190,6 +1188,7 @@ class UploadQueue {
         if (ext) {
           finalFilename = filename + ext;
           const serviceName = useOSS ? 'OSS' : 'Drive';
+          console.log(`   ℹ️  [${serviceName}上传] 文件名已添加扩展名: ${filename} → ${finalFilename}`);
         }
       } else if (hasExtension && isVideo) {
         // 对于视频文件，确保扩展名与 MIME 类型匹配
@@ -1212,15 +1211,21 @@ class UploadQueue {
       // 再次验证 targetFolderId（防止在上传前被意外修改）
       if (!targetFolderId) {
         console.error(`   ⚠️  [上传] 警告：targetFolderId 在上传前为空，尝试重新获取...`);
-        targetFolderId = resolveDefaultFolderId(useOSS);
+        if (useOSS) {
+          targetFolderId = process.env.ALIYUN_ROOT_FOLDER || 'ScreenSync';
+        } else {
+          targetFolderId = getEffectiveDriveFolderId(DRIVE_FOLDER_ID);
+        }
         if (!targetFolderId) {
           throw new Error('无法获取目标文件夹ID，无法上传文件');
         }
+        console.log(`   ✅ [上传] 已重新获取 targetFolderId: ${targetFolderId}`);
       }
 
       // 如果是大文件（视频/GIF），先保存到本地并通知插件，提高响应速度
       // 这样用户不需要等待云端同步完成就可以开始手动导入
       if ((isVideo || isGif) && finalBuffer) {
+        console.log(`   ⚡ [加速] 正在保存大文件到本地，以便快速手动导入...`);
         const saved = saveFileToLocalFolder(finalBuffer, finalFilename, finalMimeType);
         if (saved) {
           // 广播给所有 Figma 客户端
@@ -1241,6 +1246,7 @@ class UploadQueue {
       let result;
       
       if (useOSS) {
+        console.log(`📤 [OSS上传] 开始上传到 OSS: ${finalFilename} → 文件夹 ${targetFolderId}`);
         result = await ossUploadBuffer({
           buffer: finalBuffer,
           filename: finalFilename,
@@ -1248,6 +1254,7 @@ class UploadQueue {
           folderId: targetFolderId
         });
       } else {
+        console.log(`📤 [上传] 开始上传到 Drive: ${finalFilename} → 文件夹 ${targetFolderId}`);
         result = await uploadBuffer({
           buffer: finalBuffer,
           filename: finalFilename,
@@ -1293,7 +1300,11 @@ class UploadQueue {
       } catch (e) {
         // 如果访问失败或值为 null/undefined，获取默认值
         try {
-          safeTargetFolderId = resolveDefaultFolderId(useOSS);
+          if (useOSS) {
+            safeTargetFolderId = process.env.ALIYUN_ROOT_FOLDER || 'ScreenSync';
+          } else {
+            safeTargetFolderId = getEffectiveDriveFolderId(DRIVE_FOLDER_ID);
+          }
           // 如果仍然没有值，使用默认值
           if (!safeTargetFolderId) {
             safeTargetFolderId = useOSS ? 'ScreenSync' : '未知';
@@ -1412,6 +1423,7 @@ app.use(express.json({
     // 在解析前记录大请求
     if (buf && buf.length > 10 * 1024 * 1024) {
       const sizeMB = (buf.length / 1024 / 1024).toFixed(2);
+      console.log(`   📦 [Body Parser] 开始解析大请求体: ${sizeMB}MB`);
     }
   }
 }));
@@ -1442,11 +1454,13 @@ app.use((req, res, next) => {
       
       const buffer = Buffer.concat(data);
       const sizeMB = (size / 1024 / 1024).toFixed(2);
+      console.log(`   📦 [Raw Parser] 接收到原始数据: ${sizeMB}MB`);
       
       try {
         // 尝试将 Buffer 转换为字符串并解析 JSON
         const jsonString = buffer.toString('utf8');
         req.body = JSON.parse(jsonString);
+        console.log('   ✅ [Raw Parser] 成功手动解析 JSON');
       } catch (e) {
         console.error('   ❌ [Raw Parser] 手动解析 JSON 失败:', e.message);
         // 如果只是部分有效，也许可以提取关键信息（这比较危险，暂不处理）
@@ -1577,7 +1591,17 @@ if (aliyunOSSEnabled && ossUploadBuffer) {
     const parseStartTime = Date.now();
     const userId = req.headers['x-user-id'] || req.body.userId || null;
     
-    if (!validateUserId(userId, res)) return;
+    // ========================================
+    // ✅ 安全检查：拒绝上传到根目录
+    //    必须提供 userId，文件只能上传到用户专属子文件夹
+    // ========================================
+    if (!userId) {
+      console.warn(`🚫 [OSS上传接口] 拒绝：未提供用户ID，不允许上传到根目录`);
+      return res.status(403).json({ 
+        error: 'User ID required. Uploads to root folder are not allowed.',
+        code: 'USER_ID_REQUIRED'
+      });
+    }
     
     try {
       const OSS_ROOT_FOLDER = process.env.ALIYUN_ROOT_FOLDER || 'ScreenSync';
@@ -1586,7 +1610,12 @@ if (aliyunOSSEnabled && ossUploadBuffer) {
         return res.status(500).json({ error: 'Server not configured: missing ALIYUN_ROOT_FOLDER' });
       }
 
-      if (!validateUploadToken(req.headers['x-upload-token'], res)) return;
+      if (UPLOAD_TOKEN) {
+        const token = req.headers['x-upload-token'];
+        if (token !== UPLOAD_TOKEN) {
+          return res.status(401).json({ error: 'Invalid upload token' });
+        }
+      }
 
       const parseTime = Date.now() - parseStartTime;
       if (parseTime > 500) {
@@ -1607,6 +1636,7 @@ if (aliyunOSSEnabled && ossUploadBuffer) {
         const dataSizeMB = (dataLength / 1024 / 1024).toFixed(2);
         
         const estimatedOriginalSizeMB = (dataLength * 0.75 / 1024 / 1024).toFixed(2);
+        console.log(`   📊 估算原始文件大小: ${estimatedOriginalSizeMB}MB`);
         
         if (dataLength > 800 * 1024 * 1024) {
           console.warn(`   ⚠️  警告：Base64 数据大小 (${dataSizeMB}MB) 接近 1GB 限制，可能导致上传失败`);
@@ -1661,7 +1691,17 @@ if (googleDriveEnabled && uploadBuffer) {
     // 记录请求到达（在body解析之前）
     const contentLength = req.headers['content-length'] ? parseInt(req.headers['content-length']) : 0;
     
-    if (!validateUserId(userId, res)) return;
+    // ========================================
+    // ✅ 安全检查：拒绝上传到根目录
+    //    必须提供 userId，文件只能上传到用户专属子文件夹
+    // ========================================
+    if (!userId) {
+      console.warn(`🚫 [上传接口] 拒绝：未提供用户ID，不允许上传到根目录`);
+      return res.status(403).json({ 
+        error: 'User ID required. Uploads to root folder are not allowed.',
+        code: 'USER_ID_REQUIRED'
+      });
+    }
     
     // 检查请求体是否已解析
     if (!req.body || Object.keys(req.body).length === 0) {
@@ -1681,7 +1721,12 @@ if (googleDriveEnabled && uploadBuffer) {
         return res.status(500).json({ error: 'Server not configured: missing GDRIVE_FOLDER_ID' });
       }
 
-      if (!validateUploadToken(req.headers['x-upload-token'], res)) return;
+      if (UPLOAD_TOKEN) {
+        const token = req.headers['x-upload-token'];
+        if (token !== UPLOAD_TOKEN) {
+          return res.status(401).json({ error: 'Invalid upload token' });
+        }
+      }
 
       // 记录 JSON 解析时间（用于诊断）
       const parseTime = Date.now() - parseStartTime;
@@ -1706,6 +1751,7 @@ if (googleDriveEnabled && uploadBuffer) {
         
         // 估算原始文件大小（Base64 编码会增加约 33%）
         const estimatedOriginalSizeMB = (dataLength * 0.75 / 1024 / 1024).toFixed(2);
+        console.log(`   📊 估算原始文件大小: ${estimatedOriginalSizeMB}MB`);
         
         // 检查是否超过限制（1GB body parser限制）
         if (dataLength > 800 * 1024 * 1024) {
@@ -1765,8 +1811,27 @@ if (googleDriveEnabled && uploadBuffer) {
       const filename = req.body.filename;
       const mimeType = req.body.mimeType;
 
-      if (!validateUserId(userId, res)) return;
-      if (!validateUploadToken(req.headers['x-upload-token'], res)) return;
+      
+      // ========================================
+      // ✅ 安全检查：拒绝上传到根目录
+      //    必须提供 userId，文件只能上传到用户专属子文件夹
+      // ========================================
+      if (!userId) {
+        console.warn(`🚫 [Upload URL] 拒绝：未提供用户ID，不允许上传到根目录`);
+        return res.status(403).json({ 
+          error: 'User ID required. Uploads to root folder are not allowed.',
+          code: 'USER_ID_REQUIRED'
+        });
+      }
+      
+      // Token 验证 (保持与其他接口一致)
+      if (UPLOAD_TOKEN) {
+        const token = req.headers['x-upload-token'];
+        if (token !== UPLOAD_TOKEN) {
+          console.warn(`   ⚠️  [Upload URL] Token 验证失败: ${token ? 'Invalid token' : 'Missing token'}`);
+          return res.status(401).json({ error: 'Invalid upload token' });
+        }
+      }
 
       if (!filename) {
         console.warn(`   ⚠️  [Upload URL] 缺少文件名 (Body: ${JSON.stringify(req.body).substring(0, 100)}...)`);
@@ -1912,6 +1977,8 @@ wss.on('connection', (ws, req) => {
       
       // 先卸载
       exec(`launchctl unload "${plistPath}"`, (unloadError) => {
+        console.log('   🗑️  卸载旧服务...');
+        
         // 重新加载
         exec(`launchctl load "${plistPath}"`, (loadError) => {
           if (loadError) {
@@ -1971,6 +2038,8 @@ wss.on('connection', (ws, req) => {
     
     // 打开文件夹
     if (data.type === 'open-folder') {
+      console.log('   目标子文件夹:', data.targetFolder || '默认');
+      
       let targetFolder;
       const subFolder = data.targetFolder || 'GIF-导出'; // 默认打开 GIF-导出 文件夹
       
@@ -1983,13 +2052,16 @@ wss.on('connection', (ws, req) => {
           'Library/Mobile Documents/com~apple~CloudDocs/ScreenSyncImg',
           subFolder
         );
+        console.log('   [iCloud模式] 目标文件夹:', targetFolder);
       } else {
         // Google Drive 或其他模式：打开 ScreenSyncImg 下的子文件夹
         const baseFolder = userConfig.getLocalDownloadFolder();
         targetFolder = path.join(baseFolder, subFolder);
+        console.log('   [本地模式] 目标文件夹:', targetFolder);
       }
       
       if (fs.existsSync(targetFolder)) {
+        console.log('   ✓ 文件夹存在，执行打开命令');
         exec(`open "${targetFolder}"`, (err) => {
           if (err) {
             console.error('   ❌ 无法打开文件夹:', err);
@@ -2002,6 +2074,7 @@ wss.on('connection', (ws, req) => {
         // 尝试打开父文件夹（ScreenSyncImg）
         const parentFolder = path.dirname(targetFolder);
         if (fs.existsSync(parentFolder)) {
+          console.log('   ℹ️  打开父文件夹替代:', parentFolder);
           exec(`open "${parentFolder}"`, (err) => {
             if (err) {
               console.error('   ❌ 无法打开父文件夹:', err);
@@ -2035,6 +2108,8 @@ wss.on('connection', (ws, req) => {
     
     // ✅ 处理缓存检查请求 (由 code.js 触发，用于自动关联未同步的 Video/GIF)
     if (data.type === 'check-cache-existence') {
+      console.log('   文件数:', data.files ? data.files.length : 0);
+
       const results = [];
       const mappingFile = path.join(userConfig.getLocalDownloadFolder(), '.cache-mapping.json');
       let mapping = {};
@@ -2047,6 +2122,7 @@ wss.on('connection', (ws, req) => {
           console.warn(`   ⚠️ 读取映射文件失败:`, e.message);
         }
       } else {
+        console.log('   ⚠️ 映射文件不存在:', mappingFile);
       }
 
       // 遍历请求的文件
@@ -2100,12 +2176,17 @@ wss.on('connection', (ws, req) => {
           type: 'cache-existence-result',
           results: results
         });
+         console.log(`   📤 已发送检查结果: 找到 ${results.length} 个文件`);
       }
       return;
     }
 
     // 处理保存手动拖入的视频/GIF到缓存的请求
     if (data.type === 'cache-manual-video') {
+      console.log('\n📥 收到保存手动拖入文件到缓存的请求');
+      console.log('   文件名:', data.filename);
+      console.log('   文件大小:', data.bytes ? `${(data.bytes.length / 1024 / 1024).toFixed(2)} MB` : '未知');
+      
       try {
         if (!data.filename || !data.bytes) {
           throw new Error('缺少文件名或文件数据');
@@ -2119,6 +2200,8 @@ wss.on('connection', (ws, req) => {
         
         if (cacheResult && cacheResult.cacheId) {
           console.log(`   ✅ 文件已保存到缓存`);
+          console.log(`   缓存ID: ${cacheResult.cacheId}`);
+          console.log(`   缓存路径: ${cacheResult.cachePath}`);
           
           // 返回缓存ID给Figma插件
           wsSend(ws, {
@@ -2145,6 +2228,7 @@ wss.on('connection', (ws, req) => {
     // 两条路径：① 有 base64 数据（来自 getBytesAsync）→ 直接缓存  ② 只有文件名 → 磁盘搜索
     if (data.type === 'auto-cache-video-by-search') {
       const { filename, timestamp, base64 } = data;
+      console.log(`\n🔄 [自动缓存] 收到缓存请求: ${filename}`, base64 ? `(${(base64.length * 0.75 / 1024 / 1024).toFixed(2)} MB)` : '(仅文件名)');
       
       try {
         if (!filename) throw new Error('缺少文件名');
@@ -2153,6 +2237,7 @@ wss.on('connection', (ws, req) => {
         // ✅ 路径①：有 base64 数据 → 直接解码为 Buffer（最可靠）
         if (base64) {
           fileBuffer = Buffer.from(base64, 'base64');
+          console.log(`   📊 文件大小: ${(fileBuffer.length / 1024 / 1024).toFixed(2)} MB (来自 getBytesAsync)`);
         }
         
         // ⚠️ 路径②：没有 base64 → 在磁盘上搜索文件
@@ -2208,6 +2293,7 @@ wss.on('connection', (ws, req) => {
           
           if (foundPath && fs.existsSync(foundPath)) {
             fileBuffer = fs.readFileSync(foundPath);
+            console.log(`   📁 磁盘搜索找到: ${foundPath} (${(fileBuffer.length / 1024 / 1024).toFixed(2)} MB)`);
           }
         }
         
@@ -2261,6 +2347,9 @@ wss.on('connection', (ws, req) => {
     // 处理上传本地 GIF/视频 请求
     if (data.type === 'upload-local-gif') {
       const startTime = Date.now();
+      console.log('\n📤 收到上传本地 GIF/视频 请求');
+      console.log('   文件名:', data.filename);
+      console.log('   Layer ID:', data.layerId);
       
       try {
         const filename = data.filename;
@@ -2269,12 +2358,16 @@ wss.on('connection', (ws, req) => {
         // 支持两种数据格式：base64（新）和 bytes 数组（旧）
         let bytes;
         if (data.base64) {
+          console.log('   📦 数据格式: Base64');
           bytes = Buffer.from(data.base64, 'base64');
         } else if (data.bytes) {
+          console.log('   📦 数据格式: 字节数组（旧格式，较慢）');
           bytes = Buffer.from(data.bytes);
         } else {
           throw new Error('缺少文件数据');
         }
+        
+        console.log('   📊 文件大小:', (bytes.length / 1024 / 1024).toFixed(2), 'MB');
         
         // 保存文件到临时目录
         const tempDir = path.join(os.tmpdir(), 'screensync-upload');
@@ -2285,17 +2378,24 @@ wss.on('connection', (ws, req) => {
         const tempFilePath = path.join(tempDir, filename);
         fs.writeFileSync(tempFilePath, bytes);
         
+        console.log('   ✅ 文件已保存到:', tempFilePath);
+        
         // 获取原始文件扩展名
         const fileExt = path.extname(filename).toLowerCase();
+        console.log('   📄 文件类型:', fileExt);
         
         // 检查文件大小，如果是视频且超过100MB，进行压缩（提高阈值以保留更多原始质量）
         const fileSizeMB = bytes.length / 1024 / 1024;
         const isVideo = ['.mov', '.mp4'].includes(fileExt);
         const needsCompression = isVideo && fileSizeMB > 100;
         
+        console.log(`   📊 文件大小: ${fileSizeMB.toFixed(2)} MB`);
+        
         let processedFilePath = tempFilePath;
         
         if (needsCompression) {
+          console.log('   🗜️  文件较大，开始压缩视频（高质量模式）...');
+          
           const compressedPath = path.join(tempDir, `compressed_${filename}`);
           
           // 使用 FFmpeg 压缩视频（高质量设置）
@@ -2350,6 +2450,10 @@ wss.on('connection', (ws, req) => {
         } catch (e) {
           // 忽略删除失败
         }
+        
+        console.log(`   📁 已保存到缓存: ${cacheResult.cachePath}`);
+        console.log(`   🔐 缓存ID: ${cacheResult.cacheId}`);
+        console.log(`   💡 文件保存在隐藏缓存目录，不会干扰用户文件夹`);
         
         // 计算总耗时
         const totalDuration = ((Date.now() - startTime) / 1000).toFixed(2);
@@ -2411,9 +2515,13 @@ wss.on('connection', (ws, req) => {
     if (data.type === 'extract-preview-frames') {
       const { layerId, layerName, originalFilename, videoId, gifCacheId, frameCount = 10 } = data;
       console.log(`\n🎞️ [时间线预览] 提取帧请求: ${layerName}`);
-      if (!gifCacheId) {
+      console.log(`   layerId: ${layerId}`);
+      if (gifCacheId) {
+        console.log(`   🔑 gifCacheId: ${gifCacheId}`);
+      } else {
         console.log(`   ⚠️ 无 gifCacheId — 该图层未绑定源文件`);
       }
+      console.log(`   请求帧数: ${frameCount}`);
       
       try {
         // 🔑 唯一查找方式：通过 gifCacheId 从缓存精确定位
@@ -2425,6 +2533,7 @@ wss.on('connection', (ws, req) => {
             const cachedResult = userConfig.getGifFromCache(originalFilename || layerName, gifCacheId);
             if (cachedResult && cachedResult.path && fs.existsSync(cachedResult.path)) {
               videoPath = cachedResult.path;
+              console.log(`   ✅ gifCacheId 精确命中: ${videoPath}`);
             } else {
               console.log(`   ⚠️ gifCacheId 存在但缓存文件不存在（可能已被清理）`);
             }
@@ -2449,6 +2558,8 @@ wss.on('connection', (ws, req) => {
           });
           return;
         }
+        
+        console.log(`   📁 最终视频路径: ${videoPath}`);
         
         // 创建临时目录存放帧（先清理旧文件，防止残留帧混入新结果）
         const tempDir = path.join(os.tmpdir(), 'screensync-preview-frames', layerId.replace(/:/g, '_'));
@@ -2481,6 +2592,7 @@ wss.on('connection', (ws, req) => {
         
         // 计算目标帧率：帧数 / 时长
         const targetFps = actualFrameCount / duration;
+        console.log(`   📊 提取参数: ${actualFrameCount} 帧, 视频时长 ${duration.toFixed(2)}s, 目标帧率 ${targetFps.toFixed(2)} fps`);
         
         // 使用单个 ffmpeg 命令一次性提取所有帧（更高效）
         const extractAllCmd = `ffmpeg -y -i "${videoPath}" -vf "fps=${targetFps},scale=-1:600" "${tempDir}/frame_%03d.png"`;
@@ -2504,6 +2616,7 @@ wss.on('connection', (ws, req) => {
           .sort();
         
         const totalFrames = frameFiles.length;
+        console.log(`   📸 实际提取帧数: ${totalFrames}`);
         
         for (let i = 0; i < totalFrames; i++) {
           const framePath = path.join(tempDir, frameFiles[i]);
@@ -2586,6 +2699,7 @@ wss.on('connection', (ws, req) => {
       try {
         const exportStartTime = Date.now();
         const receivedAlgorithm = data.gifAlgorithm || 'smooth_gradient';
+        console.log(`\n📥 [Server] 收到导出请求，算法=${receivedAlgorithm}`);
         
         const result = await composeAnnotatedGif({
           frameName: data.frameName,
@@ -2855,10 +2969,12 @@ wss.on('connection', (ws, req) => {
                 // 检查是否已经配置了 Google Drive 文件夹
                 if (!driveFolderId) {
                   console.log(`\n🔧 [Server] 检测到从 iCloud 切换到 Google Drive，开始自动配置...`);
+                  console.log(`   👤 用户ID: ${userId}`);
                   
                   // 1. 创建 Google Drive 用户文件夹
                   if (initializeUserFolderForUpload) {
                     try {
+                      console.log(`   📁 正在创建 Google Drive 用户文件夹...`);
                       const newDriveFolderId = await initializeUserFolderForUpload(userId);
                       userConfig.updateDriveFolderId(newDriveFolderId);
                       console.log(`   ✅ Google Drive 用户文件夹已创建: ${newDriveFolderId}`);
@@ -2972,6 +3088,9 @@ wss.on('connection', (ws, req) => {
     
     // 打开本地文件夹
     if (data.type === 'open-local-folder') {
+      console.log('📂 收到打开本地文件夹请求');
+      console.log('   目标子文件夹:', data.targetFolder || '根目录');
+      
       // 根据当前同步模式确定要打开的文件夹
       const currentMode = process.env.SYNC_MODE || 'drive';
       const subFolder = data.targetFolder; // 可能是 '视频', 'GIF', '图片' 或 undefined
@@ -2989,6 +3108,8 @@ wss.on('connection', (ws, req) => {
         const basePath = userConfig.getLocalDownloadFolder();
         localFolderPath = subFolder ? path.join(basePath, subFolder) : basePath;
       }
+      
+      console.log('   完整路径:', localFolderPath);
       
       // 根据操作系统选择打开命令
       let command;
@@ -3014,6 +3135,7 @@ wss.on('connection', (ws, req) => {
           command = platform === 'darwin' ? `open "${localFolderPath}"` : 
                     platform === 'win32' ? `explorer "${localFolderPath}"` : 
                     `xdg-open "${localFolderPath}"`;
+          console.log('   ℹ️  将打开父文件夹:', localFolderPath);
         }
       }
       

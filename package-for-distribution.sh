@@ -84,6 +84,8 @@ create_package() {
     cp serviceAccountKey.js "$TEMP_DIR/项目文件/" 2>/dev/null || true
     cp start.js "$TEMP_DIR/项目文件/"
     cp update-manager.js "$TEMP_DIR/项目文件/"
+    cp update-handlers.js "$TEMP_DIR/项目文件/"
+    cp gif-composer.js "$TEMP_DIR/项目文件/"
     cp drive-watcher.js "$TEMP_DIR/项目文件/"
     cp icloud-watcher.js "$TEMP_DIR/项目文件/" 2>/dev/null || true
     cp com.screensync.server.plist "$TEMP_DIR/项目文件/" 2>/dev/null || true

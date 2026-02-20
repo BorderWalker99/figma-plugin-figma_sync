@@ -522,6 +522,10 @@ figma.ui.onmessage = async (msg) => {
       return;
     }
     
+    // 🔍 Debug: 记录所有收到的消息类型
+    if (msg.type === 'get-gif-algorithm' || msg.type === 'set-gif-algorithm') {
+      console.log('🔍 [code.js] 收到消息:', msg.type);
+    }
   
   // ✅ 处理UI返回的跳过文件缓存数据
   if (msg.type === 'skipped-file-cache-response') {
@@ -622,6 +626,7 @@ figma.ui.onmessage = async (msg) => {
           selection = [frameFromId];
           // 同时更新 Figma 的选择，确保一致性
           figma.currentPage.selection = selection;
+          console.log('🕐 [导出] 使用时间线编辑的 Frame:', frameFromId.name);
         }
       }
       
@@ -1014,7 +1019,8 @@ figma.ui.onmessage = async (msg) => {
                         scaleMode: fill.scaleMode, // FILL, FIT, CROP, TILE
                         // 强制转为 JSON 字符串传输，避免 WebSocket/postMessage 序列化问题
                         imageTransform: transformArray ? JSON.stringify(transformArray) : null,
-                        scalingFactor: fill.scalingFactor || 1
+                        scalingFactor: fill.scalingFactor || 1,
+                        _debug_test: "TEST_VALUE_FROM_PLUGIN" // 添加一个测试字段
                      };
                      break;
                   }
@@ -1542,8 +1548,10 @@ figma.ui.onmessage = async (msg) => {
   
   // 处理 GIF 算法设置
   if (msg.type === 'get-gif-algorithm') {
+    console.log('🎨 [code.js] 收到 get-gif-algorithm 请求');
     try {
       const algorithm = await figma.clientStorage.getAsync('gifAlgorithm');
+      console.log('🎨 [code.js] 从存储读取算法:', algorithm || 'less_noise (默认)');
       figma.ui.postMessage({
         type: 'gif-algorithm-response',
         algorithm: algorithm || 'less_noise'
@@ -1559,8 +1567,10 @@ figma.ui.onmessage = async (msg) => {
   }
   
   if (msg.type === 'set-gif-algorithm') {
+    console.log('🎨 [code.js] 保存 GIF 算法:', msg.algorithm);
     try {
       await figma.clientStorage.setAsync('gifAlgorithm', msg.algorithm);
+      console.log('🎨 [code.js] 算法保存成功');
     } catch (error) {
       console.error('🎨 [code.js] 算法保存失败:', error);
     }
@@ -1597,6 +1607,7 @@ figma.ui.onmessage = async (msg) => {
         const node = figma.getNodeById(msg.layerId);
         if (node) {
           node.setPluginData('gifCacheId', msg.gifCacheId);
+          console.log('🔑 已回填 gifCacheId:', node.name, '→', msg.gifCacheId);
         }
       }
     } catch (e) {
@@ -2024,6 +2035,7 @@ figma.ui.onmessage = async (msg) => {
             if (node) {
               node.setPluginData('gifCacheId', gifCacheId);
               node.setPluginData('originalFilename', filename);
+              console.log('✅ 自动缓存回填到节点:', node.name, '(', node.id, ')');
               
               // 关联完成，移除 entry
               const idx = pendingDroppedFiles.indexOf(entry);
@@ -2055,6 +2067,7 @@ figma.ui.onmessage = async (msg) => {
                     nodeBase.includes(targetBase) || targetBase.includes(nodeBase)) {
                   node.setPluginData('gifCacheId', gifCacheId);
                   node.setPluginData('originalFilename', filename);
+                  console.log('✅ 自动关联到节点:', node.name, '(', node.id, ')');
                   
                   // 从 pendingDroppedFiles 中移除已关联的文件
                   if (entry) {
@@ -2254,6 +2267,9 @@ figma.ui.onmessage = async (msg) => {
               isVideoLayer = true;
             }
           }
+          
+          const hasVideoFill = child.fills && Array.isArray(child.fills) && child.fills.some(f => f.type === 'VIDEO');
+          console.log('Timeline layer: ' + child.name + ', isVideoLayer: ' + isVideoLayer + ', hasVideoFill: ' + hasVideoFill + ', videoId: ' + videoId);
           
           return {
             id: child.id,
@@ -2467,6 +2483,7 @@ figma.on('drop', (event) => {
               // 再次延迟，让 base64 编码和大消息发送不阻塞画布交互
               setTimeout(() => {
                 try {
+                  console.log('📎 [自动缓存] 读取到文件字节:', filename, (bytes.length / 1024 / 1024).toFixed(2) + ' MB');
                   const base64 = figma.base64Encode(bytes);
                   figma.ui.postMessage({
                     type: 'auto-cache-dropped-video',
@@ -2860,11 +2877,13 @@ function processDroppedMediaNode(node, nodeName) {
         }
         if (bestMatch.gifCacheId) {
           node.setPluginData('gifCacheId', bestMatch.gifCacheId);
+          console.log('✅ 自动缓存已关联到节点:', nodeName, '→ cacheId:', bestMatch.gifCacheId);
         }
         
         // 如果自动缓存尚未完成（Server 还在处理），先记录 nodeId 以便后续回填
         if (bestMatch.autoCaching && !bestMatch.gifCacheId) {
           bestMatch.pendingNodeId = node.id;
+          console.log('⏳ 自动缓存进行中，节点已记录:', nodeName, '(', node.id, ')');
           // 不移除 entry，等缓存完成后由 auto-cache-result 处理
           return;
         }

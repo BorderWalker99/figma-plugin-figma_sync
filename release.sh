@@ -104,7 +104,7 @@ sed -i '' "1,10s/\"version\": \"[^\"]*\"/\"version\": \"${NEW_VERSION}\"/" insta
 echo -e "   ${GREEN}✅ installer/package.json 版本号已更新: v${NEW_VERSION}${NC}"
 
 # 更新 installer/index.html 版本号 (显示在界面左下角)
-sed -i '' "s/v[0-9]\+\.[0-9]\+\.[0-9]\+/v${NEW_VERSION}/g" installer/index.html
+sed -i '' "s/v[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*/v${NEW_VERSION}/g" installer/index.html
 echo -e "   ${GREEN}✅ installer/index.html 版本号已更新: v${NEW_VERSION}${NC}"
 
 # 更新服务器版本号 (VERSION.txt)

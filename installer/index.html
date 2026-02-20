@@ -6,62 +6,69 @@
   <title>ScreenSync 安装向导</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Staatliches&family=Archivo+Black&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&display=swap" rel="stylesheet">
   <style>
     /*========================
-      Design System: Neumorphism (Matched with Figma Plugin)
+      Design System: Liquid Glass (Unified with Figma Plugin)
     ========================*/
     :root {
-      /* Colors */
-      --bg-app: #E8ECF0;
-      --bg-card: #E8ECF0;
-      
-      /* Neumorphism Colors (Light Theme) */
-      --neu-shadow-light: rgba(255, 255, 255, 0.9);
-      --neu-shadow-dark: rgba(0, 0, 0, 0.12);
-      --neu-face: #E8ECF0;
-      
-      --neu-ring-gradient: linear-gradient(145deg, #FFFFFF, #E0E5E9);
-      --neu-ring-inner-shadow: inset 1px 1px 2px rgba(255,255,255,0.9);
-      --neu-face-bg: #E8ECF0;
-      --neu-face-shadow: 
-        inset 1px 1px 2px rgba(255,255,255,0.9), 
-        inset -1px -1px 2px rgba(0,0,0,0.08);
-      
-      --neu-face-bg-hover: #EEF2F6;
-      --neu-face-bg-active: #E0E4E8;
-      --neu-face-shadow-active: 
-        inset 3px 3px 6px rgba(0,0,0,0.15),
-        inset -2px -2px 4px rgba(255,255,255,0.7);
+      --bg-app: #F5F5F7;
+      --bg-card: #FFFFFF;
+      --bg-inset: #F0F0F2;
+
+      /* Liquid Glass */
+      --glass-bg: rgba(255, 255, 255, 0.95);
+      --glass-bg-hover: rgba(255, 255, 255, 0.98);
+      --glass-bg-active: rgba(248, 248, 250, 0.95);
+      --glass-blur: 20px;
+      --glass-border: rgba(0, 0, 0, 0.08);
+      --glass-border-subtle: rgba(0, 0, 0, 0.05);
+      --glass-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+      --glass-shadow-hover: 0 4px 12px rgba(0, 0, 0, 0.06);
+      --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 1);
+      --glass-specular: linear-gradient(135deg, rgba(255,255,255,0.6) 0%, rgba(255,255,255,0) 50%);
+
+      /* Neumorphism (used in button active states) */
+      --neu-shadow-light: rgba(255, 255, 255, 0.8);
+      --neu-shadow-dark: rgba(0, 0, 0, 0.04);
+      --neu-face-bg-active: rgba(250, 250, 252, 0.9);
+      --neu-face-shadow-active:
+        inset 2px 2px 4px rgba(0,0,0,0.05),
+        inset -1px -1px 2px rgba(255,255,255,0.8);
+
+      /* Unified Green */
+      --unified-green: #40D468;
+      --unified-green-glow: rgba(64, 212, 104, 0.35);
 
       /* Accent & Status */
-      --unified-green: #4DE34F;
-      --unified-green-glow: rgba(77, 227, 79, 0.4);
       --accent: #0066FF;
-      --accent-gradient: linear-gradient(135deg, #0066FF, #0052CC);
       --accent-soft: rgba(0, 102, 255, 0.1);
-      
-      --success: #34C759;
-      --success-bg: rgba(52, 199, 89, 0.1);
-      --warning: #FF9500;
-      --warning-bg: rgba(255, 149, 0, 0.1);
+      --success: var(--unified-green);
+      --warning: #F59E0B;
       --danger: #FF3B30;
-      --danger-bg: rgba(255, 59, 48, 0.1);
-      
-      /* Text */
-      --text-primary: #1D1D1F;
-      --text-secondary: #86868B;
-      --text-tertiary: #AEAEB2;
-      --neu-text: #999999;
-      
-      --divider: rgba(0, 0, 0, 0.05);
-      --border: rgba(0, 0, 0, 0.08);
-      
+
+      /* Text Color Hierarchy */
+      --text-primary: #a3a3a7;
+      --text-secondary: #bababf;
+      --text-tertiary: #d0d0d5;
+
+      --divider: rgba(0, 0, 0, 0.06);
+      --border: rgba(0, 0, 0, 0.1);
+
+      /* Shadows */
+      --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.02);
+      --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.04);
+      --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.06);
+
       /* Radius */
-      --radius-s: 16px; /* Updated to 16px for consistency if used elsewhere */
-      --radius-m: 16px;
-      --radius-l: 24px;
-      
+      --radius-xs: 4px;
+      --radius-s: 8px;
+      --radius-m: 12px;
+      --radius-l: 16px;
+      --radius-xl: 24px;
+      --radius-pill: 999px;
+      --radius-btn: 12px;
+
       /* Animation */
       --ease-spring: cubic-bezier(0.25, 0.8, 0.25, 1);
       --ease-out: cubic-bezier(0.33, 1, 0.68, 1);
@@ -69,67 +76,76 @@
 
     @media (prefers-color-scheme: dark) {
       :root {
-        --bg-app: #2C2C2E;
+        --bg-app: #1C1C1E;
         --bg-card: #2C2C2E;
-        --bg-card-hover: #3A3A3C;
-        
-        /* Neumorphism Colors (Dark Theme) */
-        --neu-shadow-light: rgba(255, 255, 255, 0.06);
+        --bg-inset: rgba(28, 28, 30, 0.8);
+
+        --glass-bg: rgba(40, 40, 42, 0.7);
+        --glass-bg-hover: rgba(50, 50, 52, 0.75);
+        --glass-bg-active: rgba(35, 35, 37, 0.65);
+        --glass-blur: 24px;
+        --glass-border: rgba(255, 255, 255, 0.12);
+        --glass-border-subtle: rgba(255, 255, 255, 0.08);
+        --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        --glass-shadow-hover: 0 12px 40px rgba(0, 0, 0, 0.4);
+        --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        --glass-specular: linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0) 50%);
+
+        --neu-shadow-light: rgba(255, 255, 255, 0.04);
         --neu-shadow-dark: rgba(0, 0, 0, 0.5);
-        --neu-face: #2C2C2E;
-        
-        --neu-ring-gradient: linear-gradient(145deg, #3A3A3C, #2C2C2E);
-        --neu-ring-inner-shadow: inset 1px 1px 2px rgba(255,255,255,0.08);
-        --neu-face-bg: #2C2C2E;
-        --neu-face-shadow: 
-          inset 1px 1px 2px rgba(255,255,255,0.08), 
-          inset -1px -1px 2px rgba(0,0,0,0.3);
-        
-        --neu-face-bg-hover: #3A3A3C;
-        --neu-face-bg-active: #2C2C2E;
-        --neu-face-shadow-active: 
-          inset 3px 3px 6px rgba(0,0,0,0.5),
-          inset -2px -2px 4px rgba(255,255,255,0.05);
-        
-        --text-primary: #F5F5F7;
-        --text-secondary: #8E8E93;
-        --text-tertiary: #48484A;
-        --neu-text: #8E8E93;
-        
+        --neu-face-bg-active: rgba(40, 40, 42, 0.75);
+        --neu-face-shadow-active:
+          inset 2px 2px 4px rgba(0,0,0,0.35),
+          inset -1px -1px 2px rgba(255,255,255,0.04);
+
+        --unified-green-glow: rgba(77, 227, 79, 0.45);
+
+        --accent: #0A84FF;
+        --accent-soft: rgba(10, 132, 255, 0.15);
+
+        --text-primary: #98989D;
+        --text-secondary: #636366;
+        --text-tertiary: #545456;
+
         --divider: rgba(255, 255, 255, 0.08);
-        --border: rgba(255, 255, 255, 0.12);
+        --border: rgba(255, 255, 255, 0.1);
+
+        --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.25);
+        --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.35);
+        --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.4);
       }
     }
 
-    /* Global Text Shadow (Skeuomorphic) */
-    body, button, h1, h2, h3, p, span, div {
-       /* text-shadow: 0 1px 1px rgba(255, 255, 255, 0.5); */
-    }
-    
-    @media (prefers-color-scheme: dark) {
-      body, button, h1, h2, h3, p, span, div {
-         /* text-shadow: 0 1px 1px rgba(0, 0, 0, 0.3); */
-      }
-    }
-    
-    /* Apply text shadow more selectively to avoid blurriness on small text */
-    h1, h2, .btn, .step-title {
-        text-shadow: 0 1px 1px rgba(255, 255, 255, 0.5);
-    }
-    @media (prefers-color-scheme: dark) {
-        h1, h2, .btn, .step-title {
-            text-shadow: 0 1px 1px rgba(0, 0, 0, 0.3);
-        }
+    /* Global Text Shadow (Skeuomorphic — matches plugin) */
+    button, .modal-title, .step-title, .toast,
+    .btn span, .status-label, .status-detail,
+    h1, h2, h3, h4, h5, h6, p, span, label {
+      text-shadow: 0 1px 1px rgba(255, 255, 255, 0.5);
     }
 
-    /* Global Icon Shadow */
-    svg {
-        filter: drop-shadow(0 1px 1px rgba(255, 255, 255, 0.5));
-    }
     @media (prefers-color-scheme: dark) {
-        svg {
-            filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.3));
-        }
+      button, .modal-title, .step-title, .toast,
+      .btn span, .status-label, .status-detail,
+      h1, h2, h3, h4, h5, h6, p, span, label {
+        text-shadow: 0 1px 1px rgba(0, 0, 0, 0.3);
+      }
+    }
+
+    /* Global Icon Shadow (matches plugin) */
+    svg, .toast-icon svg, .btn svg,
+    .status-icon svg, .modal-icon svg {
+      filter: drop-shadow(0 1px 1px rgba(255, 255, 255, 0.5));
+    }
+
+    @media (prefers-color-scheme: dark) {
+      svg, .toast-icon svg, .btn svg,
+      .status-icon svg, .modal-icon svg {
+        filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.3));
+      }
+    }
+
+    svg.spinner {
+      filter: none;
     }
 
     * {
@@ -141,7 +157,7 @@
     body {
       margin: 0;
       padding: 0;
-      font-family: "SF Pro Text", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", "PingFang SC", "Hiragino Sans GB", Arial, sans-serif;
       background: var(--bg-app);
       color: var(--text-primary);
       font-size: 13px;
@@ -161,7 +177,7 @@
       align-items: center;
       justify-content: space-between;
       -webkit-app-region: drag;
-      background: var(--neu-face-bg);
+      background: transparent;
     }
 
     .brand {
@@ -173,17 +189,9 @@
     .logo-box {
       width: 24px;
       height: 24px;
-      background: transparent; 
       display: flex;
       align-items: center;
       justify-content: center;
-      color: var(--accent);
-    }
-
-    .app-title {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
     }
 
     .app-title h1 {
@@ -191,7 +199,7 @@
       font-weight: 400;
       font-size: 16px;
       letter-spacing: -0.01em;
-      line-height: 100%;
+      line-height: 1;
       color: var(--text-primary);
       margin: 0;
     }
@@ -239,10 +247,10 @@
       margin: 0;
     }
 
-    /* Neumorphic Buttons */
+    /* Buttons — Matches plugin .btn exactly */
     .btn {
       padding: 10px 12px 10px 20px;
-      border-radius: 16px; /* Explicitly set to 16px */
+      border-radius: var(--radius-btn);
       font-size: 14px;
       font-weight: 600;
       cursor: pointer;
@@ -251,71 +259,122 @@
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      gap: 8px;
-      transition: all 0.2s var(--ease-spring);
+      gap: 6px;
+      transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
       min-width: 90px;
-      
-      /* Neumorphic Style */
-      background: var(--neu-ring-gradient);
+      position: relative;
+      background: rgba(142, 142, 147, 0.18);
       color: var(--text-primary);
-      box-shadow: 
-        -3px -3px 6px var(--neu-shadow-light),
-        3px 3px 6px var(--neu-shadow-dark),
-        var(--neu-ring-inner-shadow);
+    }
+
+    .btn::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border-radius: var(--radius-btn);
+      background: transparent;
+      z-index: -2;
+      pointer-events: none;
+      opacity: 0;
+    }
+
+    .btn::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border-radius: var(--radius-btn);
+      background: transparent;
+      z-index: -1;
+      transition: all 0.25s ease;
+      pointer-events: none;
+    }
+
+    .btn span, .btn svg {
+      position: relative;
+      z-index: 1;
+    }
+
+    .btn:hover {
+      background: rgba(142, 142, 147, 0.22);
     }
 
     .btn:active {
+      background: rgba(142, 142, 147, 0.12);
+      box-shadow:
+        -3px -3px 6px var(--neu-shadow-light),
+        3px 3px 6px var(--neu-shadow-dark);
+    }
+
+    .btn:active::after {
       background: var(--neu-face-bg-active);
       box-shadow: var(--neu-face-shadow-active);
-      transform: scale(0.98);
     }
 
     .btn:disabled {
-      opacity: 0.6;
+      opacity: 0.5;
       cursor: not-allowed;
-      box-shadow: none;
-      background: var(--neu-face-bg);
     }
 
-    /* Keep raised effect even when disabled (for specific states) */
     .btn.keep-raised:disabled {
-      background: var(--neu-ring-gradient);
-      box-shadow: 
-        -3px -3px 6px var(--neu-shadow-light),
-        3px 3px 6px var(--neu-shadow-dark),
-        var(--neu-ring-inner-shadow);
-      opacity: 0.8;
+      opacity: 0.7;
       cursor: wait;
+      background: rgba(142, 142, 147, 0.18);
     }
 
-    /* Primary Button - Uses Accent Color for Text/Icon to stand out */
     .btn-primary {
-      color: var(--accent);
-    }
-    
-    .btn-primary svg {
-        color: var(--accent);
+      color: var(--text-primary);
+      background: rgba(142, 142, 147, 0.18);
     }
 
-    /* Status Items - Unified Card Container */
+    .btn-primary:hover {
+      background: rgba(142, 142, 147, 0.22);
+    }
+
+    .btn-primary:active {
+      background: rgba(142, 142, 147, 0.12);
+    }
+
+    .btn-primary::after {
+      background: transparent;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      .btn {
+        background: rgba(118, 118, 128, 0.32);
+        color: var(--text-primary);
+      }
+      .btn:hover {
+        background: rgba(118, 118, 128, 0.40);
+      }
+      .btn:active {
+        background: rgba(118, 118, 128, 0.24);
+      }
+      .btn.keep-raised:disabled {
+        background: rgba(118, 118, 128, 0.32);
+      }
+      .btn-primary {
+        background: rgba(118, 118, 128, 0.32);
+        color: var(--text-primary);
+      }
+      .btn-primary:hover {
+        background: rgba(118, 118, 128, 0.40);
+      }
+      .btn-primary:active {
+        background: rgba(118, 118, 128, 0.24);
+      }
+    }
+
+    /* Status List — Glass card */
     .status-list {
       display: flex;
       flex-direction: column;
-      gap: 0;
       border-radius: var(--radius-m);
       overflow: hidden;
-      /* Neumorphic Card */
-      background: var(--neu-face-bg);
-      box-shadow: 
-        -2px -2px 5px var(--neu-shadow-light),
-        2px 2px 5px var(--neu-shadow-dark);
-      border: 1px solid rgba(255,255,255,0.1);
-    }
-    
-    @media (prefers-color-scheme: dark) {
-        .status-list {
-            border: 1px solid rgba(255,255,255,0.05);
-        }
+      background: var(--glass-bg);
+      backdrop-filter: blur(var(--glass-blur));
+      -webkit-backdrop-filter: blur(var(--glass-blur));
+      border: 1px solid var(--glass-border-subtle);
+      box-shadow: var(--glass-shadow);
     }
 
     .status-item {
@@ -326,7 +385,7 @@
       background: transparent;
       border-bottom: 1px solid var(--divider);
     }
-    
+
     .status-item:last-child {
       border-bottom: none;
     }
@@ -361,52 +420,50 @@
     .status-item.success .status-icon { color: var(--success); }
     .status-item.error .status-icon { color: var(--danger); }
     .status-item.checking .status-icon { color: var(--accent); }
-    
-    /* Progress Bar - Neumorphic Recessed */
+
+    /* Progress — Glass card */
     .progress-container {
       border-radius: var(--radius-m);
       padding: 24px;
-      background: var(--neu-face-bg);
-      box-shadow: 
-        -2px -2px 5px var(--neu-shadow-light),
-        2px 2px 5px var(--neu-shadow-dark);
+      background: var(--glass-bg);
+      backdrop-filter: blur(var(--glass-blur));
+      -webkit-backdrop-filter: blur(var(--glass-blur));
+      border: 1px solid var(--glass-border-subtle);
+      box-shadow: var(--glass-shadow);
     }
 
     .progress-bar {
-      height: 10px;
-      background: var(--neu-face-bg);
-      border-radius: 5px;
+      height: 6px;
+      background: var(--bg-inset);
+      border-radius: var(--radius-pill);
       overflow: hidden;
       margin: 16px 0;
-      box-shadow: var(--neu-face-shadow-active); /* Inner shadow for recessed look */
     }
 
     .progress-fill {
       height: 100%;
-      background: var(--accent-gradient);
+      background: var(--accent);
       width: 0%;
       transition: width 0.3s ease;
-      border-radius: 5px;
-      box-shadow: 2px 0 5px rgba(0,0,0,0.2); /* Slight shadow for the bar */
+      border-radius: var(--radius-pill);
     }
 
     .progress-fill.success {
-      background: var(--success);
+      background: var(--unified-green);
     }
 
-    /* Logs - Recessed */
+    /* Logs — Dark inset */
     .log-container {
-      background: #1e1e1e; /* Keep dark for logs */
+      background: #1a1a1a;
       color: #d4d4d4;
       padding: 16px;
       border-radius: var(--radius-s);
-      font-family: 'Monaco', 'Menlo', monospace;
+      font-family: "SF Mono", Monaco, Menlo, monospace;
       font-size: 12px;
       height: 200px;
       overflow-y: auto;
       margin-top: 16px;
       border: 1px solid var(--border);
-      box-shadow: inset 2px 2px 5px rgba(0,0,0,0.5);
     }
 
     .log-line {
@@ -415,18 +472,16 @@
       word-break: break-all;
     }
 
-    /* Footer */
+    /* Footer — Glass surface */
     .footer {
       padding: 20px 24px;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      
-      /* Raised Effect - Neumorphic */
-      background: var(--neu-face-bg);
-      box-shadow: 
-        0 -4px 10px var(--neu-shadow-light),
-        0 -1px 4px rgba(0,0,0,0.02);
+      background: var(--glass-bg);
+      backdrop-filter: blur(var(--glass-blur));
+      -webkit-backdrop-filter: blur(var(--glass-blur));
+      border-top: 1px solid var(--glass-border-subtle);
       position: relative;
       z-index: 10;
     }
@@ -437,40 +492,23 @@
     }
 
     .dot {
-      width: 10px;
-      height: 10px;
+      width: 8px;
+      height: 8px;
       border-radius: 50%;
-      background: var(--neu-face-bg);
-      /* Recessed State (Unvisited) */
-      box-shadow: 
-        inset 1px 1px 2px var(--neu-shadow-dark),
-        inset -1px -1px 2px var(--neu-shadow-light);
+      background: var(--bg-inset);
+      border: 1px solid var(--glass-border-subtle);
       transition: all 0.3s ease;
-      border: 1px solid rgba(0,0,0,0.05); /* Subtle border */
-    }
-    
-    @media (prefers-color-scheme: dark) {
-      .dot {
-        border-color: rgba(255,255,255,0.05);
-      }
     }
 
     .dot.active {
       background: var(--unified-green);
       border-color: transparent;
-      /* Green Glowing State (Current) */
-      box-shadow: 
-        0 0 8px var(--unified-green-glow),
-        inset 1px 1px 2px rgba(255,255,255,0.4);
+      box-shadow: 0 0 8px var(--unified-green-glow);
     }
 
     .dot.completed {
       background: var(--unified-green);
       border-color: transparent;
-      /* Green Non-glowing State (Completed) - Raised */
-      box-shadow: 
-        -1px -1px 2px var(--neu-shadow-light),
-        1px 1px 2px var(--neu-shadow-dark);
     }
 
     .button-group {
@@ -481,7 +519,7 @@
       margin-top: auto;
     }
 
-    /* Alerts */
+    /* Alerts — Glass card */
     .alert {
       padding: 12px 16px;
       border-radius: var(--radius-s);
@@ -490,17 +528,17 @@
       align-items: flex-start;
       gap: 12px;
       line-height: 1.5;
-      /* Neumorphic Alert */
-      background: var(--neu-face-bg);
-      box-shadow: 
-        -2px -2px 5px var(--neu-shadow-light),
-        2px 2px 5px var(--neu-shadow-dark);
+      background: var(--glass-bg);
+      backdrop-filter: blur(var(--glass-blur));
+      -webkit-backdrop-filter: blur(var(--glass-blur));
+      border: 1px solid var(--glass-border-subtle);
+      box-shadow: var(--glass-shadow);
       margin-bottom: 16px;
     }
 
     .alert-success { color: var(--success); }
     .alert-error { color: var(--danger); }
-    
+
     .alert-icon {
       width: 20px !important;
       height: 20px !important;
@@ -509,7 +547,7 @@
       align-items: center;
       justify-content: center;
     }
-    
+
     .alert-icon svg {
       width: 100%;
       height: 100%;
@@ -525,33 +563,18 @@
       fill: none;
       stroke-linecap: round;
       stroke-linejoin: round;
-      filter: drop-shadow(0 1px 1px rgba(255, 255, 255, 0.5));
-    }
-    
-    @media (prefers-color-scheme: dark) {
-        svg {
-            filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.3));
-        }
-    }
-    
-    /* Disable shadow on spinner to prevent rotating shadow */
-    svg.spinner {
-        filter: none;
     }
 
     .btn svg {
       width: 16px;
       height: 16px;
     }
-    
-    /* Completion icon */
+
     .completion-icon svg {
       width: 40px !important;
       height: 40px !important;
-      /* Custom shadow for this large icon */
-      filter: drop-shadow(0 2px 4px rgba(0,0,0,0.1));
     }
-    
+
     .spinner {
       animation: spin 1s linear infinite;
     }
@@ -560,40 +583,45 @@
       100% { transform: rotate(360deg); }
     }
 
-    /* Modal / Overlay */
+    /* Modal — Liquid Glass */
     .overlay {
       position: fixed;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background: rgba(0, 0, 0, 0.4);
+      inset: 0;
+      background: rgba(0, 0, 0, 0);
+      backdrop-filter: blur(0px);
+      -webkit-backdrop-filter: blur(0px);
       display: flex;
       align-items: center;
       justify-content: center;
       z-index: 2000;
       opacity: 0;
       pointer-events: none;
-      transition: opacity 0.2s ease;
-      backdrop-filter: blur(4px);
+      transition: opacity 0.25s var(--ease-out),
+                  background 0.25s var(--ease-out),
+                  backdrop-filter 0.25s var(--ease-out);
     }
 
     .overlay.show {
       opacity: 1;
       pointer-events: auto;
+      background: rgba(0, 0, 0, 0.4);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
     }
 
     .modal {
-      background: var(--bg-card);
+      background: var(--glass-bg);
+      backdrop-filter: blur(var(--glass-blur));
+      -webkit-backdrop-filter: blur(var(--glass-blur));
       width: 320px;
       padding: 32px 24px;
-      border-radius: var(--radius-m);
-      /* Neumorphic Modal */
-      box-shadow: 
-        -10px -10px 20px var(--neu-shadow-light),
-        10px 10px 20px var(--neu-shadow-dark);
-      transform: scale(0.95);
-      transition: transform 0.2s var(--ease-spring);
+      border-radius: var(--radius-l);
+      border: 1px solid var(--glass-border);
+      box-shadow: var(--glass-shadow);
+      transform: scale(0.92) translateY(20px);
+      opacity: 0;
+      transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1),
+                  opacity 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
       display: flex;
       flex-direction: column;
       gap: 20px;
@@ -601,7 +629,8 @@
     }
 
     .overlay.show .modal {
-      transform: scale(1);
+      transform: scale(1) translateY(0);
+      opacity: 1;
     }
 
     .modal-icon {
@@ -610,20 +639,21 @@
       justify-content: center;
       margin: 0 auto;
       color: var(--accent);
-      /* Neumorphic Indent for icon */
       width: 64px;
       height: 64px;
       border-radius: 50%;
-      background: var(--neu-face-bg);
-      box-shadow: var(--neu-face-shadow);
+      background: var(--glass-bg);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid var(--glass-border-subtle);
+      box-shadow: var(--shadow-md), inset 0 1px 0 rgba(255, 255, 255, 0.4);
     }
-    
+
     .modal-icon svg {
       width: 32px !important;
       height: 32px !important;
-      filter: drop-shadow(0 1px 1px rgba(255, 255, 255, 0.8));
     }
-    
+
     .modal-title {
       font-size: 18px;
       font-weight: 700;
@@ -642,21 +672,23 @@
       justify-content: center;
     }
 
-    /* Toast */
+    /* Toast — Glass (matches plugin) */
     .toast {
       position: fixed;
-      top: 40px;
+      top: 20px;
       left: 50%;
       transform: translateX(-50%) translateY(-100px);
-      background: var(--bg-card);
-      border-radius: 50px; /* Pill shape */
-      padding: 12px 24px;
-      /* Neumorphic Toast */
-      box-shadow: 
-        -4px -4px 10px var(--neu-shadow-light),
-        4px 4px 10px var(--neu-shadow-dark);
+      background: var(--glass-bg);
+      backdrop-filter: blur(var(--glass-blur));
+      -webkit-backdrop-filter: blur(var(--glass-blur));
+      border: 1px solid var(--glass-border-subtle);
+      border-radius: var(--radius-xl);
+      padding: 8px 12px;
+      box-shadow:
+        0 8px 32px rgba(0, 0, 0, 0.1),
+        inset 0 1px 0 rgba(255, 255, 255, 0.5);
       font-size: 13px;
-      font-weight: 600;
+      font-weight: 500;
       color: var(--text-primary);
       z-index: 1000;
       opacity: 0;
@@ -666,7 +698,15 @@
       width: fit-content;
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 6px;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      .toast {
+        box-shadow:
+          0 8px 32px rgba(0, 0, 0, 0.35),
+          inset 0 1px 0 rgba(255, 255, 255, 0.08);
+      }
     }
 
     .toast.show {
@@ -674,18 +714,46 @@
       transform: translateX(-50%) translateY(0);
       pointer-events: auto;
     }
-    
+
     .toast-icon {
-      width: 18px;
-      height: 18px;
+      width: 14px;
+      height: 14px;
       flex-shrink: 0;
       display: flex;
       align-items: center;
       justify-content: center;
     }
 
+    .toast-icon svg {
+      width: 100%;
+      height: 100%;
+    }
+
     .toast.success .toast-icon { color: var(--success); }
     .toast.error .toast-icon { color: var(--danger); }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar {
+      width: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(142, 142, 147, 0.2);
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(142, 142, 147, 0.35);
+    }
+    @media (prefers-color-scheme: dark) {
+      ::-webkit-scrollbar-thumb {
+        background: rgba(118, 118, 128, 0.3);
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: rgba(118, 118, 128, 0.5);
+      }
+    }
   </style>
 </head>
 <body>
@@ -697,18 +765,16 @@
   <div class="header">
     <div class="brand">
       <div class="logo-box">
-        <!-- Plugin Logo SVG -->
         <img src="https://raw.githubusercontent.com/BorderWalker99/figma-plugin-figma_sync/refs/heads/main/images/logo.svg" width="18" height="18" />
       </div>
       <div class="app-title">
         <h1>ScreenSync</h1>
-        <!-- <p>安装向导</p> -->
       </div>
     </div>
   </div>
 
   <div class="content">
-    <!-- Step 1: Welcome / Cover -->
+    <!-- Step 1: Welcome -->
     <div class="step active" id="step1">
       <div class="step-header" style="flex: 1; display: flex; flex-direction: column; justify-content: center; margin: 0;">
         <div style="margin-bottom: 24px;">
@@ -726,7 +792,7 @@
       </div>
     </div>
 
-    <!-- Step 2: System Check (现在是第二步) -->
+    <!-- Step 2: System Check -->
     <div class="step" id="step2">
       <div class="step-header">
         <h2 class="step-title">环境检查</h2>
@@ -771,11 +837,7 @@
         </div>
       </div>
 
-      <!-- 统一安装按钮区域 -->
-      <!-- Alert notification and installAllSection removed as requested -->
-
       <div class="button-group" id="step2Buttons" style="display: none;">
-        <!-- 移除上一步按钮，因为 Step 1 已隐藏 -->
         <div style="flex:1"></div>
         <button class="btn btn-primary" id="step2ActionBtn">
             <svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
@@ -839,7 +901,7 @@
     <!-- Step 5: Complete -->
     <div class="step" id="step5" style="justify-content: center; gap: 16px;">
       <div class="step-header" style="margin-bottom: 0; margin-top: -12px;">
-        <div style="width: 80px; height: 80px; background: var(--success); border-radius: 50%; color: white; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; box-shadow: 0 4px 16px rgba(52, 199, 89, 0.3);">
+        <div style="width: 80px; height: 80px; background: var(--unified-green); border-radius: 50%; color: white; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; box-shadow: 0 4px 16px var(--unified-green-glow);">
           <div class="completion-icon" style="transform: translateY(4px);">
             <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
               <path d="M20 6L9 17L4 12" stroke="white" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
@@ -848,7 +910,7 @@
         </div>
         <h2 class="step-title">安装完成</h2>
       </div>
-      
+
       <div class="button-group" style="justify-content: center; margin-top: 0;">
         <button class="btn btn-primary" onclick="finishInstallation()" style="min-width: 120px;">
           我知道了

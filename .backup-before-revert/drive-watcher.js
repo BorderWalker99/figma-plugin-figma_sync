@@ -77,6 +77,7 @@ function saveCacheMapping(fileName, cacheId) {
     }
     
     fs.writeFileSync(mappingFile, JSON.stringify(mapping, null, 2));
+    console.log(`   💾 [映射] 已保存文件名映射: ${fileName} -> ${cacheId} (共 ${Object.keys(mapping).length} 条)`);
   } catch (mappingError) {
     console.error(`   ⚠️  保存映射文件失败:`, mappingError.message);
   }
@@ -197,6 +198,8 @@ function getNextSequenceNumber(folderPath, prefix, extensions) {
  */
 async function saveFileToLocalFolder(buffer, filename, mimeType, isExportedGif = false) {
   try {
+    console.log(`   💾 [Local] 准备保存文件: ${filename}, 大小: ${buffer ? buffer.length : 0} 字节`);
+    
     if (!buffer || buffer.length === 0) {
       console.error(`   ❌ [Local] Buffer 为空，无法保存`);
       return { success: false, isNew: false };
@@ -207,6 +210,7 @@ async function saveFileToLocalFolder(buffer, filename, mimeType, isExportedGif =
       console.error(`   ❌ [Local] 无法获取/创建本地文件夹路径`);
       return { success: false, isNew: false };
     }
+    console.log(`   📂 [Local] 目标文件夹: ${folderPath}`);
     
     // 清理文件名，移除不安全字符，并根据 MIME 类型添加扩展名
     const safeFilename = sanitizeFilename(filename, mimeType);
@@ -250,6 +254,8 @@ async function saveFileToLocalFolder(buffer, filename, mimeType, isExportedGif =
     const newFilename = `${filePrefix}_${paddedNumber}${ext}`;
     const finalPath = path.join(subfolderPath, newFilename);
     
+    console.log(`   📝 [Local] 新文件名: ${newFilename} (序号: ${paddedNumber})`);
+    
     // 确保目录存在
     const dir = path.dirname(finalPath);
     if (!fs.existsSync(dir)) {
@@ -258,6 +264,7 @@ async function saveFileToLocalFolder(buffer, filename, mimeType, isExportedGif =
     
     // 写入文件
     fs.writeFileSync(finalPath, buffer, { flag: 'w' });
+    console.log(`   ✅ [Local] 文件已成功写入: ${finalPath}`);
     return { success: true, isNew: true, filename: newFilename };
   } catch (error) {
     console.error(`   ❌ [Local] 保存文件到本地失败: ${error.message}`);
@@ -275,6 +282,7 @@ if (!SHARED_DRIVE_FOLDER_ID || SHARED_DRIVE_FOLDER_ID.trim() === '') {
     const serviceAccountKey = require('./serviceAccountKey');
     if (serviceAccountKey && serviceAccountKey.defaultFolderId && serviceAccountKey.defaultFolderId.trim() !== '') {
       SHARED_DRIVE_FOLDER_ID = serviceAccountKey.defaultFolderId;
+      console.log('ℹ️  使用默认的 Google Drive 根文件夹ID（从 serviceAccountKey.js）');
     }
   } catch (error) {
     // 忽略错误，继续使用环境变量
@@ -315,45 +323,70 @@ async function initializeUserFolder() {
     const userFolderName = getUserFolderName();
     const expectedUserId = getUserIdentifier();
     
+    console.log(`\n🔍 [Drive] 初始化用户文件夹检查`);
+    console.log(`   👤 用户ID: ${expectedUserId}`);
+    console.log(`   📁 期望文件夹名称: ${userFolderName}`);
+    console.log(`   📂 共享驱动器ID: ${CONFIG.sharedDriveFolderId}`);
+    
     // 先检查配置文件中是否有用户文件夹ID
     let userFolderId = getDriveFolderId();
     
     if (userFolderId) {
+      console.log(`   📋 配置文件中的文件夹ID: ${userFolderId}`);
+      
       // 验证文件夹是否存在，并且名称正确
       try {
         // 获取文件夹详细信息
         const folderInfo = await getFileInfo(userFolderId);
         
+        console.log(`   📂 文件夹名称: ${folderInfo.name}`);
+        console.log(`   📂 文件夹类型: ${folderInfo.mimeType}`);
+        console.log(`   📂 文件夹链接: ${folderInfo.webViewLink || 'N/A'}`);
+        
         // 验证文件夹名称是否匹配
         if (folderInfo.name !== userFolderName) {
-          console.log(`   ⚠️  文件夹名称不匹配，将重新创建`);
+          console.log(`   ⚠️  文件夹名称不匹配！`);
+          console.log(`      期望: ${userFolderName}`);
+          console.log(`      实际: ${folderInfo.name}`);
+          console.log(`   🔄 将重新创建正确的用户文件夹`);
           userFolderId = null;
         } else if (folderInfo.mimeType !== 'application/vnd.google-apps.folder') {
-          console.log(`   ⚠️  ID指向的不是文件夹，将重新创建`);
+          console.log(`   ⚠️  ID指向的不是文件夹！`);
+          console.log(`   🔄 将重新创建用户文件夹`);
           userFolderId = null;
         } else {
           // 验证文件夹是否可以访问
           await listFolderFiles({ folderId: userFolderId, pageSize: 1 });
+          console.log(`   ✅ 配置文件中的文件夹ID有效且名称正确`);
+          console.log(`   📂 使用现有用户文件夹: ${userFolderId}`);
           CONFIG.userFolderId = userFolderId;
           return userFolderId;
         }
       } catch (error) {
         console.log(`   ⚠️  配置文件中的文件夹ID无效: ${error.message}`);
+        console.log(`   🔄 将重新创建用户文件夹`);
         userFolderId = null;
       }
+    } else {
+      console.log(`   ℹ️  配置文件中没有用户文件夹ID`);
     }
+    
+    // 创建用户文件夹（如果不存在）
+    console.log(`\n📁 [Drive] 正在创建/查找用户专属文件夹: ${userFolderName}`);
     
     // 再次验证 sharedDriveFolderId 是否有效
     if (!CONFIG.sharedDriveFolderId || CONFIG.sharedDriveFolderId.trim() === '' || CONFIG.sharedDriveFolderId === '.') {
       throw new Error(`无效的共享驱动器根文件夹ID: "${CONFIG.sharedDriveFolderId}"。请检查 GDRIVE_FOLDER_ID 环境变量或 serviceAccountKey.js 中的 defaultFolderId`);
     }
     
+    console.log(`   🔍 正在检查文件夹是否已存在...`);
     let folder;
     try {
       folder = await createFolder({
         folderName: userFolderName,
         parentFolderId: CONFIG.sharedDriveFolderId
       });
+      console.log(`   ✅ 文件夹操作成功`);
     } catch (error) {
       console.error(`   ❌ 创建/查找文件夹失败: ${error.message}`);
       console.error(`   错误详情:`, error);
@@ -375,19 +408,27 @@ async function initializeUserFolder() {
       throw new Error('创建文件夹后未返回文件夹ID');
     }
     
+    console.log(`   ✅ 用户文件夹ID: ${userFolderId}`);
+    console.log(`   📂 文件夹链接: ${folder.webViewLink || 'N/A'}`);
+    
     // 保存到配置文件
     updateDriveFolderId(userFolderId);
     CONFIG.userFolderId = userFolderId;
     
     // 再次验证文件夹ID是否正确
     try {
-      await listFolderFiles({ folderId: userFolderId, pageSize: 1 });
+      const { files } = await listFolderFiles({ folderId: userFolderId, pageSize: 1 });
+      console.log(`   ✅ 验证成功：文件夹存在，包含 ${files.length} 个文件`);
     } catch (error) {
       console.error(`   ⚠️  验证失败：无法访问文件夹: ${error.message}`);
       throw new Error(`用户文件夹ID验证失败: ${error.message}`);
     }
     
     console.log(`\n✅ [Drive] 用户文件夹初始化完成`);
+    console.log(`   📂 用户专属文件夹ID: ${CONFIG.userFolderId}`);
+    console.log(`   📁 用户专属文件夹名称: ${userFolderName}`);
+    console.log(`   📂 共享驱动器根文件夹ID: ${CONFIG.sharedDriveFolderId} (仅用于创建子文件夹)`);
+    console.log(`   ⚠️  重要：将监听用户专属文件夹，不会监听共享文件夹根目录\n`);
     
     return userFolderId;
   } catch (error) {
@@ -464,8 +505,13 @@ async function initializeKnownFiles() {
   const queryStart = new Date(realTimeStart.getTime() - 60000);
   lastPollTime = queryStart.toISOString();
   
+  console.log(`🕒 [Drive] 实时模式启动时间: ${realTimeStart.toISOString()}`);
+  console.log(`   (查询起始时间: ${lastPollTime})`);
+  
   // 清空已知文件列表
   knownFileIds.clear();
+  
+  console.log('📂 [Drive] 正在扫描现有文件，标记为"已知"...');
   
   try {
     // 获取所有现有的图片文件
@@ -496,7 +542,9 @@ async function initializeKnownFiles() {
        }
      }
      
-     console.log(`✅ [Drive] 已标记 ${knownFileIds.size} 个现有文件为"已知"，只处理新文件`);
+     console.log(`✅ [Drive] 已标记 ${knownFileIds.size} 个现有文件为"已知"，实时模式将只处理新文件`);
+     console.log(`   📋 已记录 ${knownFileMD5s.size} 个文件的MD5指纹，用于去重检测`);
+     console.log('ℹ️  启动后上传的文件将自动同步到 Figma');
 
      // 通知用户已存在的现有文件数量，提示使用手动同步
      if (knownFileIds.size > 0 && ws && ws.readyState === WebSocket.OPEN) {
@@ -508,7 +556,8 @@ async function initializeKnownFiles() {
        });
      }
   } catch (error) {
-    console.warn(`⚠️  扫描现有文件时出错: ${error.message}，可能会同步一些旧文件`);
+    console.warn(`⚠️  扫描现有文件时出错: ${error.message}`);
+    console.warn('   将继续启动实时模式，但可能会同步一些旧文件');
   }
 }
 
@@ -518,6 +567,7 @@ async function pollDrive() {
     return;
   }
   if (isPolling) {
+    console.log('⏳ [Drive] 上次轮询尚未结束，跳过本次轮询');
     return;
   }
   if (!CONFIG.userFolderId) {
@@ -527,6 +577,7 @@ async function pollDrive() {
 
   isPolling = true;
   const pollStart = new Date();
+  console.log(`\n🔍 [Drive] 开始轮询 (${pollStart.toLocaleTimeString()})`);
 
   try {
     // 构造增量查询条件
@@ -550,6 +601,7 @@ async function pollDrive() {
       // 忽略 _exported 结尾的文件（这是服务器自己生成的导出 GIF）
       // 移除末尾的点检查，以兼容 "xxx_exported 2.gif" 这种冲突重命名的情况
       if (name.toLowerCase().includes('_exported')) {
+        // console.log(`🙈 [Drive] 忽略已导出的 GIF: ${name}`); // 可选日志
         return false;
       }
 
@@ -561,12 +613,14 @@ async function pollDrive() {
     for (const file of imageFiles) {
       // 1. 去重
       if (knownFileIds.has(file.id)) {
+        console.log(`   ⏭️  跳过已知文件: ${file.name}`);
         continue;
       }
       
       // 2. 严格时间过滤（只处理启动后创建的文件）
       const fileTime = new Date(file.createdTime);
       if (realTimeStart && fileTime < realTimeStart) {
+        console.log(`   ⏭️  跳过旧文件: ${file.name} (创建于 ${fileTime.toLocaleString()})`);
         knownFileIds.add(file.id); // 标记为已知，下次不再处理
         continue;
       }
@@ -578,8 +632,13 @@ async function pollDrive() {
         // 检查已存在的文件是否还在云端（通过检查knownFileIds）
         if (knownFileIds.has(existingFile.fileId)) {
           // 文件仍在云端，确实是重复文件
+          console.log(`   🔄 检测到重复文件: ${file.name} (MD5: ${file.md5Checksum.substring(0, 8)}...)`);
+          console.log(`   💡 已存在相同内容的文件: ${existingFile.filename} (${new Date(existingFile.createdTime).toLocaleString()})`);
+          console.log(`   🗑️  正在删除重复文件: ${file.name}`);
+          
           try {
             await trashFile(file.id);
+            console.log(`   ✅ 重复文件已删除`);
           } catch (deleteError) {
             console.error(`   ❌ 删除重复文件失败:`, deleteError.message);
           }
@@ -589,10 +648,13 @@ async function pollDrive() {
           continue;
         } else {
           // 旧文件已不在云端（已被同步并清理），更新MD5记录为新文件
+          console.log(`   🔄 检测到相同MD5，但旧文件已清理，保留新文件: ${file.name}`);
+          console.log(`   📝 更新MD5记录: ${existingFile.filename} → ${file.name}`);
           // 继续处理，不跳过
         }
       }
       
+      console.log(`   ✅ 发现新文件: ${file.name} (创建于 ${fileTime.toLocaleString()})`);
         knownFileIds.add(file.id);
         // 记录MD5，用于后续去重
         if (file.md5Checksum) {
@@ -601,9 +663,14 @@ async function pollDrive() {
             filename: file.name,
             createdTime: file.createdTime
           });
+          console.log(`      📋 MD5: ${file.md5Checksum.substring(0, 16)}...`);
+        } else {
+          console.log(`      ⚠️  该文件无MD5指纹，无法进行内容去重`);
         }
         newFiles.push(file);
       }
+
+    console.log(`📊 [Drive] 轮询结果: 总文件 ${allFiles.length}，图片/视频 ${imageFiles.length}，新文件 ${newFiles.length}`);
 
     if (newFiles.length > 0) {
       console.log(`🔄 [Drive] 检测到 ${newFiles.length} 个新文件，并发处理...`);
@@ -663,6 +730,9 @@ async function pollDrive() {
     // 即使失败，也确保下次轮询能继续
   } finally {
     isPolling = false;
+    // 注意：不需要在这里手动调度下次轮询，因为 startPolling() 已经设置了 setInterval
+    // 这个 finally 块只负责清理状态
+    console.log(`   ⏱️  轮询完成 (耗时 ${(new Date() - pollStart) / 1000} 秒)`);
   }
 }
 
@@ -673,12 +743,27 @@ async function handleDriveFile(file, deleteAfterSync = false) {
     }
 
     const startTime = Date.now();
+    console.log(`\n📥 [Drive] 下载文件: ${file.name} (${file.id})`);
 
     let backedUpLocally = false;
-    let gifCacheId = null;
+    let gifCacheId = null; // GIF 缓存 ID（统一变量，避免作用域问题）
     let originalBuffer = await downloadFileBuffer(file.id);
+    const downloadTime = Date.now() - startTime;
     const downloadedSizeKB = (originalBuffer.length / 1024).toFixed(2);
+    console.log(`   ⬇️  下载完成 (${downloadedSizeKB} KB, ${downloadTime}ms)`);
     
+    // 对于 GIF 文件，记录文件大小以便诊断质量问题
+    // 如果下载的文件大小与 Drive 中显示的大小不一致，可能是 Google Drive 进行了处理
+    if (file.name.toLowerCase().endsWith('.gif') && file.size) {
+      const driveSizeKB = (parseInt(file.size) / 1024).toFixed(2);
+      const sizeDiff = Math.abs(originalBuffer.length - parseInt(file.size));
+      if (sizeDiff > 1024) {
+        console.log(`   ⚠️  注意：下载的 GIF 大小 (${downloadedSizeKB}KB) 与 Drive 显示的大小 (${driveSizeKB}KB) 不一致`);
+        console.log(`   💡 提示：Google Drive 可能在上传时对 GIF 进行了优化，这可能导致质量下降`);
+        console.log(`   💡 建议：如需保持 GIF 原始质量，请使用 iCloud 模式`);
+      }
+    }
+
     let processedBuffer = originalBuffer;
     const processStartTime = Date.now();
     
@@ -740,6 +825,20 @@ async function handleDriveFile(file, deleteAfterSync = false) {
     if (isVideo) {
       // 视频格式（MP4 或 MOV）- Figma 插件 API 不支持视频文件，跳过处理
       const videoFormat = fileName.endsWith('.mp4') ? 'MP4' : 'MOV';
+      console.log(`   🎥 检测到 ${videoFormat} 视频格式`);
+      
+      // 验证下载的文件大小
+      if (file.size) {
+        const driveSizeKB = (parseInt(file.size) / 1024).toFixed(2);
+        const downloadedSizeKB = (originalBuffer.length / 1024).toFixed(2);
+        const sizeDiff = Math.abs(originalBuffer.length - parseInt(file.size));
+        if (sizeDiff > 1024) {
+          console.log(`   ⚠️  警告：下载的文件大小 (${downloadedSizeKB}KB) 与 Drive 显示的大小 (${driveSizeKB}KB) 不一致`);
+          console.log(`   ⚠️  差异: ${(sizeDiff / 1024).toFixed(2)}KB`);
+        } else {
+          console.log(`   ✅ 文件大小验证通过: ${downloadedSizeKB}KB`);
+        }
+      }
       
       // 验证 MOV 文件格式（检查文件头）
       if (videoFormat === 'MOV') {
@@ -750,14 +849,24 @@ async function handleDriveFile(file, deleteAfterSync = false) {
                           originalBuffer.slice(4, 8).toString('ascii').includes('qt');
         
         if (!isValidMOV && originalBuffer.length > 0) {
+          console.log(`   ⚠️  警告：下载的文件可能不是有效的 MOV 格式`);
+          console.log(`   ⚠️  文件头: ${originalBuffer.slice(0, 16).toString('hex')}`);
+          console.log(`   ⚠️  文件头（ASCII）: ${fileHeader}`);
+          console.log(`   💡 提示：Google Drive 可能对文件进行了处理，导致文件格式不兼容`);
+        } else {
+          console.log(`   ✅ MOV 文件格式验证通过`);
         }
       }
+      
+      console.log(`   ⚠️  Figma 插件 API 不支持视频文件，跳过此文件`);
+      console.log(`   💡 提示：请通过 Figma 界面直接拖放视频文件，或使用 GIF 格式`);
       
       // 自动保存到缓存（用于导出带标注的 GIF 功能）
       try {
         const cacheResult = userConfig.saveGifToCache(originalBuffer, file.name, file.id);
         if (cacheResult) {
           gifCacheId = cacheResult.cacheId;
+          console.log(`   💾 [GIF Cache] 视频已自动缓存 (ID: ${gifCacheId})`);
         }
       } catch (cacheError) {
         console.error(`   ⚠️  [GIF Cache] 缓存失败:`, cacheError.message);
@@ -766,6 +875,8 @@ async function handleDriveFile(file, deleteAfterSync = false) {
       // 将文件保存到本地文件夹，方便用户手动拖入
       const saved = await saveFileToLocalFolder(originalBuffer, file.name, file.mimeType);
       if (saved) {
+        console.log(`   📂 文件已下载到本地文件夹，可直接拖入 Figma`);
+        
         // 保存文件名和 cacheId 的映射关系
         if (gifCacheId) {
           saveCacheMapping(file.name, gifCacheId);
@@ -773,18 +884,23 @@ async function handleDriveFile(file, deleteAfterSync = false) {
         
         // 下载成功后，删除 Drive 中的文件
         try {
+          console.log(`   🗑️  删除 Drive 文件: ${file.name} (ID: ${file.id})`);
           await trashFile(file.id);
+          console.log(`   ✅ 已移至回收站`);
+          // 清理文件记录
           cleanupFileRecord(file.id, file.md5Checksum);
         } catch (error) {
           const errorMsg = error.message || String(error);
           if (errorMsg.includes('not found') || errorMsg.includes('404')) {
+            console.log(`   ℹ️  Drive 文件已不存在（可能已被删除）: ${file.name}`);
+            // 文件已不存在，也清理记录
             cleanupFileRecord(file.id, file.md5Checksum);
           } else {
             console.error(`   ⚠️  删除 Drive 文件失败 (${file.name}):`, errorMsg);
           }
         }
       } else {
-        console.warn(`   ⚠️  文件保存失败，保留 Drive 文件以便重试: ${file.name}`);
+        console.log(`   ⚠️  文件保存失败，保留 Drive 文件以便重试`);
       }
       
       // 通知 Figma 插件此文件需要手动拖入，并传递缓存信息以便自动关联
@@ -801,6 +917,8 @@ async function handleDriveFile(file, deleteAfterSync = false) {
       // 跳过此文件，不发送到 Figma
       return;
     } else if (isGif) {
+      // GIF 格式，检查文件大小
+      console.log(`   🎬 检测到 GIF 格式...`);
       
       const originalSize = originalBuffer.length;
       const maxGifSize = 100 * 1024 * 1024; // 100MB（防止 Figma 死机）
@@ -808,11 +926,15 @@ async function handleDriveFile(file, deleteAfterSync = false) {
       // 检查文件大小
       if (originalSize > maxGifSize) {
         const fileSizeMB = (originalSize / 1024 / 1024).toFixed(2);
+        console.log(`   ⚠️  GIF 文件过大 (${fileSizeMB}MB)，超过限制 (100MB)`);
+        console.log(`   ⚠️  为防止 Figma 死机，将保存到本地文件夹，可直接拖入 Figma`);
+        
         // 自动保存到缓存（用于导出带标注的 GIF 功能）
         try {
           const cacheResult = userConfig.saveGifToCache(originalBuffer, file.name, file.id);
           if (cacheResult) {
             gifCacheId = cacheResult.cacheId;
+            console.log(`   💾 [GIF Cache] 大GIF已自动缓存 (ID: ${gifCacheId})`);
           }
         } catch (cacheError) {
           console.error(`   ⚠️  [GIF Cache] 缓存失败:`, cacheError.message);
@@ -821,6 +943,8 @@ async function handleDriveFile(file, deleteAfterSync = false) {
         // 将文件保存到本地文件夹
         const saved = await saveFileToLocalFolder(originalBuffer, file.name, file.mimeType);
         if (saved) {
+          console.log(`   📂 文件已下载到本地文件夹`);
+          
           // 保存文件名和 cacheId 的映射关系
           if (gifCacheId) {
             saveCacheMapping(file.name, gifCacheId);
@@ -828,11 +952,16 @@ async function handleDriveFile(file, deleteAfterSync = false) {
           
           // 下载成功后，删除 Drive 中的文件
           try {
+            console.log(`   🗑️  删除 Drive 文件: ${file.name} (ID: ${file.id})`);
             await trashFile(file.id);
+            console.log(`   ✅ 已移至回收站`);
+            // 清理文件记录
             cleanupFileRecord(file.id, file.md5Checksum);
           } catch (error) {
             const errorMsg = error.message || String(error);
             if (errorMsg.includes('not found') || errorMsg.includes('404')) {
+              console.log(`   ℹ️  Drive 文件已不存在（可能已被删除）: ${file.name}`);
+              // 文件已不存在，也清理记录
               cleanupFileRecord(file.id, file.md5Checksum);
             } else {
               console.error(`   ⚠️  删除 Drive 文件失败 (${file.name}):`, errorMsg);
@@ -846,9 +975,10 @@ async function handleDriveFile(file, deleteAfterSync = false) {
             type: 'file-skipped',
             filename: file.name,
             reason: 'gif-too-large',
-            gifCacheId: gifCacheId,
-            driveFileId: file.id
+            gifCacheId: gifCacheId, // ✅ 传递缓存ID，用于导出时自动查找
+            driveFileId: file.id     // ✅ 传递Drive文件ID
           }));
+          console.log(`   📤 发送 file-skipped 消息: ${file.name}, gifCacheId: ${gifCacheId || '无'}`);
         }
         
         // 跳过此文件，不发送到 Figma
@@ -863,6 +993,7 @@ async function handleDriveFile(file, deleteAfterSync = false) {
         const cacheResult = userConfig.saveGifToCache(processedBuffer, file.name, file.id);
         if (cacheResult) {
           gifCacheId = cacheResult.cacheId;
+          console.log(`   💾 [GIF Cache] 已自动缓存 (ID: ${gifCacheId})`);
         }
       } catch (cacheError) {
         console.error(`   ⚠️  [GIF Cache] 缓存失败:`, cacheError.message);
@@ -874,14 +1005,24 @@ async function handleDriveFile(file, deleteAfterSync = false) {
 
       // 如果启用了 GIF 备份，保存副本到本地（用户可见的文件夹）
       if (shouldBackupGif) {
+        console.log(`   💾 [备份] 正在保存 GIF 副本到本地文件夹...`);
         const saveResult = await saveFileToLocalFolder(processedBuffer, file.name, file.mimeType);
+        // 只有当成功保存且是新文件时才标记为已备份
         backedUpLocally = (saveResult && saveResult.success && saveResult.isNew) || false;
+        if (saveResult && saveResult.success && !saveResult.isNew) {
+          console.log(`   ⏭️  [备份] 文件已存在，已替换但不计入备份数`);
+        }
       } else {
         backedUpLocally = false;
       }
 
       originalBuffer = null;
+      const fileSizeKB = (processedBuffer.length / 1024).toFixed(2);
+      console.log(`   ✅ 使用原始 GIF 文件: ${fileSizeKB}KB`);
     } else if (isHeif && os.platform() === 'darwin') {
+      // 使用 macOS 自带的 sips 命令转换 HEIF 到 JPEG
+      console.log(`   🔄 检测到 HEIF 格式，使用 sips 转换为 JPEG...`);
+      
       // 在 try 块外定义变量，确保 catch 块可以访问
       let tempInputPath = path.join(os.tmpdir(), `heif-input-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.heic`);
       let tempOutputPath = path.join(os.tmpdir(), `jpeg-output-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.jpg`);
@@ -933,11 +1074,21 @@ async function handleDriveFile(file, deleteAfterSync = false) {
           // 忽略清理错误
         }
         
+        const processTime = Date.now() - processStartTime;
+        const originalSize = (originalBuffer.length / 1024).toFixed(2);
+        const compressedSize = (processedBuffer.length / 1024).toFixed(2);
+        console.log(`   ✅ HEIF → JPEG 转换完成 (sips): ${originalSize} KB → ${compressedSize} KB (${processTime}ms)`);
+        
         // 释放原始 buffer 内存
         originalBuffer = null;
         convertedBuffer = null;
       } catch (sipsError) {
-        console.error(`   ❌ sips 转换失败: ${sipsError.message}`);
+        console.log(`   ❌ sips 转换失败: ${sipsError.message}`);
+        if (sipsError.stack) {
+          console.log(`   错误堆栈: ${sipsError.stack}`);
+        }
+        console.log(`   ⚠️  跳过此文件（无法转换 HEIF 格式）`);
+        
         // 清理临时文件（如果存在）
         try {
           if (tempInputPath && fs.existsSync(tempInputPath)) {
@@ -954,6 +1105,9 @@ async function handleDriveFile(file, deleteAfterSync = false) {
         return;
       }
     } else if (isHeif) {
+      // 非 macOS 系统，无法使用 sips
+      console.log(`   ❌ 检测到 HEIF 格式，但当前系统不支持 sips 转换`);
+      console.log(`   ⚠️  跳过此文件（无法转换 HEIF 格式）`);
       return;
     } else {
       // 非 HEIF 格式，使用 sharp 正常处理
@@ -967,9 +1121,15 @@ async function handleDriveFile(file, deleteAfterSync = false) {
           .jpeg({ quality: CONFIG.quality })
           .toBuffer();
         
+        const processTime = Date.now() - processStartTime;
+        const originalSize = (originalBuffer.length / 1024).toFixed(2);
+        const compressedSize = (processedBuffer.length / 1024).toFixed(2);
+        console.log(`   🖼️  压缩完成: ${originalSize} KB → ${compressedSize} KB (${processTime}ms)`);
+        
         // 立即释放原始buffer内存
         originalBuffer = null;
       } catch (error) {
+        console.log(`   ⚠️  压缩失败，使用原始文件: ${error.message}`);
         processedBuffer = originalBuffer;
       }
     }
@@ -982,8 +1142,15 @@ async function handleDriveFile(file, deleteAfterSync = false) {
     const backupModeForImage = userConfig.getBackupMode();
     if (backupModeForImage === 'all' && !isGif && !isVideo) {
       try {
+        console.log(`   💾 [备份] 正在保存截图副本到本地（JPEG格式）...`);
+        // 为备份文件生成 JPEG 文件名
         const jpegFilename = file.name.replace(/\.(png|heic|heif|webp)$/i, '.jpg');
         const saveResult = await saveFileToLocalFolder(processedBuffer, jpegFilename, 'image/jpeg');
+        if (saveResult && saveResult.success && saveResult.isNew) {
+          console.log(`   ✅ [备份] 截图已保存到本地`);
+        } else if (saveResult && saveResult.success && !saveResult.isNew) {
+          console.log(`   ⏭️  [备份] 文件已存在，已替换`);
+        }
       } catch (backupError) {
         console.error(`   ⚠️  [备份] 保存截图失败: ${backupError.message}`);
       }
@@ -1003,18 +1170,26 @@ async function handleDriveFile(file, deleteAfterSync = false) {
       gifCacheId: gifCacheId || null // GIF 缓存 ID（用于导出带标注的 GIF）
     };
 
+    const sendStartTime = Date.now();
     ws.send(JSON.stringify(payload));
+    const sendTime = Date.now() - sendStartTime;
+    const totalTime = Date.now() - startTime;
+    console.log(`   ⬆️  已发送到 Figma 插件 (总耗时: ${totalTime}ms, 发送: ${sendTime}ms)`);
 
     if (deleteAfterSync && CONFIG.autoDelete) {
+      // 使用文件 ID 作为键，更可靠（文件名可能重复）
       pendingDeletes.set(file.id, {
         filename: file.name,
         timestamp: Date.now()
       });
+      console.log(`   ⏳ 等待 Figma 确认后删除 Drive 文件 (ID: ${file.id})`);
 
+      // 设置超时，如果 120 秒内没有收到确认，保留文件
+      // 增加超时时间以适应批量上传场景（Figma 处理队列可能较慢）
       const confirmTimeout = 120000;
       setTimeout(() => {
         if (pendingDeletes.has(file.id)) {
-          console.warn(`   ⚠️  等待确认超时（${confirmTimeout / 1000}秒），保留文件: ${file.name}`);
+          console.log(`   ⚠️  等待确认超时（${confirmTimeout / 1000}秒），保留文件: ${file.name}`);
           pendingDeletes.delete(file.id);
         }
       }, confirmTimeout);
@@ -1027,7 +1202,11 @@ async function handleDriveFile(file, deleteAfterSync = false) {
 }
 
 async function countFilesForManualSync() {
+  console.log('\n📊 [Drive] 统计云端文件数量...');
+  
+  // Check if user folder is initialized
   if (!CONFIG.userFolderId) {
+    console.log('⚠️  [Drive] 用户文件夹未初始化');
     return;
   }
   
@@ -1037,6 +1216,7 @@ async function countFilesForManualSync() {
   }
   
   try {
+    console.log(`   🔍 正在获取文件列表...`);
     const timeoutPromise = new Promise((_, reject) => {
       setTimeout(() => reject(new Error('获取文件列表超时')), 40000);
     });
@@ -1063,6 +1243,9 @@ async function countFilesForManualSync() {
              /\.(jpg|jpeg|png|gif|webp|heic|heif|mp4|mov)$/i.test(name);
     });
     
+    console.log(`   📋 找到 ${files.length} 个文件`);
+    console.log(`   🖼️  其中 ${imageFiles.length} 个是媒体文件`);
+    
     if (ws && ws.readyState === WebSocket.OPEN) {
       safeSend({
         type: 'manual-sync-file-count',
@@ -1076,6 +1259,7 @@ async function countFilesForManualSync() {
 
 async function performManualSync() {
   console.log('\n📦 [Drive] 执行手动同步...');
+  console.log(`   ⏰ 开始时间: ${new Date().toLocaleTimeString()}`);
   
   // 防止重复触发
   if (isSyncing) {
@@ -1100,6 +1284,7 @@ async function performManualSync() {
     try {
       const userFolderId = await initializeUserFolder();
       if (userFolderId) {
+        console.log(`✅ [Drive] 重新初始化成功，用户文件夹ID: ${userFolderId}`);
       } else {
         throw new Error('重新初始化失败，返回的文件夹ID为空');
       }
@@ -1121,6 +1306,7 @@ async function performManualSync() {
   
   if (!ws || ws.readyState !== WebSocket.OPEN) {
     console.error('❌ [Drive] WebSocket 未连接，无法执行手动同步');
+    console.error(`   WebSocket 状态: ${ws ? ws.readyState : 'null'}`);
     if (ws && ws.readyState === WebSocket.OPEN) {
       safeSend({
         type: 'manual-sync-complete',
@@ -1140,6 +1326,9 @@ async function performManualSync() {
   });
   
   const syncTask = (async () => {
+    console.log(`📂 [Drive] 正在同步用户专属文件夹: ${CONFIG.userFolderId}`);
+    console.log(`   🔍 正在获取文件列表...`);
+    
     // 添加额外的超时保护
     const timeoutPromise = new Promise((_, reject) => {
       setTimeout(() => reject(new Error('获取文件列表超时（超过40秒）')), 40000);
@@ -1153,6 +1342,8 @@ async function performManualSync() {
     
     const { files } = await Promise.race([listPromise, timeoutPromise]);
 
+    console.log(`   📋 找到 ${files.length} 个文件`);
+    
     // 过滤图片和视频文件
     const imageFiles = files.filter(file => {
       const mimeType = file.mimeType || '';
@@ -1160,12 +1351,18 @@ async function performManualSync() {
       
       // 忽略 _exported 结尾的文件（这是服务器自己生成的导出 GIF）
       if (name.toLowerCase().includes('_exported')) {
+        // console.log(`🙈 [手动同步] 忽略已导出的 GIF: ${name}`);
         return false;
       }
       
       return mimeType.startsWith('image/') || mimeType.startsWith('video/') ||
              /\.(jpg|jpeg|png|gif|webp|heic|heif|mp4|mov)$/i.test(name);
     });
+    
+    console.log(`   🖼️  其中 ${imageFiles.length} 个是媒体文件`);
+    
+    // ✅ 手动同步前先进行MD5去重检测
+    console.log(`   🔍 开始检测重复文件...`);
     const md5Map = new Map(); // 临时MD5映射，用于本次手动同步
     let duplicateCount = 0;
     let filesWithMD5 = 0;
@@ -1191,9 +1388,15 @@ async function performManualSync() {
             fileToKeep = existingFile;
           }
           
+          console.log(`   🔄 发现重复文件:`);
+          console.log(`      保留: ${fileToKeep.name} (${new Date(fileToKeep.createdTime).toLocaleString()})`);
+          console.log(`      删除: ${fileToDelete.name} (${new Date(fileToDelete.createdTime).toLocaleString()})`);
+          console.log(`      MD5: ${file.md5Checksum.substring(0, 16)}...`);
+          
           try {
             await trashFile(fileToDelete.id);
             duplicateCount++;
+            console.log(`      ✅ 重复文件已删除`);
           } catch (deleteError) {
             console.error(`      ❌ 删除失败:`, deleteError.message);
           }
@@ -1205,8 +1408,16 @@ async function performManualSync() {
       }
     }
     
+    console.log(`   📊 去重统计: 共 ${imageFiles.length} 个文件，${filesWithMD5} 个有MD5指纹，${filesWithoutMD5} 个无MD5`);
     if (duplicateCount > 0) {
       console.log(`   ✨ 已清理 ${duplicateCount} 个重复文件`);
+    } else {
+      console.log(`   ✅ 未发现重复文件`);
+    }
+    
+    if (filesWithoutMD5 > 0) {
+      console.log(`   ⚠️  注意: ${filesWithoutMD5} 个文件没有MD5指纹，无法进行内容去重`);
+      console.log(`   💡 提示: Google Drive可能正在处理这些文件，或文件类型不支持MD5`);
     }
     
     // 重新获取文件列表（去重后）
@@ -1223,6 +1434,8 @@ async function performManualSync() {
       return mimeType.startsWith('image/') || mimeType.startsWith('video/') ||
              /\.(jpg|jpeg|png|gif|webp|heic|heif|mp4|mov)$/i.test(name);
     });
+    
+    console.log(`   📋 去重后剩余 ${refreshedFiles.length} 个文件`);
     
     if (refreshedFiles.length === 0) {
       console.log(`   ℹ️  没有文件需要同步`);
@@ -1244,8 +1457,14 @@ async function performManualSync() {
     // 收集所有处理过程中的错误
     const processingErrors = [];
     
+    // ✅ 获取当前备份模式，用于判断 GIF/视频是否真的被保存到本地
     const backupMode = userConfig.getBackupMode();
     const shouldBackupGif = (backupMode === 'gif_only' || backupMode === 'all');
+    console.log(`   📋 当前备份模式: ${backupMode}, 备份GIF: ${shouldBackupGif}`);
+    
+    // 手动同步时，强制同步所有图片文件（不检查 knownFileIds）
+    // 因为手动同步的目的就是同步残留的图片
+    console.log(`   🔄 手动同步模式：将并发处理所有 ${refreshedFiles.length} 个图片文件`);
     
     // 使用并发处理提升性能，但限制并发数避免过载
     const CONCURRENT_LIMIT = 10; // ⚡ 提高并发：同时处理10个文件
@@ -1253,6 +1472,7 @@ async function performManualSync() {
     
     for (let i = 0; i < refreshedFiles.length; i += CONCURRENT_LIMIT) {
       const batch = refreshedFiles.slice(i, i + CONCURRENT_LIMIT);
+      console.log(`   📦 处理批次 ${Math.floor(i / CONCURRENT_LIMIT) + 1}/${Math.ceil(refreshedFiles.length / CONCURRENT_LIMIT)} (${batch.length} 个文件)`);
       
       const batchPromises = batch.map(async (file) => {
       const wasKnown = knownFileIds.has(file.id);
@@ -1295,6 +1515,7 @@ async function performManualSync() {
             const maxGifSize = 100 * 1024 * 1024; // 100MB
             
             if (originalSize > maxGifSize) {
+              console.log(`   ⚠️  GIF 文件过大，需要手动拖入: ${file.name}`);
               if (ws && ws.readyState === WebSocket.OPEN) {
                 ws.send(JSON.stringify({
                   type: 'file-skipped',
@@ -1307,7 +1528,7 @@ async function performManualSync() {
               return { success: false, skipped: true, isGif: true, file };
             }
           } catch (checkError) {
-            // 检查失败，继续处理
+            console.log(`   ⚠️  检查 GIF 大小失败，继续处理: ${checkError.message}`);
           }
         }
         
@@ -1378,7 +1599,15 @@ async function performManualSync() {
       }
     }
 
-    console.log(`\n✅ [Drive] 手动同步完成: ${success}/${refreshedFiles.length} 成功 (图片:${imageCount}, GIF:${gifCount}, 视频:${videoCount}${processingErrors.length > 0 ? `, 失败:${processingErrors.length}` : ''})`);
+    console.log(`\n✅ [Drive] 手动同步完成`);
+    console.log(`   ✅ 成功导入 Figma: ${success} 个文件`);
+    console.log(`   🖼️  图片数量: ${imageCount} 张`);
+    console.log(`   🎞️  GIF数量: ${gifCount} 段`);
+    console.log(`   🎥 视频数量: ${videoCount} 段`);
+    console.log(`   📊 总计处理: ${refreshedFiles.length} 个媒体文件`);
+    if (processingErrors.length > 0) {
+      console.log(`   ❌ 失败: ${processingErrors.length} 个`);
+    }
 
     if (ws && ws.readyState === WebSocket.OPEN) {
       // ✅ 计算实际被保存到本地的数量
@@ -1397,6 +1626,7 @@ async function performManualSync() {
         savedVideoCount: savedVideoCount, // ✅ 实际保存到本地的视频数量
         errors: processingErrors
       };
+      console.log(`   📤 发送完成消息: imageCount=${imageCount}, gifCount=${gifCount}(saved:${savedGifCount}), videoCount=${videoCount}, errors=${processingErrors.length}`);
       ws.send(JSON.stringify(message));
     }
   })(); // 结束 syncTask async 函数
@@ -1430,7 +1660,9 @@ async function performManualSync() {
       });
     }
   } finally {
+    // 无论成功还是失败，都要重置同步标志
     isSyncing = false;
+    console.log('   🔓 手动同步标志已重置');
   }
 }
 
@@ -1477,8 +1709,11 @@ function connectWebSocket() {
       const message = JSON.parse(data);
 
       if (message.type === 'switch-sync-mode') {
+        console.log('\n🔄 [Drive] 收到模式切换消息');
+        console.log('   目标模式:', message.mode);
         if (message.mode !== 'drive' && message.mode !== 'google') {
-          console.log('🔄 [Drive] 切换到其他模式，退出当前 watcher...');
+          console.log('⚠️  [Drive] 当前是 Google Drive watcher，需要切换到其他模式');
+          console.log('   正在退出，请等待 start.js 重启正确的 watcher...\n');
           // 停止轮询
           stopPolling();
           // 关闭 WebSocket
@@ -1501,18 +1736,32 @@ function connectWebSocket() {
         const keepFile = message.keepFile === true;
         
         if (keepFile) {
+          console.log(`   ⚠️  文件导入失败，保留源文件: ${filename}`);
+          
           // 从 pendingDeletes 中移除，不删除文件
+          let removed = false;
           if (driveFileId && pendingDeletes.has(driveFileId)) {
             pendingDeletes.delete(driveFileId);
+            console.log(`   ✅ 已取消删除计划: ${filename} (ID: ${driveFileId})`);
+            removed = true;
           } else {
+            // 尝试用文件名查找
             for (const [fileId, info] of pendingDeletes.entries()) {
               if (info.filename === filename) {
                 pendingDeletes.delete(fileId);
+                console.log(`   ✅ 已取消删除计划: ${filename} (ID: ${fileId})`);
+                removed = true;
                 break;
               }
             }
           }
-          console.log(`   ⚠️  文件导入失败，保留源文件: ${filename}`);
+          
+          if (!removed) {
+            console.log(`   ℹ️  文件不在待删除列表中: ${filename}（可能已经处理或未计划删除）`);
+          }
+        } else {
+          // 如果没有标记 keepFile，正常处理失败（可能会删除文件，取决于配置）
+          console.log(`   ⚠️  文件导入失败: ${filename}（未标记保留，将按配置处理）`);
         }
         return;
       }
@@ -1549,29 +1798,44 @@ function connectWebSocket() {
           }
         }
         
+        // 只有在 pendingDeletes 中找到文件时才删除（说明没有被标记为保留）
         if (shouldDelete && deleteInfo && fileIdToDelete) {
           try {
+            console.log(`   🗑️  删除 Drive 文件: ${filename} (ID: ${fileIdToDelete})`);
             await trashFile(fileIdToDelete);
+            console.log(`   ✅ 已移至回收站`);
+            // 清理文件记录
             cleanupFileRecord(fileIdToDelete);
           } catch (error) {
+            // 如果文件不存在，可能是已经被删除或不存在，这是正常的
             const errorMsg = error.message || String(error);
             if (errorMsg.includes('File not found') || 
                 errorMsg.includes('not found') || 
                 errorMsg.includes('404') ||
                 errorMsg.includes('does not exist')) {
+              console.log(`   ℹ️  Drive 文件已不存在（可能已被删除）: ${filename}`);
+              // 文件已不存在，也清理记录
               cleanupFileRecord(fileIdToDelete);
             } else {
               console.error(`   ⚠️  删除 Drive 文件失败 (${filename}):`, errorMsg);
             }
           }
+        } else {
+          // 文件不在 pendingDeletes 中，说明已经被标记为保留（通过 screenshot-failed）
+          console.log(`   ℹ️  文件已标记为保留，不删除: ${filename}（可能导入失败需要手动拖入）`);
         }
         return;
       }
 
       if (message.type === 'start-realtime') {
         console.log('\n🎯 [Drive] 启动实时同步模式...');
+        console.log(`📊 [Drive] 之前 knownFileIds 数量: ${knownFileIds.size}`);
         
+        // 每次开启都重新初始化，以"开启的那一刻"作为新的时间基准
+        // 这样可以确保只同步开启后上传的文件，而不是关闭期间上传的文件
+        console.log('📂 [Drive] 重新初始化实时模式时间基准...');
           await initializeKnownFiles();
+        console.log(`✅ [Drive] 初始化完成，时间基准: ${realTimeStart.toISOString()}`);
         
         isRealTimeMode = true;
         wasRealTimeMode = true; // 记录状态
@@ -1605,7 +1869,12 @@ function connectWebSocket() {
 
   ws.on('close', () => {
     console.log('⚠️  [Drive] 服务器连接断开，5秒后重连');
+    // 记录断开前的实时模式状态
     wasRealTimeMode = isRealTimeMode;
+    if (wasRealTimeMode) {
+      console.log('   📝 已记录实时模式状态，重连后将自动恢复');
+    }
+    // 暂停实时模式（重连后会自动恢复）
     isRealTimeMode = false;
     stopPolling();
     setTimeout(connectWebSocket, 5000);
@@ -1665,6 +1934,7 @@ function cleanupCache() {
   if (global.gc) {
     global.gc();
     const used = process.memoryUsage();
+    console.log(`📊 [内存] RSS: ${(used.rss / 1024 / 1024).toFixed(2)} MB, Heap: ${(used.heapUsed / 1024 / 1024).toFixed(2)}/${(used.heapTotal / 1024 / 1024).toFixed(2)} MB`);
   }
 }
 
@@ -1677,6 +1947,7 @@ async function start() {
   try {
     const stats = userConfig.getGifCacheStats();
     if (stats.count > 0) {
+      console.log(`📊 [GIF Cache] 当前缓存: ${stats.count} 个文件, ${stats.sizeMB} MB, 最旧 ${stats.oldestDays} 天`);
     }
     
     const cleaned = userConfig.cleanOldGifCache(30);
@@ -1689,6 +1960,7 @@ async function start() {
 
   // 初始化用户文件夹
   try {
+    console.log('📋 [Drive] 开始初始化用户文件夹...');
     const userFolderId = await initializeUserFolder();
     if (!userFolderId) {
       throw new Error('用户文件夹ID为空');
@@ -1699,11 +1971,21 @@ async function start() {
     }
     console.log(`\n✅ [Drive] 确认：将监听用户专属文件夹`);
     const localFolderPath = getLocalDownloadFolder();
-    console.log(`📂 [本地文件夹] 无法自动导入的文件将保存到: ${localFolderPath}`);
+    console.log(`\n📂 [本地文件夹] 无法自动导入的文件将保存到: ${localFolderPath}`);
+    console.log(`   💡 提示：视频文件（MP4/MOV）和过大的 GIF 文件会自动下载到此文件夹，可直接拖入 Figma`);
+    console.log(`   📂 用户专属文件夹ID: ${CONFIG.userFolderId}`);
+    console.log(`   ⚠️  不会监听共享文件夹根目录\n`);
   } catch (error) {
-    console.warn(`\n⚠️  初始化用户文件夹失败: ${error.message}`);
-    console.warn('   如果是第一次使用，请先在手机端上传文件，否则请检查 GDRIVE_FOLDER_ID 和 Service Account 配置');
-    console.warn('   服务将继续运行，手动同步时会重新初始化\n');
+    console.warn('\n⚠️  初始化用户文件夹失败（可能是第一次使用，用户还未上传文件）');
+    console.warn(`   错误信息: ${error.message}`);
+    console.warn('\n💡 解决方案：');
+    console.warn('   1. 如果是第一次使用，请先在手机端上传至少一个文件');
+    console.warn('   2. 上传后，手动同步会自动重新初始化文件夹');
+    console.warn('   3. 如果问题持续，请检查：');
+    console.warn('      - GDRIVE_FOLDER_ID 环境变量是否正确');
+    console.warn('      - serviceAccountKey.js 中的 defaultFolderId 是否正确');
+    console.warn('      - Service Account 是否有访问和创建文件夹的权限\n');
+    console.warn('   ℹ️  服务将继续运行，等待用户上传文件后重新初始化\n');
     // 不退出进程，继续运行，等待用户上传文件后在 performManualSync 中重新初始化
   }
 

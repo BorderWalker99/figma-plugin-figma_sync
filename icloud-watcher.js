@@ -59,9 +59,7 @@ setInterval(() => {
       cleanedCount++;
     }
   }
-  if (cleanedCount > 0) {
-    console.log(`🧹 [缓存清理] 已清理 ${cleanedCount} 个过期的文件记录`);
-  }
+  
 }, CACHE_EXPIRY_MS);
 
 // 生成文件指纹
@@ -81,9 +79,6 @@ function isFileProcessed(filePath) {
   if (!fingerprint) return false;
   
   if (processedFilesCache.has(fingerprint)) {
-    const timestamp = processedFilesCache.get(fingerprint);
-    const ageMs = Date.now() - timestamp;
-    console.log(`   🔍 [重复检测] 文件已在 ${(ageMs / 1000).toFixed(1)}秒 前处理过，跳过`);
     return true;
   }
   return false;
@@ -94,7 +89,6 @@ function markFileAsProcessed(filePath) {
   const fingerprint = getFileFingerprint(filePath);
   if (fingerprint) {
     processedFilesCache.set(fingerprint, Date.now());
-    console.log(`   ✅ [缓存] 已标记文件为已处理: ${path.basename(filePath)}`);
   }
 }
 
@@ -360,7 +354,6 @@ async function moveFileToSubfolder(filePath, isExportedGif = false) {
   // 移动并重命名文件
   try {
     fs.renameSync(currentPath, targetPath);
-    console.log(`   📂 [iCloud] 文件已分类并重命名: ${filename} → ${subfolder}/${newFilename}`);
     return { moved: true, newPath: targetPath, subfolder, newFilename, heifConverted };
   } catch (moveError) {
     console.warn(`   ⚠️  [iCloud] 移动文件失败: ${moveError.message}`);
@@ -419,8 +412,6 @@ function connectWebSocket() {
     try {
       const message = JSON.parse(data);
       
-      console.log(`📨 [iCloud Watcher] 收到消息: ${message.type}`, message.connectionId ? `(from ${message.connectionId})` : '(from server)');
-      
       // 处理文件导入失败消息（需要手动拖入，保留源文件）
       if (message.type === 'screenshot-failed') {
         const filename = message.filename;
@@ -457,9 +448,6 @@ function connectWebSocket() {
           } else {
             console.log(`   📌 根据备份设置，保留文件: ${filename} (${subfolder})`);
           }
-          console.log('');
-        } else {
-          console.log(`   ℹ️  文件不在待删除列表中: ${filename}`);
           console.log('');
         }
         return;
@@ -536,10 +524,6 @@ function scheduleReconnect() {
 
 // ============= 实时监听模式 =============
 function startWatching() {
-  console.log(`\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-  console.log(`🚀 [startWatching] 函数被调用`);
-  console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`);
-  
   if (watcher) {
     console.log('⚠️  检测到旧的监听器，正在停止...');
     stopWatching();
@@ -549,8 +533,6 @@ function startWatching() {
     console.log(`📁 iCloud 文件夹不存在，正在创建: ${CONFIG.icloudPath}`);
     fs.mkdirSync(CONFIG.icloudPath, { recursive: true });
     console.log(`✅ 文件夹创建成功\n`);
-  } else {
-    console.log(`✅ iCloud 文件夹已存在: ${CONFIG.icloudPath}\n`);
   }
   
   // 确保子文件夹存在
@@ -636,7 +618,6 @@ function startWatching() {
     }
   })();
   
-  console.log(`\n🔧 正在创建 chokidar watcher...`);
   watcher = chokidar.watch(CONFIG.icloudPath, {
     persistent: true,
     ignoreInitial: true,
@@ -653,7 +634,6 @@ function startWatching() {
       pollInterval: 100
     }
   });
-  console.log(`✅ chokidar watcher 已创建\n`);
   
   const handleFileEvent = async (filePath) => {
     const filename = path.basename(filePath);
@@ -666,7 +646,6 @@ function startWatching() {
 
     // 忽略导出的GIF文件夹
     if (relativePath.startsWith(CONFIG.subfolders.exportedGif + path.sep) || relativePath === CONFIG.subfolders.exportedGif) {
-      console.log(`🚫 [iCloud] 忽略导出的GIF文件夹内容\n`);
       return;
     }
     
@@ -681,7 +660,6 @@ function startWatching() {
         lowerFilename.endsWith('.miff') || 
         lowerFilename.endsWith('.cache') ||
         lowerFilename.includes('.tmp')) {
-        console.log(`🙈 [iCloud] 忽略临时文件: ${filename}\n`);
         return;
     }
     
@@ -703,7 +681,6 @@ function startWatching() {
     
     const ext = path.extname(filePath).toLowerCase();
     if (!CONFIG.supportedFormats.includes(ext)) {
-      console.log(`⏭️  [iCloud] 跳过不支持的格式: ${ext}\n`);
       return;
     }
     
@@ -718,22 +695,13 @@ function startWatching() {
     let subfolder = null;
     
     if (!isInSubfolder) {
-      // 根目录的新文件：执行分类、HEIF 转换和重命名
-      console.log(`\n📁 [自动整理] 正在处理新文件...`);
-      
       try {
         const result = await moveFileToSubfolder(filePath);
         finalPath = result.moved ? result.newPath : filePath;
         displayFilename = result.newFilename || filename;
         subfolder = result.subfolder;
         
-        if (result.moved) {
-          console.log(`   ✅ 已分类到: ${subfolder}/`);
-          console.log(`   ✅ 重命名为: ${displayFilename}`);
-          if (result.heifConverted) {
-            console.log(`   ✅ HEIF → JPEG 转换完成`);
-          }
-        }
+        
       } catch (moveError) {
         console.error(`   ❌ 自动整理失败: ${moveError.message}`);
         // 失败时继续使用原路径
@@ -743,7 +711,6 @@ function startWatching() {
     } else {
       // 已在子文件夹中：提取子文件夹名
       subfolder = relativePath.split(path.sep)[0];
-      console.log(`   📂 文件已在子文件夹: ${subfolder}/`);
     }
     
     // 重新检测文件类型（可能已经从 HEIF 转换为 JPEG）
@@ -756,7 +723,6 @@ function startWatching() {
     //    只有这部分需要插件连接
     // ========================================
     
-    console.log(`   检查实时模式状态: ${isRealTimeMode ? '✅ 已开启' : '❌ 已关闭'}`);
     if (!isRealTimeMode) {
       console.log(`⏸️  文件已整理完成，但实时同步未开启（插件未连接）\n`);
       return;
@@ -828,8 +794,6 @@ function startWatching() {
       }
     }
     
-    console.log(`\n📸 [实时模式] 准备同步: ${displayFilename}`);
-    
     // 尝试强制下载
     try {
       exec(`brctl download "${finalPath}"`);
@@ -842,10 +806,8 @@ function startWatching() {
     });
   };
   
-  console.log(`📝 注册事件监听器...`);
   watcher.on('add', handleFileEvent);
   watcher.on('change', handleFileEvent);
-  console.log(`✅ 事件监听器已注册\n`);
   
   watcher.on('ready', () => {
     const readyTime = new Date();
@@ -890,14 +852,10 @@ function startWatching() {
         });
         
         if (files.length > 0) {
-          console.log(`\n🔄 [轮询检测] 发现 ${files.length} 个根目录待整理文件`);
           for (const file of files) {
             const filePath = path.join(CONFIG.icloudPath, file);
             try {
-              const result = await moveFileToSubfolder(filePath);
-              if (result.moved) {
-                console.log(`   ✅ ${file} → ${result.subfolder}/${result.newFilename}`);
-              }
+              await moveFileToSubfolder(filePath);
             } catch (e) {
               console.warn(`   ⚠️  整理失败: ${file} - ${e.message}`);
             }
@@ -940,8 +898,6 @@ function stopWatching() {
 
 // ============= 手动同步模式 =============
 function countFilesForManualSync() {
-  console.log('📊 [iCloud] 统计文件数量...');
-  
   if (!fs.existsSync(CONFIG.icloudPath)) {
     console.log('❌ 同步文件夹不存在\n');
     
@@ -1035,7 +991,6 @@ async function performManualSync() {
   });
   
   // 先将根目录文件分类到子文件夹（包含 HEIF 转换和自动命名）
-  console.log(`📂 [手动同步] 正在分类根目录中的 ${rootFiles.length} 个文件...`);
   for (const file of rootFiles) {
     const filePath = path.join(CONFIG.icloudPath, file);
     const { newPath, subfolder } = await moveFileToSubfolder(filePath);
@@ -1193,7 +1148,6 @@ async function syncScreenshot(filePath, deleteAfterSync = false, subfolder = nul
   const filename = path.basename(filePath);
   
   if (isFileProcessed(filePath)) {
-    console.log(`   ⏭️  跳过重复文件: ${filename}`);
     return;
   }
   
@@ -1202,8 +1156,6 @@ async function syncScreenshot(filePath, deleteAfterSync = false, subfolder = nul
       console.log('⏸️  等待服务器连接...');
       throw new Error('服务器未连接');
     }
-    
-    console.log('   ⬆️  正在上传...');
     
     if (!fs.existsSync(filePath)) {
       console.log('   ⚠️  文件不存在，可能已被删除');
@@ -1225,7 +1177,6 @@ async function syncScreenshot(filePath, deleteAfterSync = false, subfolder = nul
       console.log(`   ⚠️  视频文件不支持自动导入 Figma`);
       return;
     } else if (isGif) {
-      console.log(`   🎬 检测到 GIF 格式...`);
       imageBuffer = fs.readFileSync(filePath);
       
       // 缓存 GIF
@@ -1238,8 +1189,6 @@ async function syncScreenshot(filePath, deleteAfterSync = false, subfolder = nul
         console.error(`   ⚠️  [GIF Cache] 缓存失败:`, cacheError.message);
       }
       
-      const fileSizeKB = (imageBuffer.length / 1024).toFixed(2);
-      console.log(`   ✅ 使用原始 GIF 文件: ${fileSizeKB}KB`);
     } else if (isHeif && os.platform() === 'darwin') {
       console.log(`   🔄 检测到 HEIF 格式，使用 sips 转换为 JPEG...`);
       
@@ -1349,7 +1298,6 @@ async function syncScreenshot(filePath, deleteAfterSync = false, subfolder = nul
     if (deleteAfterSync) {
       // 添加到待删除队列，等待 Figma 确认
       pendingDeletes.set(filename, { filePath, subfolder });
-      console.log('   ⏳ 等待Figma确认...');
       
       // 设置超时兜底
       setTimeout(() => {

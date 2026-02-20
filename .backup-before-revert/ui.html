@@ -8913,7 +8913,6 @@
     let layersForTimeline = [];
     let layerFrames = {}; // { layerId: [{ percent: 0, data: base64 }, ...] }
     let timelineFrameId = null; // 存储时间线编辑的 Frame ID
-    let timelineRangeCache = {}; // { frameId: { layerId: { start, end } } } 按 Frame 缓存上次编辑的时间范围
     let timelineLongPressTimer;
     const TIMELINE_LONG_PRESS_MS = 500;
     let isTimelineLongPress = false;
@@ -9051,12 +9050,7 @@
         stopTimelinePlayback();
         document.getElementById('timelineEditorOverlay').classList.remove('show');
         
-        // 保存当前 Frame 的图层时间范围到缓存，供二次打开时恢复
-        if (timelineFrameId && Object.keys(timelineData).length > 0) {
-            timelineRangeCache[timelineFrameId] = JSON.parse(JSON.stringify(timelineData));
-        }
-        
-        // 清除当前会话的时间线数据（缓存已单独保存）
+        // 清除所有时间线缓存，确保下次打开加载全新数据
         timelineData = {};
         layersForTimeline = [];
         layerFrames = {};
@@ -9074,6 +9068,8 @@
         // ⚠️ 先保存 timelineData，因为 closeTimelineEditor 会清空它
         const exportTimelineData = JSON.parse(JSON.stringify(timelineData));
         closeTimelineEditor();
+        // Debug: Log timeline data being sent
+        console.log('🕐 [时间线] 导出时的timelineData:', JSON.stringify(exportTimelineData, null, 2));
         startExportGif(exportTimelineData);
     };
 
@@ -9100,6 +9096,9 @@
         }
         
         layersForTimeline = layers;
+        // Debug: Log received layers
+        console.log('🕐 [时间线] 收到图层列表:', layers.map(l => ({ id: l.id, name: l.name, hasThumbnail: !!l.thumbnail, thumbLen: l.thumbnail ? l.thumbnail.length : 0 })));
+        console.log('🕐 [时间线] Frame尺寸:', frameWidth, 'x', frameHeight);
         
         // Validate frame dimensions
         if (!frameWidth || !frameHeight || frameWidth <= 0 || frameHeight <= 0) {
@@ -9113,10 +9112,14 @@
         const availableWidth = Math.max(previewAreaRect.width - 40, 100); // padding, min 100
         const availableHeight = Math.max(previewAreaRect.height - 20, 100); // padding, min 100
         
+        console.log('🕐 [时间线] 预览区可用尺寸:', availableWidth, 'x', availableHeight);
+        
         // Calculate scale to fit frame within available space
         const scaleX = availableWidth / (frameWidth || 1);
         const scaleY = availableHeight / (frameHeight || 1);
         const scale = Math.min(scaleX, scaleY, 1); // Don't scale up, only down
+        
+        console.log('🕐 [时间线] 缩放比例:', scale);
         
         const scaledWidth = Math.max((frameWidth || 100) * scale, 50);
         const scaledHeight = Math.max((frameHeight || 100) * scale, 50);
@@ -9133,6 +9136,8 @@
             box-shadow: 0 2px 8px rgba(0,0,0,0.3);
         `;
         previewContainer.appendChild(previewWrapper);
+        
+        console.log('🕐 [时间线] 预览容器尺寸:', scaledWidth, 'x', scaledHeight);
         
         // Store scale for later use
         previewWrapper.dataset.scale = scale;
@@ -9158,6 +9163,8 @@
             // Check if layer is within frame bounds
             const inBounds = scaledX >= -scaledLayerWidth && scaledX <= scaledWidth &&
                             scaledY >= -scaledLayerHeight && scaledY <= scaledHeight;
+            
+            console.log(`🕐 [时间线] 图层[${index}] "${layer.name}" (${layer.type}): pos(${scaledX.toFixed(1)}, ${scaledY.toFixed(1)}) size(${scaledLayerWidth.toFixed(1)}x${scaledLayerHeight.toFixed(1)}) hasThumb:${!!layer.thumbnail} inBounds:${inBounds}`);
             
             // z-index: In Figma, children[0] is BACK-most, children[last] is FRONT-most
             // After reversal: layersReversed[0] = FRONT-most (highest z), layersReversed[last] = BACK-most (lowest z)
@@ -9186,10 +9193,12 @@
                 `;
                 
                 img.onerror = () => console.error('🕐 [时间线] 图片加载失败:', layer.name);
+                img.onload = () => console.log('🕐 [时间线] 图片加载成功:', layer.name, img.naturalWidth, 'x', img.naturalHeight);
                 
                 previewWrapper.appendChild(img);
             } else {
                 // Create placeholder for layers without thumbnail
+                console.warn('🕐 [时间线] 图层无缩略图:', layer.name);
                 const placeholder = document.createElement('div');
                 placeholder.id = `preview-layer-${layer.id}`;
                 placeholder.style.cssText = `
@@ -9212,6 +9221,23 @@
                 previewWrapper.appendChild(placeholder);
             }
         });
+
+        // Debug: Log final preview wrapper state
+        setTimeout(() => {
+            const wrapper = document.getElementById('previewWrapper');
+            if (wrapper) {
+                const wrapperRect = wrapper.getBoundingClientRect();
+                console.log('🕐 [时间线] 预览容器实际尺寸:', wrapperRect.width.toFixed(0), 'x', wrapperRect.height.toFixed(0));
+                console.log('🕐 [时间线] 预览容器子元素数:', wrapper.children.length);
+                
+                // Log each child's position
+                Array.from(wrapper.children).forEach((child, i) => {
+                    const rect = child.getBoundingClientRect();
+                    const style = window.getComputedStyle(child);
+                    console.log(`🕐 [时间线] 子元素[${i}] id=${child.id}: rect(${rect.left.toFixed(0)},${rect.top.toFixed(0)} ${rect.width.toFixed(0)}x${rect.height.toFixed(0)}) opacity=${style.opacity} visible=${style.visibility}`);
+                });
+            }
+        }, 500);
 
         // Render track rows (in original order - top layer first)
         layers.forEach(layer => {
@@ -9301,6 +9327,11 @@
         // Request frame extraction for video layers
         layerFrames = {}; // Clear previous frames
         const videoLayers = layers.filter(l => l.isVideoLayer);
+        console.log('🎞️ [时间线] 视频图层检测:', {
+            total: layers.length,
+            videoLayers: videoLayers.length,
+            details: layers.map(l => ({ name: l.name, isVideo: l.isVideoLayer, videoId: l.videoId }))
+        });
         
         if (videoLayers.length > 0 && ws && ws.readyState === 1) {
             // 区分已绑定和未绑定的视频图层
@@ -9312,6 +9343,7 @@
                     unboundLayers.map(l => l.name));
             }
             
+            console.log('🎞️ [时间线] 请求帧提取:', boundLayers.map(l => `${l.name} (🔑${l.gifCacheId.substring(0,8)})`));
             boundLayers.forEach(layer => {
                 wsSend('extract-preview-frames', {
                     layerId: layer.id,
@@ -9321,12 +9353,18 @@
                     frameCount: 120
                 });
             });
+        } else {
+            console.log('🎞️ [时间线] 无视频图层或WebSocket未连接', {
+                videoLayerCount: videoLayers.length,
+                wsReady: ws ? ws.readyState : 'null'
+            });
         }
     }
     
     // Handle preview frames response
     function handlePreviewFramesResult(data) {
         if (data.success && data.frames && data.frames.length > 0) {
+            console.log(`🎞️ [时间线] 收到帧数据: layerId=${data.layerId}, 帧数=${data.frames.length}, 时长=${data.duration}s`);
             layerFrames[data.layerId] = data.frames;
             
             // 存储视频时长到图层数据
@@ -9340,6 +9378,7 @@
                 // 始终使用实际视频时长，覆盖默认值
                 if (data.duration > 0 && (data.duration > timelineTotalDuration || timelineTotalDuration <= 0.1)) {
                     timelineTotalDuration = data.duration;
+                    console.log(`🎞️ [时间线] 更新总时长: ${data.duration.toFixed(2)}秒`);
                 }
             }
             
@@ -9367,29 +9406,8 @@
             
             // Update preview with new frames
             updatePreview(currentScrubTime);
-            
-            // 🔧 如果有等待中的播放请求，帧已就绪，自动开始播放
-            if (pendingPlayback) {
-                pendingPlayback = false;
-                // 恢复播放按钮后再启动
-                const playBtn = document.getElementById('timelinePlayBtn');
-                if (playBtn) {
-                    playBtn.textContent = '⏸';
-                    playBtn.title = '';
-                }
-                startTimelinePlayback();
-            }
         } else {
             console.warn(`🎞️ [时间线] 帧提取失败: layerId=${data.layerId}, error=${data.error}`);
-            // 帧提取失败时也要清除等待状态
-            if (pendingPlayback) {
-                pendingPlayback = false;
-                const playBtn = document.getElementById('timelinePlayBtn');
-                if (playBtn) {
-                    playBtn.textContent = '▶';
-                    playBtn.title = '';
-                }
-            }
         }
     }
     
@@ -9643,7 +9661,6 @@
     // ==========================================
     let isTimelinePlaying = false;
     let playbackAnimationId = null;
-    let pendingPlayback = false; // 🔧 等待帧数据加载后自动播放
     const DEFAULT_FRAME_RATE = 60; // 默认帧率提升到60fps
     let timelineFrameRate = DEFAULT_FRAME_RATE;
     let timelineTotalDuration = 0; // 总时长（秒），0 表示尚未获取到实际时长
@@ -9698,24 +9715,6 @@
     
     function startTimelinePlayback() {
         if (isTimelinePlaying) return;
-        
-        // 🔧 仅当存在「已请求帧」的视频图层且帧尚未到达时，才延迟播放
-        // 未绑定 gifCacheId 的图层不会请求帧，若也等待会永久阻塞播放
-        const boundVideoLayers = layersForTimeline.filter(l => l.isVideoLayer && l.gifCacheId);
-        if (boundVideoLayers.length > 0) {
-            const anyFramesLoaded = boundVideoLayers.some(l => layerFrames[l.id] && layerFrames[l.id].length > 0);
-            if (!anyFramesLoaded) {
-                pendingPlayback = true;
-                const playBtn = document.getElementById('timelinePlayBtn');
-                if (playBtn) {
-                    playBtn.textContent = '⏳';
-                    playBtn.title = '正在加载帧数据...';
-                }
-                return;
-            }
-        }
-        
-        pendingPlayback = false;
         isTimelinePlaying = true;
         
         // 使用已经从服务器获取的实际时长
@@ -9788,21 +9787,14 @@
     
     function stopTimelinePlayback() {
         isTimelinePlaying = false;
-        pendingPlayback = false;
         if (playbackAnimationId) {
             cancelAnimationFrame(playbackAnimationId);
             playbackAnimationId = null;
         }
-        // 恢复播放按钮状态
-        const playBtn = document.getElementById('timelinePlayBtn');
-        if (playBtn && playBtn.textContent === '⏳') {
-            playBtn.textContent = '▶';
-            playBtn.title = '';
-        }
     }
     
     function toggleTimelinePlayback() {
-        if (isTimelinePlaying || pendingPlayback) {
+        if (isTimelinePlaying) {
             stopTimelinePlayback();
         } else {
             startTimelinePlayback();
@@ -9833,7 +9825,7 @@
             toggleTimelinePlayback();
         }
         
-        // 左右方向键：逐帧前进/后退（Shift + 方向键：10帧跳转）
+        // 左右方向键：逐帧前进/后退
         const isLeftKey = e.code === 'ArrowLeft' || e.key === 'ArrowLeft';
         const isRightKey = e.code === 'ArrowRight' || e.key === 'ArrowRight';
         
@@ -9854,9 +9846,7 @@
             // 计算一帧对应的百分比步长
             const fps = getTimelineFrameRate() || 30;
             const duration = timelineTotalDuration || 1;
-            const singleFrameStep = (1 / fps / duration) * 100;
-            // Shift + 方向键：跳 10 帧；普通方向键：跳 1 帧
-            const frameStep = e.shiftKey ? singleFrameStep * 10 : singleFrameStep;
+            const frameStep = (1 / fps / duration) * 100;
             
             const coverage = getTimelineCoverageRange();
             let newProgress = currentScrubTime + (isRightKey ? frameStep : -frameStep);
@@ -10113,11 +10103,8 @@
             if (msg.frameId) {
                 timelineFrameId = msg.frameId;
             }
-            // 若该 Frame 有上次编辑的缓存，恢复图层时间范围
-            const cachedRanges = msg.frameId && timelineRangeCache[msg.frameId]
-                ? timelineRangeCache[msg.frameId]
-                : null;
-            renderTimeline(msg.layers, msg.frameWidth, msg.frameHeight, cachedRanges);
+            // Updated to handle frame dimensions if needed
+            renderTimeline(msg.layers, msg.frameWidth, msg.frameHeight);
         }
         
         // 处理图层位置实时更新
@@ -10204,6 +10191,8 @@
     
     // 刷新时间线（图层增删/重排序后调用）
     function refreshTimelineWithNewLayers(newLayers, frameWidth, frameHeight) {
+        console.log('🕐 [时间线] 图层结构变化，刷新时间线，新图层数:', newLayers.length);
+        
         // 保存现有的时间线数据（开始/结束时间）
         const preservedTimelineData = { ...timelineData };
         
