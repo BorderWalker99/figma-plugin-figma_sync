@@ -471,48 +471,137 @@ Homebrew 对此版本仅提供有限支持。
 // 但为了兼容性（如果有遗漏），可以保留一个别名
 window.recheckDependencies = checkSystemRequirements;
 
-// 安装缺失的依赖
+// 安装缺失的依赖（应用内可视化安装，无需打开终端）
 async function installMissingDependencies() {
   const actionBtn = document.getElementById('step2ActionBtn');
-  
-  // 设置按钮为安装中状态
+  const checks = document.getElementById('systemChecks');
+  const logContainer = document.getElementById('step2Log');
+
+  // Disable button, show spinner
   actionBtn.disabled = true;
   actionBtn.classList.add('keep-raised');
   actionBtn.innerHTML = '<svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg> 正在安装...';
-  
+
+  // Show log container
+  logContainer.style.display = 'block';
+  logContainer.innerHTML = '';
+
+  const depIndices = { homebrew: 0, node: 1, imagemagick: 2, ffmpeg: 3, gifsicle: 4 };
+  const displayNames = { homebrew: 'Homebrew', node: 'Node.js', imagemagick: 'ImageMagick', ffmpeg: 'FFmpeg', gifsicle: 'Gifsicle' };
+
+  // Mark uninstalled deps as "waiting"
+  const depsToInstall = [];
+  if (!dependencyStatus.homebrew) depsToInstall.push('homebrew');
+  if (!dependencyStatus.node) depsToInstall.push('node');
+  if (!dependencyStatus.imagemagick) depsToInstall.push('imagemagick');
+  if (!dependencyStatus.ffmpeg) depsToInstall.push('ffmpeg');
+  if (!dependencyStatus.gifsicle) depsToInstall.push('gifsicle');
+
+  for (const dep of depsToInstall) {
+    const item = checks.children[depIndices[dep]];
+    if (item) {
+      item.className = 'status-item checking';
+      item.innerHTML = `
+        <div class="status-icon"><svg class="spinner" viewBox="0 0 24 24" style="opacity:0.3"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg></div>
+        <div class="status-content">
+          <div class="status-label">${displayNames[dep]}</div>
+          <div class="status-detail" style="color: var(--text-tertiary);">等待安装...</div>
+        </div>
+      `;
+    }
+  }
+
+  // Real-time progress updates
+  const progressHandler = (event, data) => {
+    const { dep, status, message } = data;
+    const item = checks.children[depIndices[dep]];
+    if (!item) return;
+
+    if (status === 'installing' || status === 'password') {
+      item.className = 'status-item checking';
+      item.innerHTML = `
+        <div class="status-icon"><svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg></div>
+        <div class="status-content">
+          <div class="status-label">${displayNames[dep]}</div>
+          <div class="status-detail" style="color: var(--accent);">${message}</div>
+        </div>
+      `;
+    } else if (status === 'done') {
+      item.className = 'status-item success';
+      item.innerHTML = `
+        <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
+        <div class="status-content">
+          <div class="status-label">${displayNames[dep]}</div>
+          <div class="status-detail" style="color: var(--success);">已安装</div>
+        </div>
+      `;
+    } else if (status === 'error') {
+      item.className = 'status-item error';
+      item.innerHTML = `
+        <div class="status-icon"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
+        <div class="status-content">
+          <div class="status-label">${displayNames[dep]}</div>
+          <div class="status-detail" style="color: var(--danger);">${message}</div>
+        </div>
+      `;
+    }
+  };
+
+  // Real-time log output
+  const logHandler = (event, data) => {
+    const lines = data.data.split('\n');
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      const logLine = document.createElement('div');
+      logLine.style.cssText = 'padding: 1px 0; word-break: break-all; white-space: pre-wrap;';
+      logLine.textContent = line;
+      logContainer.appendChild(logLine);
+    }
+    logContainer.scrollTop = logContainer.scrollHeight;
+  };
+
+  ipcRenderer.on('dep-install-progress', progressHandler);
+  ipcRenderer.on('dep-install-log', logHandler);
+
   try {
-    // 调用一键安装所有缺失的依赖
     const result = await ipcRenderer.invoke('install-all-dependencies', dependencyStatus);
-    
+
+    ipcRenderer.removeListener('dep-install-progress', progressHandler);
+    ipcRenderer.removeListener('dep-install-log', logHandler);
+
     if (result.success) {
-      // 显示后端返回的详细消息
-      showToast(result.message || '安装已启动', 'success');
-      
-      // 显示重新检测按钮，让用户在安装完成后点击（无 icon，左右 padding 对称）
-      actionBtn.disabled = false;
-      actionBtn.classList.remove('keep-raised');
-      actionBtn.innerHTML = '重新检测';
-      actionBtn.style.padding = '10px 20px';
-      actionBtn.onclick = checkSystemRequirements;
+      showToast('所有依赖安装完成', 'success');
+
+      // Auto-recheck after a short delay
+      actionBtn.innerHTML = '<svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg> 正在验证...';
+
+      setTimeout(() => {
+        logContainer.style.display = 'none';
+        checkSystemRequirements();
+      }, 1500);
     } else {
-      // 显示错误信息（已处理"已取消安装"的情况）
-      showToast(result.error || '安装失败', 'error');
-      
-      // 恢复按钮状态（无 icon，左右 padding 对称）
+      if (result.cancelled) {
+        showToast('已取消安装', 'error');
+      } else {
+        showToast(result.error || '安装失败', 'error');
+      }
+
       actionBtn.disabled = false;
       actionBtn.classList.remove('keep-raised');
-      actionBtn.innerHTML = '立即安装';
+      actionBtn.innerHTML = '重试安装';
       actionBtn.style.padding = '10px 20px';
       actionBtn.onclick = installMissingDependencies;
     }
   } catch (error) {
+    ipcRenderer.removeListener('dep-install-progress', progressHandler);
+    ipcRenderer.removeListener('dep-install-log', logHandler);
+
     console.error('安装依赖失败:', error);
     showToast('安装失败: ' + error.message, 'error');
-    
-    // 恢复按钮状态（无 icon，左右 padding 对称）
+
     actionBtn.disabled = false;
     actionBtn.classList.remove('keep-raised');
-    actionBtn.innerHTML = '立即安装';
+    actionBtn.innerHTML = '重试安装';
     actionBtn.style.padding = '10px 20px';
     actionBtn.onclick = installMissingDependencies;
   }

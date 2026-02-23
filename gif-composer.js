@@ -65,6 +65,7 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
   
   // 1. 定义查找路径和命令
   const searchPaths = [
+    path.join(os.homedir(), '.screensync', 'bin'), // ScreenSync 本地安装 (legacy macOS)
     '/opt/homebrew/bin',  // Apple Silicon
     '/usr/local/bin',     // Intel Mac
     '/opt/local/bin',     // MacPorts

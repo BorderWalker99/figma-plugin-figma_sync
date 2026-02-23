@@ -38,6 +38,29 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 
+// Inject ScreenSync local deps into PATH (for legacy macOS without Homebrew)
+(() => {
+  const dirs = [
+    path.join(os.homedir(), '.screensync', 'bin'),
+    path.join(os.homedir(), '.screensync', 'deps', 'node', 'bin'),
+    path.join(os.homedir(), '.screensync', 'deps', 'imagemagick', 'bin')
+  ];
+  for (const d of dirs) {
+    if (fs.existsSync(d) && !process.env.PATH.includes(d)) {
+      process.env.PATH = `${d}:${process.env.PATH}`;
+    }
+  }
+  // Set MAGICK_HOME for compiled-from-source ImageMagick
+  const imHome = path.join(os.homedir(), '.screensync', 'deps', 'imagemagick');
+  if (fs.existsSync(path.join(imHome, 'bin', 'magick')) && !process.env.MAGICK_HOME) {
+    process.env.MAGICK_HOME = imHome;
+    const imLib = path.join(imHome, 'lib');
+    if (fs.existsSync(imLib)) {
+      process.env.DYLD_LIBRARY_PATH = imLib + (process.env.DYLD_LIBRARY_PATH ? ':' + process.env.DYLD_LIBRARY_PATH : '');
+    }
+  }
+})();
+
 // ─── WebSocket send helpers ───────────────────────────────────────────────────
 // Safely send JSON via WebSocket (no-op if ws is null or not OPEN)
 function wsSend(ws, data) {

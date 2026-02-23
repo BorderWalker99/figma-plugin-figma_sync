@@ -341,8 +341,9 @@ function findExecutable(name) {
     path.join(os.homedir(), `.nvm/versions/node`), // NVM
   ];
 
-  // 特殊处理：检查 /usr/local/bin 和 /opt/homebrew/bin
-  for (const p of ['/usr/local/bin', '/opt/homebrew/bin']) {
+  // 特殊处理：优先检查 ScreenSync 本地安装目录 (legacy macOS)，然后是常见路径
+  const localBin = path.join(os.homedir(), '.screensync', 'bin');
+  for (const p of [localBin, '/usr/local/bin', '/opt/homebrew/bin']) {
     const fullPath = path.join(p, name);
     if (fs.existsSync(fullPath)) {
       console.log(`Found ${name} at: ${fullPath}`);
@@ -354,7 +355,20 @@ function findExecutable(name) {
     }
   }
 
-  // 3. 检查 NVM 安装的 Node.js（如果是 node）
+  // 3. 检查 ScreenSync 本地安装的 Node.js（legacy macOS）
+  if (name === 'node') {
+    const localNodePath = path.join(os.homedir(), '.screensync', 'deps', 'node', 'bin', 'node');
+    if (fs.existsSync(localNodePath)) {
+      console.log(`Found ${name} via ScreenSync local deps: ${localNodePath}`);
+      const localNodeBin = path.dirname(localNodePath);
+      if (!process.env.PATH.includes(localNodeBin)) {
+        process.env.PATH = `${localNodeBin}:${process.env.PATH}`;
+      }
+      return localNodePath;
+    }
+  }
+
+  // 4. 检查 NVM 安装的 Node.js（如果是 node）
   if (name === 'node') {
     const nvmDir = path.join(os.homedir(), '.nvm/versions/node');
     if (fs.existsSync(nvmDir)) {
@@ -576,302 +590,523 @@ ipcMain.handle('get-macos-version', async () => {
   return getMacOSVersion();
 });
 
-ipcMain.handle('install-homebrew', async () => {
-  return new Promise(async (resolve) => {
-    // Homebrew 官方安装命令 (注意：双引号需要转义用于 AppleScript)
-    // 原始命令: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-    const installCommand = '/bin/bash -c \\"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\\"';
-    
-    const appleScript = `
-      tell application "Terminal"
-        activate
-        do script "${installCommand}"
-      end tell
-    `;
-    
-    console.log('Opening Terminal to install Homebrew...');
-    
-    try {
-      await runAppleScript(appleScript);
-      console.log('Terminal opened successfully');
-      resolve({ 
-        success: true, 
-        message: '终端已打开，请按照提示安装 Homebrew：1. 输入密码；2. 按回车继续；3. 等待安装完成；完成后请点击"重新检测"按钮。',
-        needsRestart: true
-      });
-    } catch (error) {
-      console.error('Failed to run AppleScript:', error);
-      const rawCommand = '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"';
-      resolve({ 
-        success: false, 
-        error: `无法打开终端: ${error.message}\n\n请手动在终端中运行以下命令:\n${rawCommand}`,
-        manualCommand: rawCommand
-      });
-    }
-  });
-});
+// Escape single quotes for embedding in bash single-quoted strings
+function escapeForBash(str) {
+  return str.replace(/'/g, "'\"'\"'");
+}
 
-ipcMain.handle('install-node', async () => {
-  return new Promise(async (resolve) => {
-    const installCommand = 'brew install node';
-    const appleScript = `
-      tell application "Terminal"
-        activate
-        do script "${installCommand}"
-      end tell
-    `;
-    
-    console.log('Opening Terminal to install Node.js...');
-    
-    try {
-      await runAppleScript(appleScript);
-      console.log('Terminal opened successfully');
-      resolve({ 
-        success: true, 
-        message: '终端已打开，正在安装 Node.js。通常需要 2-3 分钟。完成后请点击"重新检测"按钮。',
-        needsRestart: true
-      });
-    } catch (error) {
-      console.error('Failed to run AppleScript:', error);
-      resolve({ 
-        success: false, 
-        error: `无法打开终端: ${error.message}\n\n请手动在终端中运行:\nbrew install node`
-      });
-    }
-  });
-});
+// Strip PTY control characters from output
+function cleanPtyOutput(text) {
+  return text
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '')
+    .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')
+    .replace(/\x1b\][^\x07]*\x07/g, '');
+}
 
-ipcMain.handle('install-imagemagick', async () => {
-  return new Promise(async (resolve) => {
-    const installCommand = 'brew install imagemagick';
-    const appleScript = `
-      tell application "Terminal"
-        activate
-        do script "${installCommand}"
-      end tell
-    `;
-    
-    console.log('Opening Terminal to install ImageMagick...');
-    
-    try {
-      await runAppleScript(appleScript);
-      console.log('Terminal opened successfully');
-      resolve({ 
-        success: true, 
-        message: '终端已打开，正在安装 ImageMagick。通常需要 2-3 分钟。完成后请点击"重新检测"按钮。',
-        needsRestart: true
-      });
-    } catch (error) {
-      console.error('Failed to run AppleScript:', error);
-      resolve({ 
-        success: false, 
-        error: `无法打开终端: ${error.message}\n\n请手动在终端中运行:\nbrew install imagemagick`
-      });
-    }
+// Execute shell command as Promise
+function execPromise(cmd, options = {}) {
+  return new Promise((resolve, reject) => {
+    exec(cmd, { timeout: 600000, maxBuffer: 50 * 1024 * 1024, ...options }, (error, stdout, stderr) => {
+      if (error) { error.stdout = stdout; error.stderr = stderr; reject(error); }
+      else resolve({ stdout, stderr });
+    });
   });
-});
+}
 
-ipcMain.handle('install-ffmpeg', async () => {
-  return new Promise(async (resolve) => {
-    const installCommand = 'brew install ffmpeg';
-    const appleScript = `
-      tell application "Terminal"
-        activate
-        do script "${installCommand}"
-      end tell
-    `;
-    
-    console.log('Opening Terminal to install FFmpeg...');
-    
-    try {
-      await runAppleScript(appleScript);
-      console.log('Terminal opened successfully');
-      resolve({ 
-        success: true, 
-        message: '终端已打开，正在安装 FFmpeg。通常需要 2-3 分钟。完成后请点击"重新检测"按钮。',
-        needsRestart: true
-      });
-    } catch (error) {
-      console.error('Failed to run AppleScript:', error);
-      resolve({ 
-        success: false, 
-        error: `无法打开终端: ${error.message}\n\n请手动在终端中运行:\nbrew install ffmpeg`
-      });
-    }
+// ============================================================
+// Legacy macOS (13 and below) — direct binary download approach
+// ============================================================
+const LEGACY_DEPS_DIR = path.join(os.homedir(), '.screensync', 'deps');
+const LEGACY_BIN_DIR = path.join(os.homedir(), '.screensync', 'bin');
+const LEGACY_NODE_VERSION = '22.13.1';
+
+function getLegacyNodeUrl() {
+  const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
+  return `https://nodejs.org/dist/v${LEGACY_NODE_VERSION}/node-v${LEGACY_NODE_VERSION}-darwin-${arch}.tar.gz`;
+}
+
+// Download file via curl, report progress
+function downloadFile(url, destPath, sendLog) {
+  return new Promise((resolve, reject) => {
+    sendLog(`   下载: ${url}\n`);
+    const child = spawn('curl', ['-L', '-o', destPath, '--progress-bar', '-f', '--connect-timeout', '30', url], {
+      stdio: ['pipe', 'pipe', 'pipe']
+    });
+    child.stderr.on('data', (data) => {
+      const text = data.toString();
+      if (text.includes('%')) sendLog(text);
+    });
+    child.on('close', (code) => {
+      if (code === 0 && fs.existsSync(destPath)) resolve();
+      else reject(new Error(`下载失败: ${url}`));
+    });
+    child.on('error', reject);
   });
-});
+}
 
-// 一键安装所有缺失的依赖（合并成一条命令，用户只需输入一次密码）
-ipcMain.handle('install-all-dependencies', async (event, dependencyStatus) => {
-  return new Promise(async (resolve) => {
-    console.log('📦 一键安装所有依赖，当前状态:', dependencyStatus);
-    
-    // 检测 macOS 版本
-    const darwinVersion = parseInt(os.release().split('.')[0], 10);
-    const isOldMacOS = darwinVersion < 23; // macOS 14 = Darwin 23
-    
-    // 构建需要安装的包列表
-    const brewPackages = [];
-    if (!dependencyStatus.node) {
-      brewPackages.push('node');
+// ---- Legacy Node.js ----
+async function installLegacyNode(sendProgress, sendLog) {
+  sendProgress('node', 'installing', '正在下载 Node.js...');
+  sendLog('\n📦 正在安装 Node.js...\n');
+
+  const nodeDir = path.join(LEGACY_DEPS_DIR, 'node');
+  const tarPath = path.join(os.tmpdir(), `screensync_node_${Date.now()}.tar.gz`);
+
+  try {
+    await downloadFile(getLegacyNodeUrl(), tarPath, sendLog);
+
+    sendLog('   正在解压...\n');
+    // Clean old installation
+    if (fs.existsSync(nodeDir)) fs.rmSync(nodeDir, { recursive: true, force: true });
+    fs.mkdirSync(LEGACY_DEPS_DIR, { recursive: true });
+
+    await execPromise(`tar xzf "${tarPath}" -C "${LEGACY_DEPS_DIR}"`);
+    // Rename extracted folder (node-v22.13.1-darwin-arm64 → node)
+    const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
+    const extractedName = `node-v${LEGACY_NODE_VERSION}-darwin-${arch}`;
+    const extractedPath = path.join(LEGACY_DEPS_DIR, extractedName);
+    if (fs.existsSync(extractedPath)) {
+      fs.renameSync(extractedPath, nodeDir);
     }
-    if (!dependencyStatus.imagemagick) {
-      brewPackages.push('imagemagick');
+
+    // Symlink binaries
+    fs.mkdirSync(LEGACY_BIN_DIR, { recursive: true });
+    for (const bin of ['node', 'npm', 'npx']) {
+      const src = path.join(nodeDir, 'bin', bin);
+      const dest = path.join(LEGACY_BIN_DIR, bin);
+      try { fs.unlinkSync(dest); } catch (e) {}
+      if (fs.existsSync(src)) fs.symlinkSync(src, dest);
     }
-    if (!dependencyStatus.ffmpeg) {
-      brewPackages.push('ffmpeg');
-    }
-    if (!dependencyStatus.gifsicle) {
-      brewPackages.push('gifsicle');
-    }
-    
-    // 检查是否需要安装任何东西
-    const needsHomebrew = !dependencyStatus.homebrew;
-    const needsPackages = brewPackages.length > 0;
-    
-    if (!needsHomebrew && !needsPackages) {
-      resolve({ 
-        success: false, 
-        error: '所有依赖已安装，无需重复安装'
-      });
-      return;
-    }
-    
-    // 旧版 macOS (13 及以下) 使用手动下载方式
-    if (isOldMacOS) {
-      console.log('检测到旧版 macOS，打开 Node.js 下载页面');
-      
-      // 打开 Node.js 下载页面
-      if (!dependencyStatus.node) {
-        require('electron').shell.openExternal('https://nodejs.org');
-        resolve({
-          success: true,
-          message: '已打开 Node.js 下载页面，安装后点击"重新检测"'
-        });
-      } else {
-        // Node.js 已安装，尝试用 brew 安装其他依赖
-        // 如果 brew 不存在，提示用户
-        if (!dependencyStatus.homebrew) {
-          resolve({
-            success: false,
-            error: 'ImageMagick/FFmpeg 需要 Homebrew，建议升级系统或跳过'
-          });
-        } else {
-          // 有 brew，尝试安装
-          const pkgs = [];
-          if (!dependencyStatus.imagemagick) pkgs.push('imagemagick');
-          if (!dependencyStatus.ffmpeg) pkgs.push('ffmpeg');
-          if (!dependencyStatus.gifsicle) pkgs.push('gifsicle');
-          
-          if (pkgs.length > 0) {
-            const installScript = `brew install ${pkgs.join(' ')} && echo '✅ 安装完成，请点击重新检测'`;
-            const appleScript = `tell application "Terminal"\n  activate\n  do script "${installScript}"\nend tell`;
-            
-            try {
-              await runAppleScript(appleScript);
-              resolve({
-                success: true,
-                message: '终端已打开，安装完成后点击"重新检测"'
-              });
-            } catch (e) {
-              resolve({
-                success: false,
-                error: '无法打开终端，请手动运行: brew install ' + pkgs.join(' ')
-              });
-            }
-          } else {
-            resolve({
-              success: false,
-              error: '所有依赖已安装'
-            });
+
+    // Verify
+    const { stdout } = await execPromise(`"${path.join(LEGACY_BIN_DIR, 'node')}" --version`);
+    sendLog(`   ✅ Node.js ${stdout.trim()} 安装完成\n`);
+    sendProgress('node', 'done', '安装完成');
+  } finally {
+    try { fs.unlinkSync(tarPath); } catch (e) {}
+  }
+}
+
+// ---- Legacy FFmpeg + FFprobe ----
+async function installLegacyFFmpeg(sendProgress, sendLog) {
+  sendProgress('ffmpeg', 'installing', '正在下载 FFmpeg...');
+  sendLog('\n📦 正在安装 FFmpeg...\n');
+
+  fs.mkdirSync(LEGACY_BIN_DIR, { recursive: true });
+  const tmpDir = path.join(os.tmpdir(), `screensync_ffmpeg_${Date.now()}`);
+  fs.mkdirSync(tmpDir, { recursive: true });
+
+  try {
+    // evermeet.cx provides Intel x64 static builds; on ARM they run via Rosetta 2
+    const ffmpegZip = path.join(tmpDir, 'ffmpeg.zip');
+    const ffprobeZip = path.join(tmpDir, 'ffprobe.zip');
+
+    await downloadFile('https://evermeet.cx/ffmpeg/getrelease/zip', ffmpegZip, sendLog);
+    await downloadFile('https://evermeet.cx/ffmpeg/getrelease/ffprobe/zip', ffprobeZip, sendLog);
+
+    sendLog('   正在解压...\n');
+    await execPromise(`unzip -o "${ffmpegZip}" -d "${LEGACY_BIN_DIR}"`);
+    await execPromise(`unzip -o "${ffprobeZip}" -d "${LEGACY_BIN_DIR}"`);
+    await execPromise(`chmod +x "${path.join(LEGACY_BIN_DIR, 'ffmpeg')}" "${path.join(LEGACY_BIN_DIR, 'ffprobe')}"`);
+
+    // Verify
+    const { stdout } = await execPromise(`"${path.join(LEGACY_BIN_DIR, 'ffmpeg')}" -version`);
+    const ver = stdout.split('\n')[0];
+    sendLog(`   ✅ ${ver}\n`);
+    sendProgress('ffmpeg', 'done', '安装完成');
+  } finally {
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (e) {}
+  }
+}
+
+// ---- Legacy ImageMagick ----
+async function installLegacyImageMagick(sendProgress, sendLog) {
+  sendProgress('imagemagick', 'installing', '正在安装 ImageMagick...');
+  sendLog('\n📦 正在安装 ImageMagick...\n');
+
+  fs.mkdirSync(LEGACY_BIN_DIR, { recursive: true });
+  const imDir = path.join(LEGACY_DEPS_DIR, 'imagemagick');
+  const tmpDir = path.join(os.tmpdir(), `screensync_im_${Date.now()}`);
+  fs.mkdirSync(tmpDir, { recursive: true });
+
+  try {
+    // Strategy 1: Download standalone macOS build from mendelson.org (universal binary, notarized)
+    const dmgPath = path.join(tmpDir, 'ImageMagick.dmg');
+    const mountPoint = path.join(tmpDir, 'im_mount');
+    let installed = false;
+
+    sendLog('   尝试下载 ImageMagick macOS 独立版...\n');
+    try {
+      await downloadFile('https://mendelson.org/imagemagick.dmg', dmgPath, sendLog);
+
+      sendLog('   正在挂载 DMG...\n');
+      fs.mkdirSync(mountPoint, { recursive: true });
+      await execPromise(`hdiutil attach "${dmgPath}" -nobrowse -readonly -mountpoint "${mountPoint}"`, { timeout: 30000 });
+
+      // Find the .app inside the DMG
+      const dmgContents = fs.readdirSync(mountPoint);
+      const appName = dmgContents.find(f => f.endsWith('.app') && f.toLowerCase().includes('magick'));
+
+      if (appName) {
+        // Copy entire app bundle to deps directory
+        if (fs.existsSync(imDir)) fs.rmSync(imDir, { recursive: true, force: true });
+        fs.mkdirSync(imDir, { recursive: true });
+        const appDest = path.join(imDir, appName);
+        await execPromise(`cp -R "${path.join(mountPoint, appName)}" "${appDest}"`);
+
+        // Create wrapper scripts that invoke the binary inside the app bundle
+        const magickBin = path.join(appDest, 'Contents', 'MacOS', 'magick');
+        if (fs.existsSync(magickBin)) {
+          for (const cmd of ['magick', 'convert']) {
+            const wrapperPath = path.join(LEGACY_BIN_DIR, cmd);
+            fs.writeFileSync(wrapperPath, `#!/bin/bash\nexec "${magickBin}" ${cmd === 'convert' ? 'convert' : ''} "$@"\n`, { mode: 0o755 });
           }
+          installed = true;
         }
       }
+
+      // Unmount
+      try { await execPromise(`hdiutil detach "${mountPoint}" -force`, { timeout: 15000 }); } catch (e) {}
+    } catch (e) {
+      sendLog(`   ⚠️ 独立版下载失败: ${e.message}\n`);
+      try { await execPromise(`hdiutil detach "${mountPoint}" -force`, { timeout: 10000 }); } catch (e2) {}
+    }
+
+    // Strategy 2: Compile from source if Xcode CLT is available
+    if (!installed) {
+      sendLog('   尝试从源码编译 ImageMagick...\n');
+      try {
+        await execPromise('xcode-select -p', { timeout: 5000 });
+        sendProgress('imagemagick', 'installing', '正在编译 ImageMagick（需要几分钟）...');
+
+        const srcDir = path.join(tmpDir, 'src');
+        fs.mkdirSync(srcDir, { recursive: true });
+        if (fs.existsSync(imDir)) fs.rmSync(imDir, { recursive: true, force: true });
+        fs.mkdirSync(imDir, { recursive: true });
+
+        await execPromise(`curl -L "https://imagemagick.org/archive/ImageMagick.tar.gz" | tar xz -C "${srcDir}" --strip-components=1`, { timeout: 300000 });
+        const ncpu = os.cpus().length;
+        await execPromise(`cd "${srcDir}" && ./configure --prefix="${imDir}" --disable-docs --without-modules --without-perl --disable-openmp --with-quantum-depth=16 CFLAGS="-O2" 2>&1`, { timeout: 120000 });
+        await execPromise(`cd "${srcDir}" && make -j${ncpu} 2>&1`, { timeout: 600000 });
+        await execPromise(`cd "${srcDir}" && make install 2>&1`, { timeout: 60000 });
+
+        const compiledMagick = path.join(imDir, 'bin', 'magick');
+        if (fs.existsSync(compiledMagick)) {
+          for (const cmd of ['magick', 'convert']) {
+            const dest = path.join(LEGACY_BIN_DIR, cmd);
+            try { fs.unlinkSync(dest); } catch (e) {}
+            fs.symlinkSync(compiledMagick, dest);
+          }
+          installed = true;
+        }
+      } catch (e) {
+        sendLog(`   ⚠️ 源码编译失败: ${e.message}\n`);
+        if (!installed) {
+          sendLog('   💡 请手动安装: 访问 https://imagemagick.org 下载 macOS 版本\n');
+          sendLog('      或安装 Xcode Command Line Tools 后重试: xcode-select --install\n');
+        }
+      }
+    }
+
+    if (installed) {
+      try {
+        const { stdout } = await execPromise(`"${path.join(LEGACY_BIN_DIR, 'magick')}" --version`);
+        const ver = stdout.split('\n')[0];
+        sendLog(`   ✅ ${ver}\n`);
+      } catch (e) {
+        sendLog('   ✅ ImageMagick 已安装\n');
+      }
+      sendProgress('imagemagick', 'done', '安装完成');
+    } else {
+      sendProgress('imagemagick', 'error', '安装失败（可手动安装）');
+      throw new Error('ImageMagick 安装失败。请手动安装后重试。');
+    }
+  } finally {
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (e) {}
+  }
+}
+
+// ---- Legacy Gifsicle ----
+async function installLegacyGifsicle(sendProgress, sendLog) {
+  sendProgress('gifsicle', 'installing', '正在安装 Gifsicle...');
+  sendLog('\n📦 正在安装 Gifsicle...\n');
+
+  fs.mkdirSync(LEGACY_BIN_DIR, { recursive: true });
+  const tmpDir = path.join(os.tmpdir(), `screensync_gifsicle_${Date.now()}`);
+  fs.mkdirSync(tmpDir, { recursive: true });
+
+  try {
+    // Check if C compiler is available
+    try { await execPromise('cc --version', { timeout: 5000 }); } catch (e) {
+      sendLog('   ⚠️ 未找到 C 编译器，跳过 Gifsicle（不影响基本功能）\n');
+      sendProgress('gifsicle', 'done', '已跳过（可选组件）');
       return;
     }
-    
-    // 构建一体化安装脚本
-    // 使用 bash 脚本串联所有命令，一次性完成所有安装
-    let installScript = '';
-    let description = '';
-    
-    if (needsHomebrew && needsPackages) {
-      // 需要安装 Homebrew + 其他依赖
-      // 脚本流程：安装 Homebrew → 配置 PATH → 安装依赖包
-      description = `Homebrew, ${brewPackages.join(', ')}`;
-      
-      // 检测芯片架构，确定 Homebrew 路径
-      const isAppleSilicon = process.arch === 'arm64';
-      const brewPath = isAppleSilicon ? '/opt/homebrew/bin' : '/usr/local/bin';
-      const brewEvalCmd = isAppleSilicon 
-        ? 'eval "$(/opt/homebrew/bin/brew shellenv)"'
-        : 'eval "$(/usr/local/bin/brew shellenv)"';
-      
-      // 构建完整安装脚本
-      // 1. 显示欢迎信息
-      // 2. 安装 Homebrew（交互式，需要密码）
-      // 3. 配置 PATH（确保 brew 可用）
-      // 4. 安装所有依赖包
-      // 5. 显示完成信息
-      installScript = `echo '🚀 ScreenSync 一键安装脚本' && echo '================================' && echo '' && echo '📦 即将安装: Homebrew + ${brewPackages.join(' + ')}' && echo '💡 安装过程中需要输入一次密码' && echo '' && /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" && echo '' && echo '✅ Homebrew 安装完成，正在配置环境...' && export PATH="${brewPath}:$PATH" && ${brewEvalCmd} 2>/dev/null || true && echo '📦 正在安装依赖: ${brewPackages.join(' ')}...' && brew install ${brewPackages.join(' ')} && echo '' && echo '🎉 ================================' && echo '🎉 所有依赖安装完成！' && echo '🎉 请返回安装器点击"重新检测"' && echo '🎉 ================================'`;
-      
-    } else if (needsHomebrew) {
-      // 只需要安装 Homebrew
-      description = 'Homebrew';
-      installScript = `echo '🚀 ScreenSync 一键安装脚本' && echo '================================' && echo '' && echo '📦 即将安装: Homebrew' && echo '💡 安装过程中需要输入密码' && echo '' && /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" && echo '' && echo '🎉 ================================' && echo '🎉 Homebrew 安装完成！' && echo '🎉 请返回安装器点击"重新检测"' && echo '🎉 ================================'`;
-      
+
+    sendLog('   正在下载源码...\n');
+    await execPromise(`curl -L "https://www.lcdf.org/gifsicle/gifsicle-1.96.tar.gz" | tar xz -C "${tmpDir}" --strip-components=1`, { timeout: 60000 });
+
+    sendLog('   正在编译...\n');
+    await execPromise(`cd "${tmpDir}" && ./configure --disable-gifview --prefix="${LEGACY_DEPS_DIR}/gifsicle" 2>&1`, { timeout: 60000 });
+    await execPromise(`cd "${tmpDir}" && make -j${os.cpus().length} 2>&1`, { timeout: 120000 });
+
+    const srcBin = path.join(tmpDir, 'src', 'gifsicle');
+    if (fs.existsSync(srcBin)) {
+      const dest = path.join(LEGACY_BIN_DIR, 'gifsicle');
+      try { fs.unlinkSync(dest); } catch (e) {}
+      fs.copyFileSync(srcBin, dest);
+      fs.chmodSync(dest, 0o755);
+
+      const { stdout } = await execPromise(`"${dest}" --version`);
+      sendLog(`   ✅ ${stdout.split('\n')[0]}\n`);
+      sendProgress('gifsicle', 'done', '安装完成');
     } else {
-      // 只需要安装依赖包（Homebrew 已存在）
-      description = brewPackages.join(', ');
-      installScript = `echo '🚀 ScreenSync 一键安装脚本' && echo '================================' && echo '' && echo '📦 即将安装: ${brewPackages.join(' + ')}' && echo '' && brew install ${brewPackages.join(' ')} && echo '' && echo '🎉 ================================' && echo '🎉 所有依赖安装完成！' && echo '🎉 请返回安装器点击"重新检测"' && echo '🎉 ================================'`;
+      throw new Error('编译产物未找到');
     }
-    
-    // 使用 AppleScript 打开终端并运行脚本
-    // 注意：需要对双引号进行转义
-    const escapedScript = installScript.replace(/"/g, '\\"');
-    const appleScript = `tell application "Terminal"
-  activate
-  do script "${escapedScript}"
-end tell`;
-    
-    console.log('Opening Terminal to install:', description);
-    console.log('Install script length:', installScript.length);
-    
-    try {
-      const result = await runAppleScript(appleScript);
-      console.log('Terminal opened successfully, result:', result);
-      
-      const tips = needsHomebrew 
-        ? '💡 提示：\n- 终端会要求输入密码（安装 Homebrew 时）\n- 输入时不会显示字符（这是正常的）\n- 输入完成后按回车，脚本会自动继续\n- 全部完成后点击"重新检测"按钮'
-        : '💡 提示：\n- 如果提示需要密码，请输入 Mac 登录密码\n- 输入时不会显示字符（这是正常的）\n- 等待安装完成后点击"重新检测"按钮';
-      
-      resolve({ 
-        success: true, 
-        message: `终端已打开，正在安装: ${description}\n\n${tips}`
-      });
-    } catch (error) {
-      console.error('Failed to open Terminal:', error);
-      console.error('Error details:', {
-        message: error.message,
-        code: error.code,
-        stack: error.stack
-      });
-      
-      // 提供手动安装命令
-      let manualCommands = '';
-      if (needsHomebrew) {
-        manualCommands += '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"\n';
+  } catch (e) {
+    sendLog(`   ⚠️ Gifsicle 安装失败: ${e.message}（不影响基本功能）\n`);
+    sendProgress('gifsicle', 'done', '已跳过（可选组件）');
+  } finally {
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (e) {}
+  }
+}
+
+// Full legacy installation orchestrator
+async function installLegacyDeps(event, dependencyStatus) {
+  console.log('📦 Legacy macOS: 使用直接下载方式安装依赖');
+
+  const sendProgress = (dep, status, message) => {
+    try { event.sender.send('dep-install-progress', { dep, status, message }); } catch (e) {}
+  };
+  const sendLog = (data) => {
+    try { event.sender.send('dep-install-log', { data }); } catch (e) {}
+  };
+
+  fs.mkdirSync(LEGACY_DEPS_DIR, { recursive: true });
+  fs.mkdirSync(LEGACY_BIN_DIR, { recursive: true });
+
+  // Homebrew is not needed for direct downloads; mark it as handled if absent
+  if (!dependencyStatus.homebrew) {
+    sendProgress('homebrew', 'done', '无需安装（直接下载模式）');
+  }
+
+  try {
+    if (!dependencyStatus.node) await installLegacyNode(sendProgress, sendLog);
+    if (!dependencyStatus.ffmpeg) await installLegacyFFmpeg(sendProgress, sendLog);
+    if (!dependencyStatus.imagemagick) await installLegacyImageMagick(sendProgress, sendLog);
+    if (!dependencyStatus.gifsicle) await installLegacyGifsicle(sendProgress, sendLog);
+
+    // Inject into current process PATH
+    if (!process.env.PATH.includes(LEGACY_BIN_DIR)) {
+      process.env.PATH = `${LEGACY_BIN_DIR}:${process.env.PATH}`;
+    }
+    const legacyNodeBin = path.join(LEGACY_DEPS_DIR, 'node', 'bin');
+    if (fs.existsSync(legacyNodeBin) && !process.env.PATH.includes(legacyNodeBin)) {
+      process.env.PATH = `${legacyNodeBin}:${process.env.PATH}`;
+    }
+
+    return { success: true, message: '所有依赖安装完成' };
+  } catch (error) {
+    sendLog(`\n❌ ${error.message}\n`);
+    return { success: false, error: error.message };
+  }
+}
+
+// In-app dependency installation (no Terminal.app needed)
+ipcMain.handle('install-all-dependencies', async (event, dependencyStatus) => {
+  // Detect macOS version — use legacy direct-download mode for macOS 13 and below
+  const darwinVersion = parseInt(os.release().split('.')[0], 10);
+  const isLegacyMacOS = darwinVersion < 23; // Darwin 23 = macOS 14
+
+  if (isLegacyMacOS) {
+    return await installLegacyDeps(event, dependencyStatus);
+  }
+  console.log('📦 开始应用内安装依赖，当前状态:', dependencyStatus);
+
+  const needsHomebrew = !dependencyStatus.homebrew;
+  const brewPackages = [];
+  if (!dependencyStatus.node) brewPackages.push('node');
+  if (!dependencyStatus.imagemagick) brewPackages.push('imagemagick');
+  if (!dependencyStatus.ffmpeg) brewPackages.push('ffmpeg');
+  if (!dependencyStatus.gifsicle) brewPackages.push('gifsicle');
+  const needsPackages = brewPackages.length > 0;
+
+  if (!needsHomebrew && !needsPackages) {
+    return { success: true, message: '所有依赖已安装' };
+  }
+
+  const sendProgress = (dep, status, message) => {
+    try { event.sender.send('dep-install-progress', { dep, status, message }); } catch (e) {}
+  };
+  const sendLog = (data) => {
+    try { event.sender.send('dep-install-log', { data }); } catch (e) {}
+  };
+
+  try {
+    // ===== Phase 1: Install Homebrew =====
+    if (needsHomebrew) {
+      sendProgress('homebrew', 'password', '等待输入密码...');
+
+      // Native macOS password dialog
+      let password;
+      try {
+        password = await new Promise((resolve, reject) => {
+          const dialogCmd = `osascript -e 'text returned of (display dialog "安装 Homebrew 需要管理员权限" & return & return & "请输入您的 Mac 登录密码：" default answer "" with hidden answer with title "ScreenSync 安装器" with icon caution)'`;
+          exec(dialogCmd, { timeout: 120000 }, (err, stdout) => {
+            if (err) reject(new Error('cancelled'));
+            else resolve(stdout.trim());
+          });
+        });
+      } catch (e) {
+        sendProgress('homebrew', 'error', '已取消');
+        return { success: false, error: '已取消密码输入', cancelled: true };
       }
-      if (needsPackages) {
-        manualCommands += `brew install ${brewPackages.join(' ')}`;
-      }
-      
-      resolve({ 
-        success: false, 
-        error: `无法打开终端: ${error.message}\n\n请手动在终端中运行:\n${manualCommands}`
+
+      sendProgress('homebrew', 'installing', '正在安装 Homebrew...');
+      sendLog('📦 正在安装 Homebrew...\n');
+
+      const isAppleSilicon = process.arch === 'arm64';
+      const brewBin = isAppleSilicon ? '/opt/homebrew/bin' : '/usr/local/bin';
+      const escapedPass = escapeForBash(password);
+
+      // Build the install script:
+      // 1. Pre-authenticate sudo via password pipe (credentials cached for this PTY session)
+      // 2. Run Homebrew installer non-interactively
+      // 3. Configure PATH for Apple Silicon
+      const brewScript = [
+        `echo '${escapedPass}' | sudo -S -v 2>/dev/null`,
+        `if [ $? -ne 0 ]; then echo "SUDO_AUTH_FAILED"; exit 1; fi`,
+        `echo "✅ 密码验证成功"`,
+        `export NONINTERACTIVE=1`,
+        `export CI=1`,
+        `echo "📦 正在下载并安装 Homebrew（可能需要几分钟）..."`,
+        `/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"`,
+        `BREW_EXIT=$?`,
+        `sudo -k 2>/dev/null || true`,
+        isAppleSilicon ? [
+          `if [ -f /opt/homebrew/bin/brew ]; then`,
+          `  eval "$(/opt/homebrew/bin/brew shellenv)"`,
+          `  echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile 2>/dev/null || true`,
+          `  echo "✅ Homebrew PATH 已配置"`,
+          `fi`
+        ].join('\n') : '',
+        `exit $BREW_EXIT`
+      ].filter(Boolean).join('\n');
+
+      await new Promise((resolve, reject) => {
+        // Use 'script' utility to create a PTY — required for sudo tty_tickets
+        const child = spawn('script', ['-q', '/dev/null', '/bin/bash', '-c', brewScript], {
+          env: { ...process.env, NONINTERACTIVE: '1', CI: '1' }
+        });
+
+        const timeout = setTimeout(() => {
+          try { child.kill('SIGTERM'); } catch (e) {}
+          reject(new Error('Homebrew 安装超时（15分钟）'));
+        }, 15 * 60 * 1000);
+
+        let sudoFailed = false;
+
+        child.stdout.on('data', (data) => {
+          const text = cleanPtyOutput(data.toString());
+          if (text.includes('SUDO_AUTH_FAILED')) {
+            sudoFailed = true;
+            sendProgress('homebrew', 'error', '密码错误');
+          }
+          if (text.trim()) sendLog(text);
+        });
+
+        child.stderr.on('data', (data) => {
+          const text = cleanPtyOutput(data.toString());
+          if (text.trim()) sendLog(text);
+        });
+
+        child.on('close', (code) => {
+          clearTimeout(timeout);
+          if (sudoFailed) {
+            reject(new Error('密码验证失败，请重试'));
+          } else if (code === 0) {
+            sendProgress('homebrew', 'done', '安装完成');
+            sendLog('\n✅ Homebrew 安装完成\n');
+            // Update PATH so findExecutable works for subsequent brew calls
+            if (fs.existsSync(path.join(brewBin, 'brew'))) {
+              process.env.PATH = `${brewBin}:${process.env.PATH}`;
+            }
+            resolve();
+          } else {
+            sendProgress('homebrew', 'error', '安装失败');
+            reject(new Error(`Homebrew 安装失败 (exit code: ${code})`));
+          }
+        });
+
+        child.on('error', (err) => {
+          clearTimeout(timeout);
+          reject(err);
+        });
       });
     }
-  });
+
+    // ===== Phase 2: Install brew packages =====
+    if (needsPackages) {
+      const brewPath = findExecutable('brew')
+        || (process.arch === 'arm64' ? '/opt/homebrew/bin/brew' : '/usr/local/bin/brew');
+
+      if (!brewPath || !fs.existsSync(brewPath)) {
+        return { success: false, error: '未找到 Homebrew，无法安装依赖包' };
+      }
+
+      const displayNames = { node: 'Node.js', imagemagick: 'ImageMagick', ffmpeg: 'FFmpeg', gifsicle: 'Gifsicle' };
+
+      for (const pkg of brewPackages) {
+        const name = displayNames[pkg] || pkg;
+        sendProgress(pkg, 'installing', `正在安装 ${name}...`);
+        sendLog(`\n📦 正在安装 ${name}...\n`);
+
+        await new Promise((resolve, reject) => {
+          const child = spawn(brewPath, ['install', pkg], {
+            env: process.env
+          });
+
+          const timeout = setTimeout(() => {
+            try { child.kill('SIGTERM'); } catch (e) {}
+            reject(new Error(`${name} 安装超时（10分钟）`));
+          }, 10 * 60 * 1000);
+
+          child.stdout.on('data', (data) => {
+            const text = data.toString();
+            if (text.trim()) sendLog(text);
+          });
+
+          child.stderr.on('data', (data) => {
+            const text = data.toString();
+            if (text.trim()) sendLog(text);
+          });
+
+          child.on('close', (code) => {
+            clearTimeout(timeout);
+            if (code === 0) {
+              sendProgress(pkg, 'done', '安装完成');
+              sendLog(`✅ ${name} 安装完成\n`);
+              resolve();
+            } else {
+              sendProgress(pkg, 'error', '安装失败');
+              reject(new Error(`${name} 安装失败`));
+            }
+          });
+
+          child.on('error', (err) => {
+            clearTimeout(timeout);
+            reject(err);
+          });
+        });
+      }
+    }
+
+    return { success: true, message: '所有依赖安装完成' };
+  } catch (error) {
+    sendLog(`\n❌ ${error.message}\n`);
+    return { success: false, error: error.message };
+  }
 });
 
 ipcMain.handle('install-dependencies', async (event, installPath) => {
@@ -943,11 +1178,8 @@ ipcMain.handle('install-dependencies', async (event, installPath) => {
       }
     }
     
-    // 查找 npm 路径
-    const npmPath = findExecutable('npm') || 
-      (process.platform === 'darwin' 
-        ? (process.arch === 'arm64' ? '/opt/homebrew/bin/npm' : '/usr/local/bin/npm')
-        : 'npm');
+    const npmPath = findExecutable('npm')
+      || (process.arch === 'arm64' ? '/opt/homebrew/bin/npm' : '/usr/local/bin/npm');
     
     console.log('📦 npm 路径:', npmPath);
 
@@ -1172,9 +1404,8 @@ ipcMain.handle('start-server', async (event, installPath) => {
       return;
     }
 
-    const nodePath = process.platform === 'darwin'
-      ? (process.arch === 'arm64' ? '/opt/homebrew/bin/node' : '/usr/local/bin/node')
-      : 'node';
+    const nodePath = findExecutable('node')
+      || (process.arch === 'arm64' ? '/opt/homebrew/bin/node' : '/usr/local/bin/node');
     
     const startScript = path.join(installPath, 'start.js');
     
@@ -1265,9 +1496,10 @@ ipcMain.handle('setup-autostart', async (event, installPath) => {
         console.warn('⚠️  findExecutable("node") 返回 null，尝试回退路径...');
         
         const fallbackPaths = [
-          '/usr/local/bin/node',      // 官网安装（优先，兼容所有架构）
-          '/opt/homebrew/bin/node',   // Homebrew Apple Silicon
-          'node'                      // 最后尝试直接使用命令
+          path.join(os.homedir(), '.screensync', 'deps', 'node', 'bin', 'node'),
+          '/usr/local/bin/node',
+          '/opt/homebrew/bin/node',
+          'node'
         ];
         
         for (const fallback of fallbackPaths) {
@@ -1301,6 +1533,8 @@ ipcMain.handle('setup-autostart', async (event, installPath) => {
       
       // 构建包含所有可能 Node.js 路径的 PATH
       const comprehensivePath = [
+        path.join(os.homedir(), '.screensync', 'bin'),          // ScreenSync 本地安装 (legacy macOS)
+        path.join(os.homedir(), '.screensync', 'deps', 'node', 'bin'), // 本地 Node.js
         '/usr/local/bin',           // 官网安装
         '/opt/homebrew/bin',        // Homebrew Apple Silicon
         '/usr/bin',

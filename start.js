@@ -2,7 +2,26 @@
 const { spawn, execSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const { checkUpdateAsync } = require('./update-manager');
+
+// Inject ScreenSync local deps into PATH and env (for legacy macOS without Homebrew)
+const localBin = path.join(os.homedir(), '.screensync', 'bin');
+const localNodeBin = path.join(os.homedir(), '.screensync', 'deps', 'node', 'bin');
+const localImBin = path.join(os.homedir(), '.screensync', 'deps', 'imagemagick', 'bin');
+for (const p of [localBin, localNodeBin, localImBin]) {
+  if (fs.existsSync(p) && !process.env.PATH.includes(p)) {
+    process.env.PATH = `${p}:${process.env.PATH}`;
+  }
+}
+const imHome = path.join(os.homedir(), '.screensync', 'deps', 'imagemagick');
+if (fs.existsSync(path.join(imHome, 'bin', 'magick')) && !process.env.MAGICK_HOME) {
+  process.env.MAGICK_HOME = imHome;
+  const imLib = path.join(imHome, 'lib');
+  if (fs.existsSync(imLib)) {
+    process.env.DYLD_LIBRARY_PATH = imLib + (process.env.DYLD_LIBRARY_PATH ? ':' + process.env.DYLD_LIBRARY_PATH : '');
+  }
+}
 let chokidar;
 try {
   chokidar = require('chokidar');
