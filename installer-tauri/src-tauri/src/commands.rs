@@ -1052,6 +1052,48 @@ pub async fn install_dependencies(app: AppHandle, install_path: String) -> Insta
             if is_apple_silicon() { "/opt/homebrew/bin/npm".into() }
             else { "/usr/local/bin/npm".into() }
         });
+    let node_path = find_executable("node")
+        .unwrap_or_else(|| {
+            if is_apple_silicon() { "/opt/homebrew/bin/node".into() }
+            else { "/usr/local/bin/node".into() }
+        });
+
+    if !Path::new(&npm_path).exists() {
+        return InstallResult {
+            success: false,
+            message: None,
+            error: Some(format!("未找到 npm 可执行文件：{npm_path}")),
+            cancelled: None,
+        };
+    }
+    if !Path::new(&node_path).exists() {
+        return InstallResult {
+            success: false,
+            message: None,
+            error: Some(format!("未找到 node 可执行文件：{node_path}")),
+            cancelled: None,
+        };
+    }
+
+    // Ensure npm can find node when installer runs in restricted app PATH.
+    let npm_dir = Path::new(&npm_path)
+        .parent()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let node_dir = Path::new(&node_path)
+        .parent()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let current_path = env::var("PATH").unwrap_or_default();
+    let comprehensive_path = format!(
+        "{}:{}:{}:{}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:{}",
+        screensync_bin().display(),
+        screensync_deps().join("node/bin").display(),
+        npm_dir,
+        node_dir,
+        current_path
+    );
+    let env_path = [("PATH", comprehensive_path.as_str())];
 
     let cmd_mirror = format!(
         "\"{}\" install --legacy-peer-deps --omit=dev --registry=https://registry.npmmirror.com --prefix \"{}\"",
@@ -1064,10 +1106,10 @@ pub async fn install_dependencies(app: AppHandle, install_path: String) -> Insta
 
     let _ = app.emit("install-output", serde_json::json!({
         "type": "stdout",
-        "data": format!("正在安装依赖包...\n项目目录: {install_path}\n使用 npm: {npm_path}\n")
+        "data": format!("正在安装依赖包...\n项目目录: {install_path}\n使用 npm: {npm_path}\n使用 node: {node_path}\n")
     }));
 
-    let code_mirror = run_streamed_to_event(&app, &cmd_mirror, &[], "install-output").unwrap_or(1);
+    let code_mirror = run_streamed_to_event(&app, &cmd_mirror, &env_path, "install-output").unwrap_or(1);
     if code_mirror == 0 {
         return InstallResult {
             success: true,
@@ -1081,7 +1123,7 @@ pub async fn install_dependencies(app: AppHandle, install_path: String) -> Insta
         "type": "stderr",
         "data": format!("\n镜像源安装失败（退出码 {code_mirror}），正在切换官方源重试...\n")
     }));
-    let code_official = run_streamed_to_event(&app, &cmd_official, &[], "install-output").unwrap_or(1);
+    let code_official = run_streamed_to_event(&app, &cmd_official, &env_path, "install-output").unwrap_or(1);
 
     if code_official == 0 {
         InstallResult {

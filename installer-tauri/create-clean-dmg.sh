@@ -67,6 +67,7 @@ tell application "Finder"
         set viewOptions to the icon view options of container window
         set arrangement of viewOptions to not arranged
         set icon size of viewOptions to 96
+        set text size of viewOptions to 13
         try
             set background picture of viewOptions to file ".background:background.png"
         end try
@@ -78,9 +79,9 @@ tell application "Finder"
             set background picture of the icon view options of container window to file ".background:background.png"
         end try
     end tell
-    -- Position the app icon in center
+    -- Position the app icon at true center of 660x400 window
     try
-        set position of item "ScreenSync Installer.app" of disk volName to {330, 210}
+        set position of item "ScreenSync Installer.app" of disk volName to {330, 185}
     end try
     delay 0.5
     tell disk volName

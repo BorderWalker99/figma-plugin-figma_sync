@@ -884,7 +884,6 @@
         </div>
       </div>
 
-      <div class="log-container" id="installLog" style="display: none;"></div>
       <div id="installErrorAlert" style="display: none;"></div>
 
       <div class="button-group" id="step3Buttons" style="display: none;">
@@ -965,6 +964,24 @@
       <div class="modal-message" id="modalMessage">内容</div>
       <div class="modal-actions">
         <button class="btn btn-primary" id="alertCloseBtn">我知道了</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="errorDetailOverlay" class="overlay">
+    <div class="modal" style="width: 460px; max-height: 80vh; text-align: left;">
+      <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+        <div>
+          <div class="modal-title" style="font-size: 16px; margin-bottom: 4px;">失败详情</div>
+          <div style="font-size: 12px; color: var(--text-secondary);">请把失败日志复制发送给开发者</div>
+        </div>
+        <button class="btn" id="errorDetailCopyBtn" style="min-width: auto; padding: 6px 14px; font-size: 12px; flex-shrink: 0;">
+          复制日志
+        </button>
+      </div>
+      <div id="errorDetailContent" style="background: #1a1a1a; color: #d4d4d4; padding: 14px; border-radius: 8px; font-family: 'SF Mono', Monaco, Menlo, monospace; font-size: 11px; max-height: 45vh; overflow-y: auto; white-space: pre-wrap; word-break: break-all; margin-top: 12px; border: 1px solid var(--border);"></div>
+      <div style="display: flex; justify-content: flex-end; margin-top: 12px;">
+        <button class="btn btn-primary" id="errorDetailCloseBtn" style="padding: 8px 20px;">关闭</button>
       </div>
     </div>
   </div>

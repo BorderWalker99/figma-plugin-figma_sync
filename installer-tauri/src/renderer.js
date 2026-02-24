@@ -341,6 +341,8 @@ async function installMissingDependencies() {
   }
 }
 
+let _installLogBuffer = [];
+
 async function installDependencies() {
   const progressBar = document.getElementById('installProgress');
   const errorAlert = document.getElementById('installErrorAlert');
@@ -350,12 +352,15 @@ async function installDependencies() {
   errorAlert.innerHTML = '';
   progressBar.classList.remove('success');
   progressBar.style.width = '10%';
-  if (statusLabel) statusLabel.textContent = '正在安装依赖...';
+  if (statusLabel) statusLabel.textContent = '正在安装...';
+  _installLogBuffer = [];
 
   let currentProgress = 10;
 
   const unlistenOutput = await listen('install-output', (event) => {
-    const lines = (event.payload.data || '').split('\n').length;
+    const data = event.payload.data || '';
+    _installLogBuffer.push(data);
+    const lines = data.split('\n').length;
     const progress = 10 + (lines / 2);
     if (progress > currentProgress) {
       currentProgress = Math.min(progress, 95);
@@ -363,7 +368,15 @@ async function installDependencies() {
     }
   });
 
-  const result = await invoke('install_dependencies', { installPath });
+  // ── Mock failure for walkthrough testing ──
+  // Set window._mockInstallFail = true in console before reaching Step 3
+  let result;
+  if (window._mockInstallFail) {
+    _installLogBuffer.push('MOCK: npm ERR! code ERESOLVE\nMOCK: npm ERR! ERESOLVE unable to resolve dependency tree\nMOCK: npm ERR! Could not resolve dependency:\nMOCK: npm ERR! peer react@"^17.0.0" from react-dom@17.0.2\n');
+    result = { success: false, error: 'npm install 失败（镜像源退出码 1，官方源退出码 1）。Mock 测试。' };
+  } else {
+    result = await invoke('install_dependencies', { installPath });
+  }
   unlistenOutput();
 
   if (result.success) {
@@ -372,22 +385,25 @@ async function installDependencies() {
     if (statusLabel) statusLabel.textContent = '依赖安装完成';
     document.getElementById('step3Next').disabled = false;
   } else {
-    errorAlert.innerHTML = `
-      <div class="alert alert-error">
-        <div class="alert-icon" style="flex-shrink: 0; color: var(--danger);">
-          <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="currentColor"/><path d="M12 8v5M12 16.5v.5" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </div>
-        <div>
-          <div style="font-weight: 600; margin-bottom: 4px;">依赖安装失败</div>
-          <div style="opacity: 0.9; font-size: 12px; white-space: pre-wrap;">${result.error}</div>
-        </div>
-      </div>`;
-    errorAlert.style.display = 'block';
+    _installLogBuffer.push('\n--- 错误信息 ---\n' + (result.error || '未知错误'));
     progressBar.style.width = '0%';
-    if (statusLabel) statusLabel.textContent = '安装失败';
+    if (statusLabel) {
+      statusLabel.innerHTML = `<span style="color: var(--danger);">安装失败</span><span style="display: inline-block; width: 8px;"></span><a id="viewErrorLink" href="#" style="color: var(--accent); font-size: 12px; text-decoration: underline; cursor: pointer;">查看原因</a>`;
+      document.getElementById('viewErrorLink').addEventListener('click', (e) => {
+        e.preventDefault();
+        showErrorDetailModal(_installLogBuffer.join(''));
+      });
+    }
   }
 
   document.getElementById('step3Buttons').style.display = 'flex';
+}
+
+function showErrorDetailModal(logText) {
+  const overlay = document.getElementById('errorDetailOverlay');
+  const content = document.getElementById('errorDetailContent');
+  content.textContent = logText || '（无日志）';
+  overlay.classList.add('show');
 }
 
 async function setupConfiguration() {
@@ -494,6 +510,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   bind('step4Next', () => window.nextStep());
   bind('step5Finish', () => window.finishInstallation());
   bind('alertCloseBtn', () => window.closeAlert());
+  bind('errorDetailCloseBtn', () => {
+    document.getElementById('errorDetailOverlay').classList.remove('show');
+  });
+  bind('errorDetailCopyBtn', () => {
+    const text = document.getElementById('errorDetailContent').textContent;
+    if (invoke) {
+      invoke('copy_to_clipboard', { text }).then(() => showToast('日志已复制', 'success')).catch(() => {});
+    }
+  });
 
   try {
     await detectProjectRoot();
