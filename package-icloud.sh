@@ -84,6 +84,7 @@ echo -e "${YELLOW}📄 复制核心文件（双模式版本）...${NC}"
 cp server.js "$TEMP_DIR/项目文件/"
 cp userConfig.js "$TEMP_DIR/项目文件/"
 cp start.js "$TEMP_DIR/项目文件/"
+cp setup-autostart.js "$TEMP_DIR/项目文件/"
 cp update-manager.js "$TEMP_DIR/项目文件/"
 # Google Drive 模式需要的文件
 cp drive-watcher.js "$TEMP_DIR/项目文件/"

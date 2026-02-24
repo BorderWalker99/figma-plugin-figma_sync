@@ -445,12 +445,23 @@ window.finishInstallation = async function() {
     button.classList.add('keep-raised');
     button.disabled = true;
 
+    // Keep Electron installer behavior: start server first, then configure autostart.
+    button.textContent = '正在启动服务器...';
+    const startResult = await invoke('start_server', { installPath });
+    if (!startResult.success) {
+      button.classList.remove('keep-raised');
+      button.disabled = false;
+      button.textContent = originalText;
+      showToast(startResult.error || '服务器启动失败', 'error');
+      return;
+    }
+
     if (selectedMode === 'icloud') {
       button.textContent = '正在配置 iCloud 文件夹';
       await invoke('setup_icloud_keep_downloaded');
     }
 
-    button.textContent = '正在启动服务器...';
+    button.textContent = '正在配置自启动...';
     const autostartResult = await invoke('setup_autostart', { installPath });
 
     if (autostartResult.success) {
@@ -458,8 +469,8 @@ window.finishInstallation = async function() {
       showToast(autostartResult.message || '服务已启动并配置自启动', 'success');
       setTimeout(() => invoke('quit_app'), 1500);
     } else {
-      button.textContent = '启动失败';
-      showToast(autostartResult.error || '自启动配置失败', 'error');
+      button.textContent = '启动成功（自启失败）';
+      showToast(autostartResult.error || '服务器已启动，自启动配置失败', 'error');
       setTimeout(() => invoke('quit_app'), 2000);
     }
   } catch (err) {

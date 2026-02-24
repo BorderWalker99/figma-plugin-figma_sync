@@ -37,6 +37,15 @@ pub struct InstallResult {
 }
 
 #[derive(Deserialize)]
+struct NodeAutostartResult {
+    success: bool,
+    #[serde(default)]
+    message: Option<String>,
+    #[serde(default)]
+    error: Option<String>,
+}
+
+#[derive(Deserialize)]
 pub struct DependencyStatus {
     #[serde(default)]
     homebrew: bool,
@@ -1249,6 +1258,66 @@ pub fn setup_autostart(install_path: String) -> InstallResult {
             else { "/usr/local/bin/node".into() }
         });
 
+    // Root-cause fix: run Node-based autostart setup script (same approach as Electron).
+    // If script is available in install path, trust it as the primary implementation.
+    let node_setup_script = Path::new(&install_path).join("setup-autostart.js");
+    if node_setup_script.exists() {
+        match Command::new(&node_path)
+            .arg(node_setup_script.to_string_lossy().to_string())
+            .arg(install_path.clone())
+            .output()
+        {
+            Ok(output) => {
+                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                let json_line = stdout
+                    .lines()
+                    .rev()
+                    .find(|line| !line.trim().is_empty())
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
+
+                if let Ok(parsed) = serde_json::from_str::<NodeAutostartResult>(&json_line) {
+                    return InstallResult {
+                        success: parsed.success,
+                        message: parsed.message,
+                        error: parsed.error,
+                        cancelled: None,
+                    };
+                }
+
+                if output.status.success() {
+                    return InstallResult {
+                        success: true,
+                        message: Some("服务器已启动并配置为开机自动启动".into()),
+                        error: None,
+                        cancelled: None,
+                    };
+                }
+
+                return InstallResult {
+                    success: false,
+                    message: None,
+                    error: Some(format!(
+                        "Node 自启动脚本执行失败\nstdout: {}\nstderr: {}",
+                        stdout.trim(),
+                        stderr.trim()
+                    )),
+                    cancelled: None,
+                };
+            }
+            Err(e) => {
+                return InstallResult {
+                    success: false,
+                    message: None,
+                    error: Some(format!("无法执行 Node 自启动脚本: {e}")),
+                    cancelled: None,
+                };
+            }
+        }
+    }
+
     let home = home_dir();
     let agents_dir = home.join("Library/LaunchAgents");
     fs::create_dir_all(&agents_dir).ok();
@@ -1319,15 +1388,36 @@ pub fn setup_autostart(install_path: String) -> InstallResult {
     let _ = run_cmd("lsof -ti :8888 | xargs kill -9 2>/dev/null");
     std::thread::sleep(std::time::Duration::from_millis(500));
 
-    // Unload previous agent (if any), then load the new one.
-    let _ = run_cmd(&format!("launchctl unload \"{}\" 2>/dev/null", plist_path.display()));
-    std::thread::sleep(std::time::Duration::from_millis(500));
-    let load_result = run_cmd(&format!("launchctl load \"{}\"", plist_path.display()));
+    // Prefer modern launchctl flow (bootstrap/kickstart), fallback to legacy load/unload.
+    let label = "com.screensync.server";
+    let mut launch_loaded = false;
 
-    if load_result.is_err() {
+    if let Ok(uid) = run_cmd("id -u") {
+        if !uid.is_empty() {
+            let domain = format!("gui/{uid}");
+            let _ = run_cmd(&format!("launchctl bootout {domain}/{label} 2>/dev/null"));
+            std::thread::sleep(std::time::Duration::from_millis(300));
+
+            if run_cmd(&format!("launchctl bootstrap {domain} \"{}\"", plist_path.display())).is_ok() {
+                let _ = run_cmd(&format!("launchctl enable {domain}/{label} 2>/dev/null"));
+                let _ = run_cmd(&format!("launchctl kickstart -k {domain}/{label} 2>/dev/null"));
+                launch_loaded = true;
+            }
+        }
+    }
+
+    if !launch_loaded {
+        let _ = run_cmd(&format!("launchctl unload \"{}\" 2>/dev/null", plist_path.display()));
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        if run_cmd(&format!("launchctl load \"{}\"", plist_path.display())).is_ok() {
+            launch_loaded = true;
+        }
+    }
+
+    if !launch_loaded {
         return InstallResult {
             success: false, message: None,
-            error: Some("LaunchAgent 加载失败".into()), cancelled: None,
+            error: Some("LaunchAgent 加载失败（bootstrap/load 均失败）".into()), cancelled: None,
         };
     }
 
@@ -1368,9 +1458,10 @@ pub fn setup_autostart(install_path: String) -> InstallResult {
     }
 
     InstallResult {
-        success: true,
-        message: Some("自启动已配置，服务器正在启动中".into()),
-        error: None, cancelled: None,
+        success: false,
+        message: None,
+        error: Some("自启动配置已写入，但服务器未能启动。请检查 /tmp/screensync-server-error.log".into()),
+        cancelled: None,
     }
 }
 

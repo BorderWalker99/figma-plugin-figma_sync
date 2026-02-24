@@ -102,6 +102,7 @@ create_package() {
     cp userConfig.js "$TEMP_DIR/项目文件/"
     cp serviceAccountKey.js "$TEMP_DIR/项目文件/" 2>/dev/null || true
     cp start.js "$TEMP_DIR/项目文件/"
+    cp setup-autostart.js "$TEMP_DIR/项目文件/"
     cp update-manager.js "$TEMP_DIR/项目文件/"
     cp update-handlers.js "$TEMP_DIR/项目文件/"
     cp gif-composer.js "$TEMP_DIR/项目文件/"
