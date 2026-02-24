@@ -318,6 +318,23 @@ pub fn get_project_root() -> Option<String> {
         }
     }
 
+    // Strategy 5: Scan common extraction locations (~/Downloads, ~/Desktop)
+    let home = home_dir();
+    for base in &["Downloads", "Desktop"] {
+        let base_dir = home.join(base);
+        if let Ok(entries) = fs::read_dir(&base_dir) {
+            for entry in entries.filter_map(|e| e.ok()) {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.starts_with("ScreenSync") && entry.file_type().map_or(false, |t| t.is_dir()) {
+                    let pf = entry.path().join("项目文件");
+                    if pf.join("package.json").exists() {
+                        return found(pf.to_string_lossy().to_string());
+                    }
+                }
+            }
+        }
+    }
+
     None
 }
 
@@ -340,17 +357,30 @@ fn find_dmg_source_dir(volume_path: &str) -> Option<String> {
         .ok()?;
     let info = String::from_utf8_lossy(&output.stdout);
 
+    // hdiutil info outputs blocks per image. We need to match the block that
+    // contains our volume mount point. Each block starts with "====" and has
+    // "image-path" near the top and mount entries at the bottom.
     let mut image_path: Option<String> = None;
 
     for line in info.lines() {
         let trimmed = line.trim();
+        // Reset on block boundary
+        if trimmed.starts_with("====") {
+            image_path = None;
+            continue;
+        }
         if trimmed.starts_with("image-path") {
-            if let Some(p) = trimmed.split(':').nth(1) {
-                image_path = Some(p.trim().to_string());
+            // Format: "image-path      : /path/to/file.dmg"
+            // Split on first colon only to handle paths with colons
+            if let Some(idx) = trimmed.find(':') {
+                let p = trimmed[idx + 1..].trim();
+                if !p.is_empty() {
+                    image_path = Some(p.to_string());
+                }
             }
         }
+        // Check if this line contains our mount point
         if trimmed.contains(volume_path) {
-            // Found the mount point — the most recent image-path above is the DMG file
             if let Some(ref dmg_path) = image_path {
                 return Path::new(dmg_path)
                     .parent()

@@ -31,31 +31,33 @@ g.drawLinearGradient(gradient,
     end: CGPoint(x: 0, y: 0),
     options: [])
 
-// ── Subtle glow behind app icon area ──
-let appCx = CGFloat(W) / 2.0
-let appCy = CGFloat(H) * 0.42  // where the icon sits
-for radius in stride(from: 200.0, through: 20.0, by: -10.0) {
-    let alpha = 0.015 * (1.0 - radius / 200.0)
+// App icon position: (330, 210) in DMG point coords → (660, 420) in @2x pixels
+// In CoreGraphics (origin bottom-left): (660, 800-420) = (660, 380)
+let iconCx: CGFloat = 660
+let iconCy: CGFloat = 380
+
+// ── Subtle glow behind app icon ──
+for radius in stride(from: 180.0, through: 20.0, by: -10.0) {
+    let alpha = 0.018 * (1.0 - radius / 180.0)
     g.setFillColor(CGColor(red: 0.25, green: 0.83, blue: 0.41, alpha: CGFloat(alpha)))
     g.fillEllipse(in: CGRect(
-        x: appCx - CGFloat(radius),
-        y: appCy - CGFloat(radius),
+        x: iconCx - CGFloat(radius),
+        y: iconCy - CGFloat(radius),
         width: CGFloat(radius) * 2,
         height: CGFloat(radius) * 2
     ))
 }
 
-// ── Arrow (bezier curve) ──
+// ── Single curved arrow pointing directly at the app icon ──
 let arrowColor = CGColor(red: 0.25, green: 0.83, blue: 0.41, alpha: 0.85)
 g.setStrokeColor(arrowColor)
 g.setLineWidth(5.0)
 g.setLineCap(.round)
 
-// Curved arrow from above-left to near the icon
 let arrowPath = CGMutablePath()
-let startPt = CGPoint(x: appCx - 280, y: appCy + 240)  // above-left
-let ctrlPt  = CGPoint(x: appCx - 200, y: appCy + 40)
-let endPt   = CGPoint(x: appCx - 80,  y: appCy + 60)
+let startPt = CGPoint(x: iconCx - 300, y: iconCy + 200)
+let ctrlPt  = CGPoint(x: iconCx - 180, y: iconCy - 20)
+let endPt   = CGPoint(x: iconCx - 60,  y: iconCy + 30)
 arrowPath.move(to: startPt)
 arrowPath.addQuadCurve(to: endPt, control: ctrlPt)
 g.addPath(arrowPath)
@@ -107,13 +109,6 @@ drawText("Double click to install",
     font: subFont,
     color: NSColor(red: 0.67, green: 0.67, blue: 0.80, alpha: 1.0),
     center: CGPoint(x: CGFloat(W) / 2, y: CGFloat(H) - 185))
-
-// "↓" down arrow indicator below title
-let arrowFont = NSFont(name: "PingFangSC-Light", size: 40) ?? NSFont.systemFont(ofSize: 40)
-drawText("↓",
-    font: arrowFont,
-    color: NSColor(red: 0.25, green: 0.83, blue: 0.41, alpha: 0.7),
-    center: CGPoint(x: CGFloat(W) / 2, y: CGFloat(H) - 240))
 
 // Bottom hint — accurate instructions for all macOS versions
 let hintFont = NSFont(name: "PingFangSC-Regular", size: 19) ?? NSFont.systemFont(ofSize: 19)

@@ -44,6 +44,10 @@ function showStep(step) {
 }
 
 window.nextStep = function() {
+  if (currentStep === 1 && !installPath) {
+    showToast('请先选择项目文件夹', 'error');
+    return;
+  }
   if (currentStep < 5) showStep(currentStep + 1);
 };
 
@@ -69,8 +73,12 @@ async function detectProjectRoot() {
 
 function showManualSelectionUI() {
   const step1 = document.getElementById('step1');
+  const nextBtn = document.getElementById('step1Next');
   const existingAlert = document.getElementById('pathAlert');
   if (existingAlert) existingAlert.remove();
+
+  // Disable the "开始安装" button until a path is selected
+  if (nextBtn) nextBtn.disabled = true;
 
   const alertDiv = document.createElement('div');
   alertDiv.id = 'pathAlert';
@@ -87,24 +95,20 @@ function showManualSelectionUI() {
   step1.insertBefore(alertDiv, step1.firstChild);
 
   document.getElementById('selectPathBtn').onclick = async () => {
-    const result = await invoke('select_project_root');
-    if (result.success && result.path) {
-      installPath = result.path;
-      showToast('已选择项目目录', 'success');
-      alertDiv.remove();
-    } else if (result.error) {
-      showToast(result.error, 'error');
+    try {
+      const result = await invoke('select_project_root');
+      if (result.success && result.path) {
+        installPath = result.path;
+        showToast('已选择项目目录: ' + result.path.split('/').pop(), 'success');
+        alertDiv.remove();
+        if (nextBtn) nextBtn.disabled = false;
+      } else if (result.error) {
+        showToast(result.error, 'error');
+      }
+    } catch (err) {
+      showToast('选择失败: ' + err, 'error');
     }
   };
-
-  const nextBtn = document.getElementById('step1Next');
-  if (nextBtn) {
-    const originalOnClick = nextBtn.onclick;
-    nextBtn.onclick = (e) => {
-      if (!installPath) { showToast('请先选择项目文件夹', 'error'); return; }
-      if (originalOnClick) originalOnClick.call(nextBtn, e);
-    };
-  }
 }
 
 window.selectMode = function(mode) {
