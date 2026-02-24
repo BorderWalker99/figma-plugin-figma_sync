@@ -14,6 +14,8 @@
         "title": "ScreenSync 安装向导",
         "width": 600,
         "height": 500,
+        "minWidth": 600,
+        "minHeight": 500,
         "resizable": false,
         "fullscreen": false,
         "transparent": true,

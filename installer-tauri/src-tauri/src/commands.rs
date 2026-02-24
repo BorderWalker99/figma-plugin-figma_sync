@@ -190,8 +190,22 @@ fn send_log(app: &AppHandle, data: &str) {
     let _ = app.emit("dep-install-log", LogEvent { data: data.to_string() });
 }
 
+fn send_log_to_event(app: &AppHandle, event_name: &str, data: &str) {
+    let _ = app.emit(event_name, LogEvent { data: data.to_string() });
+}
+
 /// Stream a shell command's stdout/stderr to the frontend log.
 fn run_streamed(app: &AppHandle, cmd: &str, env_extra: &[(&str, &str)]) -> Result<i32, String> {
+    run_streamed_to_event(app, cmd, env_extra, "dep-install-log")
+}
+
+/// Stream a shell command's stdout/stderr to a specified event channel.
+fn run_streamed_to_event(
+    app: &AppHandle,
+    cmd: &str,
+    env_extra: &[(&str, &str)],
+    event_name: &'static str,
+) -> Result<i32, String> {
     let mut child_cmd = Command::new("/bin/bash");
     child_cmd
         .args(["-c", cmd])
@@ -205,12 +219,13 @@ fn run_streamed(app: &AppHandle, cmd: &str, env_extra: &[(&str, &str)]) -> Resul
     // Stream stdout
     if let Some(stdout) = child.stdout.take() {
         let app_clone = app.clone();
+        let event_name = event_name;
         std::thread::spawn(move || {
             let reader = BufReader::new(stdout);
             for line in reader.lines() {
                 if let Ok(line) = line {
                     if !line.trim().is_empty() {
-                        send_log(&app_clone, &format!("{line}\n"));
+                        send_log_to_event(&app_clone, event_name, &format!("{line}\n"));
                     }
                 }
             }
@@ -219,12 +234,13 @@ fn run_streamed(app: &AppHandle, cmd: &str, env_extra: &[(&str, &str)]) -> Resul
     // Stream stderr
     if let Some(stderr) = child.stderr.take() {
         let app_clone = app.clone();
+        let event_name = event_name;
         std::thread::spawn(move || {
             let reader = BufReader::new(stderr);
             for line in reader.lines() {
                 if let Ok(line) = line {
                     if !line.trim().is_empty() {
-                        send_log(&app_clone, &format!("{line}\n"));
+                        send_log_to_event(&app_clone, event_name, &format!("{line}\n"));
                     }
                 }
             }
@@ -996,7 +1012,10 @@ fn num_cpus() -> usize {
 
 #[tauri::command]
 pub async fn install_dependencies(app: AppHandle, install_path: String) -> InstallResult {
-    if !Path::new(&install_path).join("package.json").exists() {
+    inject_local_path();
+
+    let install_dir = Path::new(&install_path);
+    if !install_dir.join("package.json").exists() {
         return InstallResult {
             success: false, message: None,
             error: Some(format!("未找到 package.json: {install_path}")),
@@ -1004,25 +1023,82 @@ pub async fn install_dependencies(app: AppHandle, install_path: String) -> Insta
         };
     }
 
+    // Detect read-only directory early (common when user selected mounted DMG path).
+    let write_probe = install_dir.join(".screensync_write_test");
+    if std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&write_probe)
+        .is_err()
+    {
+        let is_volume_path = install_path.starts_with("/Volumes/");
+        let hint = if is_volume_path {
+            "当前目录在只读 DMG 挂载盘中。请先解压 tar.gz 到本地目录，再从解压目录运行安装器。"
+        } else {
+            "当前目录不可写，请确认对项目目录有读写权限。"
+        };
+        return InstallResult {
+            success: false,
+            message: None,
+            error: Some(format!("无法写入项目目录：{install_path}\n{hint}")),
+            cancelled: None,
+        };
+    }
+    let _ = fs::remove_file(&write_probe);
+
     let npm_path = find_executable("npm")
         .unwrap_or_else(|| {
             if is_apple_silicon() { "/opt/homebrew/bin/npm".into() }
             else { "/usr/local/bin/npm".into() }
         });
 
-    let cmd = format!(
+    let cmd_mirror = format!(
         "\"{}\" install --legacy-peer-deps --omit=dev --registry=https://registry.npmmirror.com --prefix \"{}\"",
         npm_path, install_path
     );
+    let cmd_official = format!(
+        "\"{}\" install --legacy-peer-deps --omit=dev --prefix \"{}\"",
+        npm_path, install_path
+    );
 
-    let _ = app.emit("install-output", serde_json::json!({ "type": "stdout", "data": "正在安装依赖包...\n" }));
+    let _ = app.emit("install-output", serde_json::json!({
+        "type": "stdout",
+        "data": format!("正在安装依赖包...\n项目目录: {install_path}\n使用 npm: {npm_path}\n")
+    }));
 
-    let code = run_streamed(&app, &cmd, &[]).unwrap_or(1);
+    let code_mirror = run_streamed_to_event(&app, &cmd_mirror, &[], "install-output").unwrap_or(1);
+    if code_mirror == 0 {
+        return InstallResult {
+            success: true,
+            message: Some("依赖安装完成".into()),
+            error: None,
+            cancelled: None,
+        };
+    }
 
-    if code == 0 {
-        InstallResult { success: true, message: Some("依赖安装完成".into()), error: None, cancelled: None }
+    let _ = app.emit("install-output", serde_json::json!({
+        "type": "stderr",
+        "data": format!("\n镜像源安装失败（退出码 {code_mirror}），正在切换官方源重试...\n")
+    }));
+    let code_official = run_streamed_to_event(&app, &cmd_official, &[], "install-output").unwrap_or(1);
+
+    if code_official == 0 {
+        InstallResult {
+            success: true,
+            message: Some("依赖安装完成".into()),
+            error: None,
+            cancelled: None,
+        }
     } else {
-        InstallResult { success: false, message: None, error: Some("npm install 失败".into()), cancelled: None }
+        InstallResult {
+            success: false,
+            message: None,
+            error: Some(format!(
+                "npm install 失败（镜像源退出码 {code_mirror}，官方源退出码 {code_official}）。请查看上方日志定位具体错误。"
+            )),
+            cancelled: None,
+        }
     }
 }
 

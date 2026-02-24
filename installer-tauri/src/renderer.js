@@ -271,7 +271,7 @@ async function installMissingDependencies() {
     if (item) {
       item.className = 'status-item checking';
       item.innerHTML = `<div class="status-icon"><svg class="spinner" viewBox="0 0 24 24" style="opacity:0.3"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg></div>
-        <div class="status-content"><div class="status-label">${displayNames[dep]}</div><div class="status-detail" style="color: var(--text-tertiary);">等待安装...</div></div>`;
+        <div class="status-content"><div class="status-label">${displayNames[dep]}</div><div class="status-detail" style="color: var(--text-tertiary);">正在安装...</div></div>`;
     }
   }
 
@@ -284,7 +284,7 @@ async function installMissingDependencies() {
     if (status === 'installing' || status === 'password') {
       item.className = 'status-item checking';
       item.innerHTML = `<div class="status-icon"><svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg></div>
-        <div class="status-content"><div class="status-label">${displayNames[dep]}</div><div class="status-detail" style="color: var(--accent);">${message}</div></div>`;
+        <div class="status-content"><div class="status-label">${displayNames[dep]}</div><div class="status-detail" style="color: var(--accent);">正在安装...</div></div>`;
     } else if (status === 'done') {
       item.className = 'status-item success';
       item.innerHTML = `<div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
