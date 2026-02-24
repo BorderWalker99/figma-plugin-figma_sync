@@ -129,11 +129,10 @@ function cleanOldLaunchAgents() {
     if (!fs.statSync(plistPath).isFile()) continue;
 
     const label = f.replace(/\.plist$/, '');
+    run(`launchctl unload ${shQuote(plistPath)} 2>/dev/null`);
     if (domain) {
       run(`launchctl bootout ${domain}/${label} 2>/dev/null`);
-      run(`launchctl disable ${domain}/${label} 2>/dev/null`);
     }
-    run(`launchctl unload ${shQuote(plistPath)} 2>/dev/null`);
     try {
       fs.unlinkSync(plistPath);
     } catch (_) {}
@@ -201,6 +200,12 @@ function main() {
   // kill a running server process.  The LaunchAgent is only needed for future
   // reboots; the currently running server (started by start_server earlier in
   // the install flow) must stay alive.
+  // Re-enable the label first in case a previous run (or Electron cleanup) disabled it
+  if (uidRes.ok && uidRes.out) {
+    const domain = `gui/${uidRes.out}`;
+    run(`launchctl enable ${domain}/${label} 2>/dev/null`);
+  }
+
   run(`launchctl unload ${shQuote(plistPath)} 2>/dev/null`);
   sleepSec(1);
   const loadRes = run(`launchctl load ${shQuote(plistPath)}`);
@@ -214,7 +219,6 @@ function main() {
     sleepSec(1);
     const bootstrap = run(`launchctl bootstrap ${domain} ${shQuote(plistPath)}`);
     if (bootstrap.ok) {
-      run(`launchctl enable ${domain}/${label} 2>/dev/null`);
       loaded = true;
     }
   }

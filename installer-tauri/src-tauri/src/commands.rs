@@ -1448,10 +1448,16 @@ pub fn setup_autostart(install_path: String) -> InstallResult {
     // register the LaunchAgent for future reboots.
     let server_already_running = run_cmd_ok("lsof -i :8888 -sTCP:LISTEN");
 
-    // Use legacy launchctl load/unload (like Electron) — it does not kill the
-    // currently running server process.
     let label = "com.screensync.server";
     let mut launch_loaded = false;
+
+    // Re-enable the label first in case a previous install disabled it
+    if let Ok(uid) = run_cmd("id -u") {
+        if !uid.is_empty() {
+            let domain = format!("gui/{uid}");
+            let _ = run_cmd(&format!("launchctl enable {domain}/{label} 2>/dev/null"));
+        }
+    }
 
     let _ = run_cmd(&format!("launchctl unload \"{}\" 2>/dev/null", plist_path.display()));
     std::thread::sleep(std::time::Duration::from_millis(500));
@@ -1467,7 +1473,6 @@ pub fn setup_autostart(install_path: String) -> InstallResult {
                 std::thread::sleep(std::time::Duration::from_millis(300));
 
                 if run_cmd(&format!("launchctl bootstrap {domain} \"{}\"", plist_path.display())).is_ok() {
-                    let _ = run_cmd(&format!("launchctl enable {domain}/{label} 2>/dev/null"));
                     launch_loaded = true;
                 }
             }
