@@ -315,7 +315,17 @@ Homebrew 对此版本仅提供有限支持。
     const homebrewResult = await ipcRenderer.invoke('check-homebrew');
     dependencyStatus.homebrew = homebrewResult.installed;
     
-    if (homebrewResult.installed) {
+    if (homebrewResult.skipped) {
+      // Legacy macOS: Homebrew not needed, direct download mode
+      homebrewCheck.className = 'status-item success';
+      homebrewCheck.innerHTML = `
+        <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
+        <div class="status-content">
+          <div class="status-label">Homebrew</div>
+          <div class="status-detail" style="color: var(--text-tertiary);">无需安装（直接下载模式）</div>
+        </div>
+      `;
+    } else if (homebrewResult.installed) {
       homebrewCheck.className = 'status-item success';
       homebrewCheck.innerHTML = `
         <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>

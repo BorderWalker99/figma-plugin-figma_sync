@@ -393,11 +393,27 @@ function findExecutable(name) {
 }
 
 ipcMain.handle('check-homebrew', async () => {
-  return new Promise((resolve) => {
-    const brewPath = findExecutable('brew');
-    console.log('Check Homebrew:', brewPath);
-    resolve({ installed: !!brewPath });
-  });
+  const darwinVersion = parseInt(os.release().split('.')[0], 10);
+  const isLegacyMacOS = darwinVersion < 23;
+  if (isLegacyMacOS) {
+    return { installed: true, skipped: true };
+  }
+
+  const brewPath = findExecutable('brew');
+  if (!brewPath) {
+    console.log('Check Homebrew: not found');
+    return { installed: false };
+  }
+
+  // Verify brew actually works (catches stale binaries from incomplete uninstalls)
+  try {
+    require('child_process').execSync(`"${brewPath}" --version`, { encoding: 'utf8', timeout: 10000 });
+    console.log('Check Homebrew: verified at', brewPath);
+    return { installed: true };
+  } catch (e) {
+    console.log('Check Homebrew: binary found but broken at', brewPath, e.message);
+    return { installed: false };
+  }
 });
 
 ipcMain.handle('check-node', async () => {
@@ -698,12 +714,31 @@ async function installLegacyFFmpeg(sendProgress, sendLog) {
   fs.mkdirSync(tmpDir, { recursive: true });
 
   try {
-    // evermeet.cx provides Intel x64 static builds; on ARM they run via Rosetta 2
+    const arch = process.arch === 'arm64' ? 'arm64' : 'amd64';
     const ffmpegZip = path.join(tmpDir, 'ffmpeg.zip');
     const ffprobeZip = path.join(tmpDir, 'ffprobe.zip');
 
-    await downloadFile('https://evermeet.cx/ffmpeg/getrelease/zip', ffmpegZip, sendLog);
-    await downloadFile('https://evermeet.cx/ffmpeg/getrelease/ffprobe/zip', ffprobeZip, sendLog);
+    // martin-riedl.de: signed & notarized static builds with native ARM64 + Intel
+    const primaryUrls = [
+      [`https://ffmpeg.martin-riedl.de/redirect/latest/macos/${arch}/release/ffmpeg.zip`, ffmpegZip, 'FFmpeg'],
+      [`https://ffmpeg.martin-riedl.de/redirect/latest/macos/${arch}/release/ffprobe.zip`, ffprobeZip, 'FFprobe']
+    ];
+    // evermeet.cx as fallback (Intel x64 only; runs via Rosetta 2 on ARM)
+    const fallbackUrls = [
+      ['https://evermeet.cx/ffmpeg/getrelease/zip', ffmpegZip, 'FFmpeg'],
+      ['https://evermeet.cx/ffmpeg/getrelease/ffprobe/zip', ffprobeZip, 'FFprobe']
+    ];
+
+    for (let i = 0; i < primaryUrls.length; i++) {
+      const [primaryUrl, dest, label] = primaryUrls[i];
+      const [fallbackUrl] = fallbackUrls[i];
+      try {
+        await downloadFile(primaryUrl, dest, sendLog);
+      } catch (e) {
+        sendLog(`   ⚠️ ${label} 主下载源失败，尝试备用源...\n`);
+        await downloadFile(fallbackUrl, dest, sendLog);
+      }
+    }
 
     sendLog('   正在解压...\n');
     await execPromise(`unzip -o "${ffmpegZip}" -d "${LEGACY_BIN_DIR}"`);
