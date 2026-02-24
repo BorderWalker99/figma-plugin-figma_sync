@@ -1,0 +1,9 @@
+/Applications/ScreenSync - SourceCode/installer-tauri/src-tauri/target/release/deps/objc2_security-e3278805e50fe16f.d: /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/objc2-security-0.3.2/src/lib.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/objc2-security-0.3.2/src/generated/mod.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/objc2-security-0.3.2/src/generated/SecTrust.rs
+
+/Applications/ScreenSync - SourceCode/installer-tauri/src-tauri/target/release/deps/libobjc2_security-e3278805e50fe16f.rlib: /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/objc2-security-0.3.2/src/lib.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/objc2-security-0.3.2/src/generated/mod.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/objc2-security-0.3.2/src/generated/SecTrust.rs
+
+/Applications/ScreenSync - SourceCode/installer-tauri/src-tauri/target/release/deps/libobjc2_security-e3278805e50fe16f.rmeta: /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/objc2-security-0.3.2/src/lib.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/objc2-security-0.3.2/src/generated/mod.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/objc2-security-0.3.2/src/generated/SecTrust.rs
+
+/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/objc2-security-0.3.2/src/lib.rs:
+/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/objc2-security-0.3.2/src/generated/mod.rs:
+/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/objc2-security-0.3.2/src/generated/SecTrust.rs:

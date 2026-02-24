@@ -1,0 +1,10 @@
+/Applications/ScreenSync - SourceCode/installer-tauri/src-tauri/target/release/deps/time_core-30b1e25db4a628db.d: /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/time-core-0.1.8/src/lib.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/time-core-0.1.8/src/convert.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/time-core-0.1.8/src/hint.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/time-core-0.1.8/src/util.rs
+
+/Applications/ScreenSync - SourceCode/installer-tauri/src-tauri/target/release/deps/libtime_core-30b1e25db4a628db.rlib: /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/time-core-0.1.8/src/lib.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/time-core-0.1.8/src/convert.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/time-core-0.1.8/src/hint.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/time-core-0.1.8/src/util.rs
+
+/Applications/ScreenSync - SourceCode/installer-tauri/src-tauri/target/release/deps/libtime_core-30b1e25db4a628db.rmeta: /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/time-core-0.1.8/src/lib.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/time-core-0.1.8/src/convert.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/time-core-0.1.8/src/hint.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/time-core-0.1.8/src/util.rs
+
+/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/time-core-0.1.8/src/lib.rs:
+/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/time-core-0.1.8/src/convert.rs:
+/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/time-core-0.1.8/src/hint.rs:
+/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/time-core-0.1.8/src/util.rs:

@@ -1,0 +1,10 @@
+/Applications/ScreenSync - SourceCode/installer-tauri/src-tauri/target/release/deps/idna-36099fff010ea24d.d: /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/idna-1.1.0/src/lib.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/idna-1.1.0/src/deprecated.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/idna-1.1.0/src/punycode.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/idna-1.1.0/src/uts46.rs
+
+/Applications/ScreenSync - SourceCode/installer-tauri/src-tauri/target/release/deps/libidna-36099fff010ea24d.rlib: /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/idna-1.1.0/src/lib.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/idna-1.1.0/src/deprecated.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/idna-1.1.0/src/punycode.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/idna-1.1.0/src/uts46.rs
+
+/Applications/ScreenSync - SourceCode/installer-tauri/src-tauri/target/release/deps/libidna-36099fff010ea24d.rmeta: /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/idna-1.1.0/src/lib.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/idna-1.1.0/src/deprecated.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/idna-1.1.0/src/punycode.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/idna-1.1.0/src/uts46.rs
+
+/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/idna-1.1.0/src/lib.rs:
+/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/idna-1.1.0/src/deprecated.rs:
+/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/idna-1.1.0/src/punycode.rs:
+/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/idna-1.1.0/src/uts46.rs:

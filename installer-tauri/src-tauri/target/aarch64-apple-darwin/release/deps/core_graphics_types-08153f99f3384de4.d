@@ -1,0 +1,9 @@
+/Applications/ScreenSync - SourceCode/installer-tauri/src-tauri/target/aarch64-apple-darwin/release/deps/core_graphics_types-08153f99f3384de4.d: /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/core-graphics-types-0.2.0/src/lib.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/core-graphics-types-0.2.0/src/base.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/core-graphics-types-0.2.0/src/geometry.rs
+
+/Applications/ScreenSync - SourceCode/installer-tauri/src-tauri/target/aarch64-apple-darwin/release/deps/libcore_graphics_types-08153f99f3384de4.rlib: /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/core-graphics-types-0.2.0/src/lib.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/core-graphics-types-0.2.0/src/base.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/core-graphics-types-0.2.0/src/geometry.rs
+
+/Applications/ScreenSync - SourceCode/installer-tauri/src-tauri/target/aarch64-apple-darwin/release/deps/libcore_graphics_types-08153f99f3384de4.rmeta: /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/core-graphics-types-0.2.0/src/lib.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/core-graphics-types-0.2.0/src/base.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/core-graphics-types-0.2.0/src/geometry.rs
+
+/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/core-graphics-types-0.2.0/src/lib.rs:
+/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/core-graphics-types-0.2.0/src/base.rs:
+/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/core-graphics-types-0.2.0/src/geometry.rs:

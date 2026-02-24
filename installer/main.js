@@ -998,98 +998,121 @@ ipcMain.handle('install-all-dependencies', async (event, dependencyStatus) => {
         return { success: false, error: '已取消密码输入', cancelled: true };
       }
 
-      sendProgress('homebrew', 'installing', '正在安装 Homebrew...');
+      sendProgress('homebrew', 'installing', '正在验证密码...');
       sendLog('📦 正在安装 Homebrew...\n');
 
       const isAppleSilicon = process.arch === 'arm64';
       const brewBin = isAppleSilicon ? '/opt/homebrew/bin' : '/usr/local/bin';
       const escapedPass = escapeForBash(password);
 
-      const brewScript = [
-        `echo '${escapedPass}' | sudo -S -v 2>/dev/null`,
-        `if [ $? -ne 0 ]; then echo "SUDO_AUTH_FAILED"; exit 1; fi`,
-        `echo "✅ 密码验证成功"`,
-        `export NONINTERACTIVE=1`,
-        `export CI=1`,
-        // Tsinghua mirror for Homebrew (raw.githubusercontent.com is blocked/slow in China)
-        `export HOMEBREW_BREW_GIT_REMOTE="https://mirrors.tuna.tsinghua.edu.cn/git/homebrew/brew.git"`,
-        `export HOMEBREW_CORE_GIT_REMOTE="https://mirrors.tuna.tsinghua.edu.cn/git/homebrew/homebrew-core.git"`,
-        `export HOMEBREW_API_DOMAIN="https://mirrors.tuna.tsinghua.edu.cn/homebrew-bottles/api"`,
-        `export HOMEBREW_BOTTLE_DOMAIN="https://mirrors.tuna.tsinghua.edu.cn/homebrew-bottles"`,
-        `echo "📦 正在下载并安装 Homebrew（可能需要几分钟）..."`,
-        // Try Tsinghua mirror first, fall back to GitHub
-        `INSTALL_SCRIPT=$(curl -fsSL --connect-timeout 10 https://mirrors.tuna.tsinghua.edu.cn/git/homebrew/install/raw/HEAD/install.sh 2>/dev/null)`,
-        `if [ -z "$INSTALL_SCRIPT" ]; then`,
-        `  echo "⚠️ 镜像源不可用，尝试 GitHub..."`,
-        `  INSTALL_SCRIPT=$(curl -fsSL --connect-timeout 15 https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)`,
-        `fi`,
-        `if [ -z "$INSTALL_SCRIPT" ]; then echo "❌ 无法下载 Homebrew 安装脚本"; exit 1; fi`,
-        `/bin/bash -c "$INSTALL_SCRIPT"`,
-        `BREW_EXIT=$?`,
-        `sudo -k 2>/dev/null || true`,
-        isAppleSilicon ? [
-          `if [ -f /opt/homebrew/bin/brew ]; then`,
-          `  eval "$(/opt/homebrew/bin/brew shellenv)"`,
-          `  echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile 2>/dev/null || true`,
-          `  echo "✅ Homebrew PATH 已配置"`,
-          `fi`
-        ].join('\n') : '',
-        `exit $BREW_EXIT`
-      ].filter(Boolean).join('\n');
+      // Create a temporary SUDO_ASKPASS helper script.
+      // Homebrew's install.sh natively checks for SUDO_ASKPASS and adds -A flag.
+      // When no TTY is available (Electron spawn), sudo also auto-uses askpass.
+      // This eliminates the need for the `script` PTY utility entirely.
+      const askpassDir = path.join(os.tmpdir(), `screensync_askpass_${Date.now()}`);
+      fs.mkdirSync(askpassDir, { recursive: true });
+      const askpassPath = path.join(askpassDir, 'askpass.sh');
+      fs.writeFileSync(askpassPath, `#!/bin/bash\necho '${escapedPass}'\n`, { mode: 0o700 });
 
-      await new Promise((resolve, reject) => {
-        const child = spawn('script', ['-q', '/dev/null', '/bin/bash', '-c', brewScript], {
-          env: { ...process.env, NONINTERACTIVE: '1', CI: '1' }
-        });
+      try {
+        // Step 1: Validate password before starting long install
+        sendLog('   正在验证密码...\n');
+        try {
+          await execPromise(`SUDO_ASKPASS="${askpassPath}" /usr/bin/sudo -A -v`, { timeout: 15000 });
+          sendLog('   ✅ 密码验证成功\n');
+        } catch (e) {
+          sendProgress('homebrew', 'error', '密码错误');
+          throw new Error('密码验证失败，请检查密码后重试');
+        }
 
-        const timeout = setTimeout(() => {
-          try { child.kill('SIGTERM'); } catch (e) {}
-          reject(new Error('Homebrew 安装超时（15分钟）'));
-        }, 15 * 60 * 1000);
+        // Step 2: Download and run Homebrew installer
+        sendProgress('homebrew', 'installing', '正在安装 Homebrew...');
 
-        let allOutput = '';
-        let stdoutEnded = false;
-        let exitCode = null;
+        const brewScript = [
+          `echo "📦 正在下载并安装 Homebrew（可能需要几分钟）..."`,
+          // Try Tsinghua mirror first, fall back to GitHub
+          `INSTALL_SCRIPT=$(curl -fsSL --connect-timeout 10 https://mirrors.tuna.tsinghua.edu.cn/git/homebrew/install/raw/HEAD/install.sh 2>/dev/null)`,
+          `if [ -z "$INSTALL_SCRIPT" ]; then`,
+          `  echo "⚠️ 镜像源不可用，尝试 GitHub..."`,
+          `  INSTALL_SCRIPT=$(curl -fsSL --connect-timeout 15 https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)`,
+          `fi`,
+          `if [ -z "$INSTALL_SCRIPT" ]; then echo "❌ 无法下载 Homebrew 安装脚本"; exit 1; fi`,
+          `/bin/bash -c "$INSTALL_SCRIPT"`,
+          `BREW_EXIT=$?`,
+          `/usr/bin/sudo -k 2>/dev/null || true`,
+          isAppleSilicon ? [
+            `if [ -f /opt/homebrew/bin/brew ]; then`,
+            `  eval "$(/opt/homebrew/bin/brew shellenv)"`,
+            `  echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile 2>/dev/null || true`,
+            `  echo "✅ Homebrew PATH 已配置"`,
+            `fi`
+          ].join('\n') : '',
+          `exit $BREW_EXIT`
+        ].filter(Boolean).join('\n');
 
-        // Buffer all output — close can fire before data events finish
-        const tryFinish = () => {
-          if (!stdoutEnded || exitCode === null) return;
-          clearTimeout(timeout);
-
-          if (allOutput.includes('SUDO_AUTH_FAILED')) {
-            sendProgress('homebrew', 'error', '密码错误');
-            reject(new Error('密码验证失败，请重试'));
-          } else if (exitCode === 0) {
-            sendProgress('homebrew', 'done', '安装完成');
-            sendLog('\n✅ Homebrew 安装完成\n');
-            if (fs.existsSync(path.join(brewBin, 'brew'))) {
-              process.env.PATH = `${brewBin}:${process.env.PATH}`;
+        await new Promise((resolve, reject) => {
+          const child = spawn('/bin/bash', ['-c', brewScript], {
+            env: {
+              ...process.env,
+              NONINTERACTIVE: '1',
+              CI: '1',
+              SUDO_ASKPASS: askpassPath,
+              HOMEBREW_BREW_GIT_REMOTE: 'https://mirrors.tuna.tsinghua.edu.cn/git/homebrew/brew.git',
+              HOMEBREW_CORE_GIT_REMOTE: 'https://mirrors.tuna.tsinghua.edu.cn/git/homebrew/homebrew-core.git',
+              HOMEBREW_API_DOMAIN: 'https://mirrors.tuna.tsinghua.edu.cn/homebrew-bottles/api',
+              HOMEBREW_BOTTLE_DOMAIN: 'https://mirrors.tuna.tsinghua.edu.cn/homebrew-bottles'
             }
-            resolve();
-          } else {
-            const hint = allOutput.includes('curl') ? '（网络连接失败，请检查网络或使用代理）' : '';
-            sendProgress('homebrew', 'error', `安装失败${hint}`);
-            sendLog(`\n❌ exit code: ${exitCode}\n`);
-            reject(new Error(`Homebrew 安装失败 (exit code: ${exitCode})${hint}`));
-          }
-        };
+          });
 
-        child.stdout.on('data', (data) => {
-          const text = cleanPtyOutput(data.toString());
-          allOutput += text;
-          if (text.trim()) sendLog(text);
+          const timeout = setTimeout(() => {
+            try { child.kill('SIGTERM'); } catch (e) {}
+            reject(new Error('Homebrew 安装超时（15分钟）'));
+          }, 15 * 60 * 1000);
+
+          let allOutput = '';
+          let stdoutEnded = false;
+          let exitCode = null;
+
+          const tryFinish = () => {
+            if (!stdoutEnded || exitCode === null) return;
+            clearTimeout(timeout);
+
+            if (exitCode === 0) {
+              sendProgress('homebrew', 'done', '安装完成');
+              sendLog('\n✅ Homebrew 安装完成\n');
+              if (fs.existsSync(path.join(brewBin, 'brew'))) {
+                process.env.PATH = `${brewBin}:${process.env.PATH}`;
+              }
+              resolve();
+            } else {
+              const hint = allOutput.includes('curl') || allOutput.includes('Failed to connect')
+                ? '（网络连接失败，请检查网络或使用代理）' : '';
+              sendProgress('homebrew', 'error', `安装失败${hint}`);
+              sendLog(`\n❌ exit code: ${exitCode}\n`);
+              reject(new Error(`Homebrew 安装失败 (exit code: ${exitCode})${hint}`));
+            }
+          };
+
+          child.stdout.on('data', (data) => {
+            const text = data.toString();
+            allOutput += text;
+            if (text.trim()) sendLog(text);
+          });
+
+          child.stderr.on('data', (data) => {
+            const text = data.toString();
+            allOutput += text;
+            if (text.trim()) sendLog(text);
+          });
+
+          child.stdout.on('end', () => { stdoutEnded = true; tryFinish(); });
+          child.on('close', (code) => { exitCode = code; tryFinish(); });
+          child.on('error', (err) => { clearTimeout(timeout); reject(err); });
         });
-
-        child.stderr.on('data', (data) => {
-          const text = cleanPtyOutput(data.toString());
-          allOutput += text;
-          if (text.trim()) sendLog(text);
-        });
-
-        child.stdout.on('end', () => { stdoutEnded = true; tryFinish(); });
-        child.on('close', (code) => { exitCode = code; tryFinish(); });
-        child.on('error', (err) => { clearTimeout(timeout); reject(err); });
-      });
+      } finally {
+        // Securely clean up askpass script (contains password)
+        try { fs.rmSync(askpassDir, { recursive: true, force: true }); } catch (e) {}
+      }
     }
 
     // ===== Phase 2: Install brew packages =====
@@ -1110,7 +1133,11 @@ ipcMain.handle('install-all-dependencies', async (event, dependencyStatus) => {
 
         await new Promise((resolve, reject) => {
           const child = spawn(brewPath, ['install', pkg], {
-            env: process.env
+            env: {
+              ...process.env,
+              HOMEBREW_API_DOMAIN: 'https://mirrors.tuna.tsinghua.edu.cn/homebrew-bottles/api',
+              HOMEBREW_BOTTLE_DOMAIN: 'https://mirrors.tuna.tsinghua.edu.cn/homebrew-bottles'
+            }
           });
 
           const timeout = setTimeout(() => {

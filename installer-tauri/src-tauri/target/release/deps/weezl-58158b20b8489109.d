@@ -1,0 +1,10 @@
+/Applications/ScreenSync - SourceCode/installer-tauri/src-tauri/target/release/deps/weezl-58158b20b8489109.d: /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/weezl-0.1.12/src/lib.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/weezl-0.1.12/src/decode.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/weezl-0.1.12/src/encode.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/weezl-0.1.12/src/error.rs
+
+/Applications/ScreenSync - SourceCode/installer-tauri/src-tauri/target/release/deps/libweezl-58158b20b8489109.rlib: /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/weezl-0.1.12/src/lib.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/weezl-0.1.12/src/decode.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/weezl-0.1.12/src/encode.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/weezl-0.1.12/src/error.rs
+
+/Applications/ScreenSync - SourceCode/installer-tauri/src-tauri/target/release/deps/libweezl-58158b20b8489109.rmeta: /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/weezl-0.1.12/src/lib.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/weezl-0.1.12/src/decode.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/weezl-0.1.12/src/encode.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/weezl-0.1.12/src/error.rs
+
+/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/weezl-0.1.12/src/lib.rs:
+/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/weezl-0.1.12/src/decode.rs:
+/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/weezl-0.1.12/src/encode.rs:
+/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/weezl-0.1.12/src/error.rs:

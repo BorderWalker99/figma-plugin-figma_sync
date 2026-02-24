@@ -17,26 +17,31 @@ echo -e "${BLUE}║  ScreenSync 用户分发打包脚本          ║${NC}"
 echo -e "${BLUE}║  (双架构独立打包版本)                 ║${NC}"
 echo -e "${BLUE}╚════════════════════════════════════════╝${NC}\n"
 
-# 检查 GUI 安装器是否已构建
-echo -e "${YELLOW}🔨 正在构建最新版 GUI 安装器...${NC}"
-cd installer
-# 清理旧的构建产物，防止使用缓存的旧文件
-if [ -d "dist" ]; then
-    rm -rf dist
-    echo -e "   ✅ 已清理旧的 dist/ 目录"
-fi
-npm install
-npm run build:mac
+# 检查 GUI 安装器是否已构建 (Tauri)
+echo -e "${YELLOW}🔨 正在构建最新版 GUI 安装器 (Tauri)...${NC}"
+cd installer-tauri
+
+# 确保 Rust 目标已安装
+source "$HOME/.cargo/env" 2>/dev/null || true
+rustup target add x86_64-apple-darwin aarch64-apple-darwin 2>/dev/null || true
+
+# 构建 Intel 和 Apple Silicon 两个版本
+echo -e "   ${YELLOW}构建 Intel 版本...${NC}"
+cargo tauri build --target x86_64-apple-darwin
+echo -e "   ${YELLOW}构建 Apple Silicon 版本...${NC}"
+cargo tauri build --target aarch64-apple-darwin
+
 cd ..
 
 # 查找两个版本的 DMG
-DMG_INTEL=$(find installer/dist -name "*.dmg" -type f | grep -v "arm64" | sort -V | tail -1)
-DMG_ARM=$(find installer/dist -name "*arm64.dmg" -type f | sort -V | tail -1)
+TAURI_BASE="installer-tauri/src-tauri/target"
+DMG_INTEL=$(find "$TAURI_BASE/x86_64-apple-darwin" -name "*.dmg" -type f 2>/dev/null | sort -V | tail -1)
+DMG_ARM=$(find "$TAURI_BASE/aarch64-apple-darwin" -name "*.dmg" -type f 2>/dev/null | sort -V | tail -1)
 
 if [ -z "$DMG_INTEL" ] || [ -z "$DMG_ARM" ]; then
     echo -e "${RED}❌ 错误：需要同时存在 Intel 和 Apple Silicon 版本的 DMG${NC}"
-    echo -e "   Intel DMG: $DMG_INTEL"
-    echo -e "   ARM DMG: $DMG_ARM"
+    echo -e "   Intel DMG: ${DMG_INTEL:-未找到}"
+    echo -e "   ARM DMG: ${DMG_ARM:-未找到}"
     exit 1
 fi
 

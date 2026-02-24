@@ -1,0 +1,9 @@
+/Applications/ScreenSync - SourceCode/installer-tauri/src-tauri/target/aarch64-apple-darwin/release/deps/objc2_security-d0ca7f12b522f3c1.d: /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/objc2-security-0.3.2/src/lib.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/objc2-security-0.3.2/src/generated/mod.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/objc2-security-0.3.2/src/generated/SecTrust.rs
+
+/Applications/ScreenSync - SourceCode/installer-tauri/src-tauri/target/aarch64-apple-darwin/release/deps/libobjc2_security-d0ca7f12b522f3c1.rlib: /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/objc2-security-0.3.2/src/lib.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/objc2-security-0.3.2/src/generated/mod.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/objc2-security-0.3.2/src/generated/SecTrust.rs
+
+/Applications/ScreenSync - SourceCode/installer-tauri/src-tauri/target/aarch64-apple-darwin/release/deps/libobjc2_security-d0ca7f12b522f3c1.rmeta: /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/objc2-security-0.3.2/src/lib.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/objc2-security-0.3.2/src/generated/mod.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/objc2-security-0.3.2/src/generated/SecTrust.rs
+
+/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/objc2-security-0.3.2/src/lib.rs:
+/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/objc2-security-0.3.2/src/generated/mod.rs:
+/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/objc2-security-0.3.2/src/generated/SecTrust.rs:

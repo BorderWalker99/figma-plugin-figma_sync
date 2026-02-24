@@ -1,0 +1,10 @@
+/Applications/ScreenSync - SourceCode/installer-tauri/src-tauri/target/aarch64-apple-darwin/release/deps/arboard-6bc278a96febd4b3.d: /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/arboard-3.6.1/src/lib.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/arboard-3.6.1/src/common.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/arboard-3.6.1/src/platform/mod.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/arboard-3.6.1/src/platform/osx.rs
+
+/Applications/ScreenSync - SourceCode/installer-tauri/src-tauri/target/aarch64-apple-darwin/release/deps/libarboard-6bc278a96febd4b3.rlib: /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/arboard-3.6.1/src/lib.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/arboard-3.6.1/src/common.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/arboard-3.6.1/src/platform/mod.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/arboard-3.6.1/src/platform/osx.rs
+
+/Applications/ScreenSync - SourceCode/installer-tauri/src-tauri/target/aarch64-apple-darwin/release/deps/libarboard-6bc278a96febd4b3.rmeta: /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/arboard-3.6.1/src/lib.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/arboard-3.6.1/src/common.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/arboard-3.6.1/src/platform/mod.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/arboard-3.6.1/src/platform/osx.rs
+
+/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/arboard-3.6.1/src/lib.rs:
+/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/arboard-3.6.1/src/common.rs:
+/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/arboard-3.6.1/src/platform/mod.rs:
+/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/arboard-3.6.1/src/platform/osx.rs:

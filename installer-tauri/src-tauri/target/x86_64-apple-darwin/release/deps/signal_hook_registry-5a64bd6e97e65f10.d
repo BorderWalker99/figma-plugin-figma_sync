@@ -1,0 +1,9 @@
+/Applications/ScreenSync - SourceCode/installer-tauri/src-tauri/target/x86_64-apple-darwin/release/deps/signal_hook_registry-5a64bd6e97e65f10.d: /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/signal-hook-registry-1.4.8/src/lib.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/signal-hook-registry-1.4.8/src/half_lock.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/signal-hook-registry-1.4.8/src/vec_map.rs
+
+/Applications/ScreenSync - SourceCode/installer-tauri/src-tauri/target/x86_64-apple-darwin/release/deps/libsignal_hook_registry-5a64bd6e97e65f10.rlib: /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/signal-hook-registry-1.4.8/src/lib.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/signal-hook-registry-1.4.8/src/half_lock.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/signal-hook-registry-1.4.8/src/vec_map.rs
+
+/Applications/ScreenSync - SourceCode/installer-tauri/src-tauri/target/x86_64-apple-darwin/release/deps/libsignal_hook_registry-5a64bd6e97e65f10.rmeta: /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/signal-hook-registry-1.4.8/src/lib.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/signal-hook-registry-1.4.8/src/half_lock.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/signal-hook-registry-1.4.8/src/vec_map.rs
+
+/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/signal-hook-registry-1.4.8/src/lib.rs:
+/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/signal-hook-registry-1.4.8/src/half_lock.rs:
+/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/signal-hook-registry-1.4.8/src/vec_map.rs:

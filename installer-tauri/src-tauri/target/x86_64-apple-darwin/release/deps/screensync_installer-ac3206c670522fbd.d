@@ -1,0 +1,16 @@
+/Applications/ScreenSync - SourceCode/installer-tauri/src-tauri/target/x86_64-apple-darwin/release/deps/screensync_installer-ac3206c670522fbd.d: src/main.rs src/commands.rs /Applications/ScreenSync\ -\ SourceCode/installer-tauri/src-tauri/target/x86_64-apple-darwin/release/build/screensync-installer-deb2d8f750beba90/out/dcc30a4fabe39b7493cae7a54afe5d971950030f5b975f29eba2e121f0f7bb1b /Applications/ScreenSync\ -\ SourceCode/installer-tauri/src-tauri/../src/renderer.js /Applications/ScreenSync\ -\ SourceCode/installer-tauri/src-tauri/target/x86_64-apple-darwin/release/build/screensync-installer-deb2d8f750beba90/out/tauri-codegen-assets/0d010ed4c5b66a1790eb762eb195b9beac343b7f41744a7e6e6c1342c92532b8.js /Applications/ScreenSync\ -\ SourceCode/installer-tauri/src-tauri/../src/index.html /Applications/ScreenSync\ -\ SourceCode/installer-tauri/src-tauri/target/x86_64-apple-darwin/release/build/screensync-installer-deb2d8f750beba90/out/tauri-codegen-assets/78c471b149badc695c58b7afbe188fded3f1dd06ee61af45ff35f09b476265e8.html
+
+/Applications/ScreenSync - SourceCode/installer-tauri/src-tauri/target/x86_64-apple-darwin/release/deps/screensync_installer-ac3206c670522fbd: src/main.rs src/commands.rs /Applications/ScreenSync\ -\ SourceCode/installer-tauri/src-tauri/target/x86_64-apple-darwin/release/build/screensync-installer-deb2d8f750beba90/out/dcc30a4fabe39b7493cae7a54afe5d971950030f5b975f29eba2e121f0f7bb1b /Applications/ScreenSync\ -\ SourceCode/installer-tauri/src-tauri/../src/renderer.js /Applications/ScreenSync\ -\ SourceCode/installer-tauri/src-tauri/target/x86_64-apple-darwin/release/build/screensync-installer-deb2d8f750beba90/out/tauri-codegen-assets/0d010ed4c5b66a1790eb762eb195b9beac343b7f41744a7e6e6c1342c92532b8.js /Applications/ScreenSync\ -\ SourceCode/installer-tauri/src-tauri/../src/index.html /Applications/ScreenSync\ -\ SourceCode/installer-tauri/src-tauri/target/x86_64-apple-darwin/release/build/screensync-installer-deb2d8f750beba90/out/tauri-codegen-assets/78c471b149badc695c58b7afbe188fded3f1dd06ee61af45ff35f09b476265e8.html
+
+src/main.rs:
+src/commands.rs:
+/Applications/ScreenSync\ -\ SourceCode/installer-tauri/src-tauri/target/x86_64-apple-darwin/release/build/screensync-installer-deb2d8f750beba90/out/dcc30a4fabe39b7493cae7a54afe5d971950030f5b975f29eba2e121f0f7bb1b:
+/Applications/ScreenSync\ -\ SourceCode/installer-tauri/src-tauri/../src/renderer.js:
+/Applications/ScreenSync\ -\ SourceCode/installer-tauri/src-tauri/target/x86_64-apple-darwin/release/build/screensync-installer-deb2d8f750beba90/out/tauri-codegen-assets/0d010ed4c5b66a1790eb762eb195b9beac343b7f41744a7e6e6c1342c92532b8.js:
+/Applications/ScreenSync\ -\ SourceCode/installer-tauri/src-tauri/../src/index.html:
+/Applications/ScreenSync\ -\ SourceCode/installer-tauri/src-tauri/target/x86_64-apple-darwin/release/build/screensync-installer-deb2d8f750beba90/out/tauri-codegen-assets/78c471b149badc695c58b7afbe188fded3f1dd06ee61af45ff35f09b476265e8.html:
+
+# env-dep:CARGO_PKG_AUTHORS=
+# env-dep:CARGO_PKG_DESCRIPTION=ScreenSync GUI Installer
+# env-dep:CARGO_PKG_NAME=screensync-installer
+# env-dep:OUT_DIR=/Applications/ScreenSync - SourceCode/installer-tauri/src-tauri/target/x86_64-apple-darwin/release/build/screensync-installer-deb2d8f750beba90/out
