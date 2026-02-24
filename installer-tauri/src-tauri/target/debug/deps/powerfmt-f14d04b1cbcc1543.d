@@ -1,0 +1,9 @@
+/Applications/ScreenSync - SourceCode/installer-tauri/src-tauri/target/debug/deps/powerfmt-f14d04b1cbcc1543.d: /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/powerfmt-0.2.0/src/lib.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/powerfmt-0.2.0/src/buf.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/powerfmt-0.2.0/src/ext.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/powerfmt-0.2.0/src/smart_display.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/powerfmt-0.2.0/src/smart_display_impls.rs
+
+/Applications/ScreenSync - SourceCode/installer-tauri/src-tauri/target/debug/deps/libpowerfmt-f14d04b1cbcc1543.rmeta: /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/powerfmt-0.2.0/src/lib.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/powerfmt-0.2.0/src/buf.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/powerfmt-0.2.0/src/ext.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/powerfmt-0.2.0/src/smart_display.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/powerfmt-0.2.0/src/smart_display_impls.rs
+
+/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/powerfmt-0.2.0/src/lib.rs:
+/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/powerfmt-0.2.0/src/buf.rs:
+/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/powerfmt-0.2.0/src/ext.rs:
+/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/powerfmt-0.2.0/src/smart_display.rs:
+/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/powerfmt-0.2.0/src/smart_display_impls.rs:

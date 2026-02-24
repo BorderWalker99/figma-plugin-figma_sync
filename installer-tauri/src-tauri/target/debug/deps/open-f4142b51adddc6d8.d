@@ -1,0 +1,6 @@
+/Applications/ScreenSync - SourceCode/installer-tauri/src-tauri/target/debug/deps/open-f4142b51adddc6d8.d: /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/open-5.3.3/src/lib.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/open-5.3.3/src/macos.rs
+
+/Applications/ScreenSync - SourceCode/installer-tauri/src-tauri/target/debug/deps/libopen-f4142b51adddc6d8.rmeta: /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/open-5.3.3/src/lib.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/open-5.3.3/src/macos.rs
+
+/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/open-5.3.3/src/lib.rs:
+/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/open-5.3.3/src/macos.rs:

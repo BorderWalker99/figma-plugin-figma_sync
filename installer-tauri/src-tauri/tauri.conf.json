@@ -33,7 +33,13 @@
       "icons/icon.png"
     ],
     "macOS": {
-      "minimumSystemVersion": "10.13"
+      "minimumSystemVersion": "10.13",
+      "dmg": {
+        "background": "dmg-resources/background.png",
+        "windowSize": { "width": 660, "height": 400 },
+        "appPosition": { "x": 330, "y": 200 },
+        "applicationFolderPosition": { "x": 9999, "y": 9999 }
+      }
     }
   },
   "plugins": {

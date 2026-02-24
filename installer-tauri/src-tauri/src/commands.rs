@@ -91,6 +91,17 @@ fn is_legacy_macos() -> bool {
     darwin_version() < 23
 }
 
+/// Runtime architecture detection (works correctly even when cross-compiled).
+fn is_apple_silicon() -> bool {
+    Command::new("uname")
+        .arg("-m")
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim() == "arm64")
+        .unwrap_or(false)
+}
+
 fn run_cmd(cmd: &str) -> Result<String, String> {
     let output = Command::new("/bin/bash")
         .args(["-c", cmd])
@@ -112,37 +123,31 @@ fn run_cmd_ok(cmd: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Find an executable by searching common paths + ScreenSync local dirs.
+/// Find an executable by searching ScreenSync local dirs first, then common paths.
 fn find_executable(name: &str) -> Option<String> {
-    // 1. `which`
-    if let Ok(path) = run_cmd(&format!("which {name}")) {
-        if !path.is_empty() && Path::new(&path).exists() {
-            return Some(path);
+    // 1. ScreenSync local install (highest priority — legacy macOS mode)
+    let local = screensync_bin().join(name);
+    if local.exists() {
+        return Some(local.to_string_lossy().to_string());
+    }
+
+    // 2. Legacy Node.js deps (node/npm/npx)
+    if name == "node" || name == "npm" || name == "npx" {
+        let legacy = screensync_deps().join("node").join("bin").join(name);
+        if legacy.exists() {
+            return Some(legacy.to_string_lossy().to_string());
         }
     }
 
-    // 2. Common paths (ScreenSync local first)
-    let search = [
-        screensync_bin().to_string_lossy().to_string(),
-        "/usr/local/bin".to_string(),
-        "/opt/homebrew/bin".to_string(),
-    ];
-    for dir in &search {
+    // 3. Homebrew paths (Apple Silicon first, then Intel)
+    for dir in &["/opt/homebrew/bin", "/usr/local/bin"] {
         let full = format!("{dir}/{name}");
         if Path::new(&full).exists() {
             return Some(full);
         }
     }
 
-    // 3. Local Node.js (legacy)
-    if name == "node" {
-        let local = screensync_deps().join("node").join("bin").join("node");
-        if local.exists() {
-            return Some(local.to_string_lossy().to_string());
-        }
-    }
-
-    // 4. NVM
+    // 4. NVM (for node only)
     if name == "node" {
         let nvm = home_dir().join(".nvm/versions/node");
         if let Ok(entries) = fs::read_dir(&nvm) {
@@ -152,11 +157,18 @@ fn find_executable(name: &str) -> Option<String> {
                 .collect();
             versions.sort();
             if let Some(latest) = versions.last() {
-                let p = nvm.join(latest).join("bin/node");
+                let p = nvm.join(latest).join("bin").join(name);
                 if p.exists() {
                     return Some(p.to_string_lossy().to_string());
                 }
             }
+        }
+    }
+
+    // 5. System-wide `which` (lowest priority)
+    if let Ok(path) = run_cmd(&format!("which {name}")) {
+        if !path.is_empty() && Path::new(&path).exists() {
+            return Some(path);
         }
     }
 
@@ -244,28 +256,108 @@ pub fn get_macos_version() -> MacOSVersion {
 
 #[tauri::command]
 pub fn get_project_root() -> Option<String> {
-    // Look for ScreenSync source relative to the installer app bundle
     let exe = env::current_exe().ok()?;
-    // Walk up from .app/Contents/MacOS/screensync-installer
-    let mut dir = exe.parent()?.parent()?.parent()?.parent()?.to_path_buf();
 
-    // Check sibling: ScreenSync - SourceCode or ScreenSync-UserPackage
-    for name in &["ScreenSync - SourceCode", "ScreenSync-UserPackage"] {
-        let candidate = dir.join(name);
-        if candidate.join("package.json").exists() {
-            return Some(candidate.to_string_lossy().to_string());
+    // Walk up from .app/Contents/MacOS/screensync-installer to find the .app bundle
+    let mut app_dir = exe.to_path_buf();
+    loop {
+        if app_dir.extension().and_then(|e| e.to_str()) == Some("app") {
+            break;
+        }
+        app_dir = app_dir.parent()?.to_path_buf();
+        if app_dir == Path::new("/") {
+            return None;
+        }
+    }
+    // app_dir is now e.g. /Volumes/ScreenSync Installer/ScreenSync Installer.app
+    // or /Users/.../ScreenSync-Apple/ScreenSync Installer.app
+    let parent = app_dir.parent()?;
+
+    // Helper: when we find the project root, strip quarantine so all files work.
+    let found = |p: String| -> Option<String> {
+        strip_quarantine(&p);
+        Some(p)
+    };
+
+    // Strategy 1: Check for "项目文件/package.json" in sibling (current distribution structure)
+    let project_files = parent.join("项目文件");
+    if project_files.join("package.json").exists() {
+        return found(project_files.to_string_lossy().to_string());
+    }
+
+    // Strategy 2: Check if parent itself has package.json (legacy flat structure)
+    if parent.join("package.json").exists() {
+        return found(parent.to_string_lossy().to_string());
+    }
+
+    // Strategy 3: Running from mounted DMG — find the DMG source path
+    // and look for 项目文件/ next to the DMG file on disk
+    let parent_str = parent.to_string_lossy();
+    if parent_str.starts_with("/Volumes/") {
+        if let Some(dmg_dir) = find_dmg_source_dir(&parent_str) {
+            let project_from_dmg = Path::new(&dmg_dir).join("项目文件");
+            if project_from_dmg.join("package.json").exists() {
+                return found(project_from_dmg.to_string_lossy().to_string());
+            }
+            if Path::new(&dmg_dir).join("package.json").exists() {
+                return found(dmg_dir);
+            }
         }
     }
 
-    // Check parent
-    dir = dir.parent()?.to_path_buf();
-    for name in &["ScreenSync - SourceCode", "ScreenSync-UserPackage"] {
-        let candidate = dir.join(name);
-        if candidate.join("package.json").exists() {
-            return Some(candidate.to_string_lossy().to_string());
+    // Strategy 4: Walk up and check each level for 项目文件/ or package.json
+    let mut search = parent.to_path_buf();
+    for _ in 0..3 {
+        search = search.parent()?.to_path_buf();
+        let pf = search.join("项目文件");
+        if pf.join("package.json").exists() {
+            return found(pf.to_string_lossy().to_string());
+        }
+        if search.join("package.json").exists() {
+            return found(search.to_string_lossy().to_string());
         }
     }
 
+    None
+}
+
+/// Strip macOS quarantine attributes from a directory tree.
+/// This replaces the old "第一步_拖进终端回车运行.command" script,
+/// allowing users to never touch Terminal at all.
+fn strip_quarantine(dir: &str) {
+    let _ = Command::new("/usr/bin/xattr")
+        .args(["-dr", "com.apple.quarantine", dir])
+        .output();
+}
+
+/// Given a Volume mount point (e.g. "/Volumes/ScreenSync Installer"),
+/// use `hdiutil info` to find the original DMG file path on disk,
+/// and return the directory containing that DMG.
+fn find_dmg_source_dir(volume_path: &str) -> Option<String> {
+    let output = Command::new("hdiutil")
+        .args(["info"])
+        .output()
+        .ok()?;
+    let info = String::from_utf8_lossy(&output.stdout);
+
+    let mut image_path: Option<String> = None;
+
+    for line in info.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("image-path") {
+            if let Some(p) = trimmed.split(':').nth(1) {
+                image_path = Some(p.trim().to_string());
+            }
+        }
+        if trimmed.contains(volume_path) {
+            // Found the mount point — the most recent image-path above is the DMG file
+            if let Some(ref dmg_path) = image_path {
+                return Path::new(dmg_path)
+                    .parent()
+                    .map(|p| p.to_string_lossy().to_string());
+            }
+        }
+    }
     None
 }
 
@@ -274,19 +366,35 @@ pub async fn select_project_root(app: AppHandle) -> Result<HashMap<String, serde
     use tauri_plugin_dialog::DialogExt;
     let folder = app.dialog().file().blocking_pick_folder();
     match folder {
-        Some(path) => {
-            let p = path.to_string();
-            if Path::new(&p).join("package.json").exists() {
+        Some(fp) => {
+            let p = fp.to_string();
+            let selected = Path::new(&p);
+
+            // Case 1: selected folder directly has package.json
+            if selected.join("package.json").exists() {
+                strip_quarantine(&p);
                 let mut map = HashMap::new();
                 map.insert("success".into(), true.into());
                 map.insert("path".into(), p.into());
-                Ok(map)
-            } else {
-                let mut map = HashMap::new();
-                map.insert("success".into(), false.into());
-                map.insert("error".into(), "所选文件夹中未找到 package.json".into());
-                Ok(map)
+                return Ok(map);
             }
+
+            // Case 2: selected the distribution root (ScreenSync-Apple/ etc.)
+            // which contains 项目文件/package.json
+            let project_files = selected.join("项目文件");
+            if project_files.join("package.json").exists() {
+                let resolved = project_files.to_string_lossy().to_string();
+                strip_quarantine(&resolved);
+                let mut map = HashMap::new();
+                map.insert("success".into(), true.into());
+                map.insert("path".into(), resolved.into());
+                return Ok(map);
+            }
+
+            let mut map = HashMap::new();
+            map.insert("success".into(), false.into());
+            map.insert("error".into(), "选择的文件夹不正确。\n\n请选择解压后的 ScreenSync 安装包文件夹，或其中的「项目文件」文件夹。".into());
+            Ok(map)
         }
         None => {
             let mut map = HashMap::new();
@@ -724,7 +832,7 @@ exit $BREW_EXIT
         send_log(app, "\n✅ Homebrew 安装完成\n");
 
         // Configure PATH for Apple Silicon
-        if cfg!(target_arch = "aarch64") {
+        if is_apple_silicon() {
             if Path::new("/opt/homebrew/bin/brew").exists() {
                 let _ = run_cmd("echo 'eval \"$(/opt/homebrew/bin/brew shellenv)\"' >> ~/.zprofile");
             }
@@ -742,7 +850,7 @@ fn install_brew_package(app: &AppHandle, pkg: &str, display_name: &str) -> Resul
 
     let brew_path = find_executable("brew")
         .unwrap_or_else(|| {
-            if cfg!(target_arch = "aarch64") { "/opt/homebrew/bin/brew".into() }
+            if is_apple_silicon() { "/opt/homebrew/bin/brew".into() }
             else { "/usr/local/bin/brew".into() }
         });
 
@@ -868,7 +976,7 @@ pub async fn install_dependencies(app: AppHandle, install_path: String) -> Insta
 
     let npm_path = find_executable("npm")
         .unwrap_or_else(|| {
-            if cfg!(target_arch = "aarch64") { "/opt/homebrew/bin/npm".into() }
+            if is_apple_silicon() { "/opt/homebrew/bin/npm".into() }
             else { "/usr/local/bin/npm".into() }
         });
 
@@ -941,7 +1049,7 @@ pub fn start_server(install_path: String) -> InstallResult {
 
     let node_path = find_executable("node")
         .unwrap_or_else(|| {
-            if cfg!(target_arch = "aarch64") { "/opt/homebrew/bin/node".into() }
+            if is_apple_silicon() { "/opt/homebrew/bin/node".into() }
             else { "/usr/local/bin/node".into() }
         });
 
@@ -989,7 +1097,7 @@ pub fn setup_autostart(install_path: String) -> InstallResult {
 
     let node_path = find_executable("node")
         .unwrap_or_else(|| {
-            if cfg!(target_arch = "aarch64") { "/opt/homebrew/bin/node".into() }
+            if is_apple_silicon() { "/opt/homebrew/bin/node".into() }
             else { "/usr/local/bin/node".into() }
         });
 

@@ -134,6 +134,8 @@ echo -e "   ${YELLOW}正在打包服务器...${NC}"
 # 先清理日志和临时文件
 find . -maxdepth 1 -name "*.log" -delete 2>/dev/null || true
 rm -f .user-config.json .sync-mode 2>/dev/null || true
+# Tauri CLI rejects CI=1 (only accepts true/false)
+unset CI
 if ./package-for-distribution.sh > /dev/null 2>&1; then
     INTEL_TAR="ScreenSync-Intel.tar.gz"
     APPLE_TAR="ScreenSync-Apple.tar.gz"

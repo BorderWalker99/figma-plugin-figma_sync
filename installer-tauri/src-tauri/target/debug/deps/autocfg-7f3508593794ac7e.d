@@ -1,0 +1,10 @@
+/Applications/ScreenSync - SourceCode/installer-tauri/src-tauri/target/debug/deps/autocfg-7f3508593794ac7e.d: /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/autocfg-1.5.0/src/lib.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/autocfg-1.5.0/src/error.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/autocfg-1.5.0/src/rustc.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/autocfg-1.5.0/src/version.rs
+
+/Applications/ScreenSync - SourceCode/installer-tauri/src-tauri/target/debug/deps/libautocfg-7f3508593794ac7e.rlib: /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/autocfg-1.5.0/src/lib.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/autocfg-1.5.0/src/error.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/autocfg-1.5.0/src/rustc.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/autocfg-1.5.0/src/version.rs
+
+/Applications/ScreenSync - SourceCode/installer-tauri/src-tauri/target/debug/deps/libautocfg-7f3508593794ac7e.rmeta: /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/autocfg-1.5.0/src/lib.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/autocfg-1.5.0/src/error.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/autocfg-1.5.0/src/rustc.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/autocfg-1.5.0/src/version.rs
+
+/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/autocfg-1.5.0/src/lib.rs:
+/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/autocfg-1.5.0/src/error.rs:
+/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/autocfg-1.5.0/src/rustc.rs:
+/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/autocfg-1.5.0/src/version.rs:

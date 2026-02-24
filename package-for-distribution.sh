@@ -17,36 +17,50 @@ echo -e "${BLUE}║  ScreenSync 用户分发打包脚本          ║${NC}"
 echo -e "${BLUE}║  (双架构独立打包版本)                 ║${NC}"
 echo -e "${BLUE}╚════════════════════════════════════════╝${NC}\n"
 
-# 检查 GUI 安装器是否已构建 (Tauri)
+# 构建 Tauri 安装器 (.app only, DMG 由自定义脚本生成)
 echo -e "${YELLOW}🔨 正在构建最新版 GUI 安装器 (Tauri)...${NC}"
 cd installer-tauri
 
-# 确保 Rust 目标已安装
 source "$HOME/.cargo/env" 2>/dev/null || true
 rustup target add x86_64-apple-darwin aarch64-apple-darwin 2>/dev/null || true
 
-# 构建 Intel 和 Apple Silicon 两个版本
+# Tauri CLI rejects CI=1 (only accepts true/false), unset to avoid build errors
+unset CI
+
 echo -e "   ${YELLOW}构建 Intel 版本...${NC}"
-cargo tauri build --target x86_64-apple-darwin
+cargo tauri build --target x86_64-apple-darwin --bundles app
 echo -e "   ${YELLOW}构建 Apple Silicon 版本...${NC}"
-cargo tauri build --target aarch64-apple-darwin
+cargo tauri build --target aarch64-apple-darwin --bundles app
 
-cd ..
+# 定位构建产物 (.app bundles)
+TAURI_BASE="src-tauri/target"
+APP_INTEL=$(find "$TAURI_BASE/x86_64-apple-darwin/release/bundle/macos" -name "*.app" -type d 2>/dev/null | head -1)
+APP_ARM=$(find "$TAURI_BASE/aarch64-apple-darwin/release/bundle/macos" -name "*.app" -type d 2>/dev/null | head -1)
 
-# 查找两个版本的 DMG
-TAURI_BASE="installer-tauri/src-tauri/target"
-DMG_INTEL=$(find "$TAURI_BASE/x86_64-apple-darwin" -name "*.dmg" -type f 2>/dev/null | sort -V | tail -1)
-DMG_ARM=$(find "$TAURI_BASE/aarch64-apple-darwin" -name "*.dmg" -type f 2>/dev/null | sort -V | tail -1)
-
-if [ -z "$DMG_INTEL" ] || [ -z "$DMG_ARM" ]; then
-    echo -e "${RED}❌ 错误：需要同时存在 Intel 和 Apple Silicon 版本的 DMG${NC}"
-    echo -e "   Intel DMG: ${DMG_INTEL:-未找到}"
-    echo -e "   ARM DMG: ${DMG_ARM:-未找到}"
+if [ -z "$APP_INTEL" ] || [ -z "$APP_ARM" ]; then
+    echo -e "${RED}❌ 错误：需要同时存在 Intel 和 Apple Silicon 版本的 .app${NC}"
+    echo -e "   Intel .app: ${APP_INTEL:-未找到}"
+    echo -e "   ARM .app: ${APP_ARM:-未找到}"
     exit 1
 fi
 
-echo -e "${GREEN}✅ 找到 Intel 版本: $DMG_INTEL${NC}"
-echo -e "${GREEN}✅ 找到 Apple Silicon 版本: $DMG_ARM${NC}\n"
+# 使用自定义脚本生成干净的 DMG (仅含 app, 无 Applications 快捷方式)
+echo -e "   ${YELLOW}创建 Intel DMG...${NC}"
+./create-clean-dmg.sh "$APP_INTEL" "$TAURI_BASE/ScreenSync-Installer-Intel.dmg"
+echo -e "   ${YELLOW}创建 Apple Silicon DMG...${NC}"
+./create-clean-dmg.sh "$APP_ARM" "$TAURI_BASE/ScreenSync-Installer-Apple.dmg"
+
+DMG_INTEL="$TAURI_BASE/ScreenSync-Installer-Intel.dmg"
+DMG_ARM="$TAURI_BASE/ScreenSync-Installer-Apple.dmg"
+
+cd ..
+
+echo -e "${GREEN}✅ Intel DMG: installer-tauri/$DMG_INTEL${NC}"
+echo -e "${GREEN}✅ Apple Silicon DMG: installer-tauri/$DMG_ARM${NC}\n"
+
+# 从这里开始引用相对路径前缀
+DMG_INTEL="installer-tauri/$DMG_INTEL"
+DMG_ARM="installer-tauri/$DMG_ARM"
 
 # 获取当前目录名和版本号
 CURRENT_DIR=$(basename "$PWD")
@@ -102,68 +116,10 @@ create_package() {
   cp README.md "$TEMP_DIR/项目文件/"
   cp MANUAL_INSTALL_LEGACY.md "$TEMP_DIR/项目文件/" 2>/dev/null || echo "   ⚠️  MANUAL_INSTALL_LEGACY.md not found (optional)"
     
-    # 3. 复制对应架构的 DMG
+    # 3. 复制对应架构的 DMG (不再需要 .command 脚本, 安装器内部自动清除隔离)
     echo -e "${YELLOW}🖥️  复制 ${ARCH_TYPE} 安装器...${NC}"
-    cp "$DMG_PATH" "$TEMP_DIR/第二步_双击安装.dmg"
+    cp "$DMG_PATH" "$TEMP_DIR/双击安装.dmg"
     echo "   ✅ 已复制安装器 DMG"
-    
-    # 4. 创建针对该架构的 Gatekeeper 修复脚本
-    echo -e "${YELLOW}🔧 创建安全修复脚本...${NC}"
-    cat > "$TEMP_DIR/第一步_拖进终端回车运行.command" << 'SCRIPT_EOF'
-#!/bin/bash
-
-# ScreenSync 安全修复脚本
-# 此脚本用于解除 macOS Gatekeeper 对下载文件的安全限制
-
-clear
-
-echo ""
-echo "╔════════════════════════════════════════════════════════╗"
-echo "║                                                        ║"
-echo "║       ScreenSync 安全修复工具                          ║"
-echo "║                                                        ║"
-echo "╚════════════════════════════════════════════════════════╝"
-echo ""
-
-# 获取脚本所在目录
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-
-echo "📁 检测到安装目录: $SCRIPT_DIR"
-echo ""
-
-# 检查 DMG 文件是否存在
-DMG_FILE="$SCRIPT_DIR/第二步_双击安装.dmg"
-
-if [ ! -f "$DMG_FILE" ]; then
-    echo "❌ 错误：未找到安装器文件"
-    echo "   请确保 第二步_双击安装.dmg 文件存在"
-    echo ""
-    read -p "按回车键退出..."
-    exit 1
-fi
-
-echo "🔧 正在解除安全限制..."
-echo ""
-
-# 删除 quarantine 属性
-xattr -d com.apple.quarantine "$DMG_FILE" 2>/dev/null
-xattr -d com.apple.quarantine "$SCRIPT_DIR/项目文件" 2>/dev/null
-xattr -dr com.apple.quarantine "$SCRIPT_DIR/项目文件" 2>/dev/null
-xattr -cr "$DMG_FILE" 2>/dev/null
-xattr -cr "$SCRIPT_DIR/项目文件" 2>/dev/null
-echo "   ✅ 处理完成"
-
-echo ""
-echo "✅ 安全限制已解除！"
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "现在请双击 第二步_双击安装.dmg 开始安装"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
-read -p "按回车键关闭此窗口..."
-SCRIPT_EOF
-    chmod +x "$TEMP_DIR/第一步_拖进终端回车运行.command"
-    echo "   ✅ 安全修复脚本已创建"
     
     # 5. 复制 Figma 插件文件
     echo -e "${YELLOW}🎨 复制 Figma 插件文件...${NC}"
@@ -208,7 +164,7 @@ Thumbs.db
 ../ScreenSyncImg/
 EOF
     
-    # 7. 创建 README
+    # 7. 创建 README（全新无终端版本）
     echo -e "${YELLOW}📖 创建说明文档...${NC}"
     cat > "$TEMP_DIR/README_请先阅读.txt" << EOF
 ╔════════════════════════════════════════════════════════╗
@@ -228,19 +184,19 @@ EOF
    - 如果显示 "Apple M1/M2/M3"，请使用 ScreenSync-Apple.tar.gz
 
 
-📦 安装步骤
+📦 安装步骤（全程无需打开终端）
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-步骤 1：解决安全提示（必做）
-   1. 打开"终端"应用
-   2. 将 "第一步_拖进终端回车运行.command" 拖入终端窗口
-   3. 按回车键运行
-   4. 看到 "✅ 准备完成！" 后关闭终端
+步骤 1：打开安装器
+   1. 双击 "双击安装.dmg"
+   2. 在弹出的窗口中双击 "ScreenSync Installer" 图标
+   3. 如果被拦截：系统设置 → 隐私与安全性 → 仍要打开
 
-步骤 2：安装软件
-   1. 双击 "第二步_双击安装.dmg"
-   2. 在弹出的窗口中双击 "ScreenSync Installer"
-   3. 按照图形界面提示完成配置
+步骤 2：跟随安装向导
+   安装器会自动完成所有配置，包括：
+   - 环境依赖安装（Node.js、FFmpeg 等）
+   - 项目配置
+   - 开机自启动设置
 
 步骤 3：导入 Figma 插件
    1. 打开 Figma Desktop 应用
@@ -257,11 +213,10 @@ EOF
 🆘 遇到问题？
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Q: 提示"ScreenSync Installer 已损坏"怎么办？
-A: 请确保已执行步骤 1 的安全修复脚本。
-
-Q: 安装器打不开怎么办？
-A: 右键点击安装器 → 打开 → 在弹窗中点击"打开"。
+Q: 提示 "无法验证开发者" 或被拦截怎么办？
+A: 前往 系统设置 → 隐私与安全性 → 找到被拦截的提示
+   → 点击"仍要打开" → 输入密码确认即可。
+   （首次打开需要此操作，之后不再需要）
 
 更多帮助请联系作者或查看项目文档。
 EOF
@@ -272,27 +227,21 @@ ScreenSync - iPhone截图自动同步到Figma
 
 ═══════════════════════════════════════════════════════
 
-📦 安装步骤
+📦 安装步骤（全程无需打开终端）
 
-⚠️ 步骤 1：解决安全提示（必做）
-由于 macOS 安全机制，首次运行需要清除隔离属性：
-1. 打开"终端"应用
-2. 将"第一步_拖进终端回车运行.command"拖入终端窗口
-3. 按回车键运行
-4. 看到"✅ 准备完成！"后关闭终端
-
-步骤 2：安装软件
-1. 双击 "第二步_双击安装.dmg"
+步骤 1：运行安装器
+1. 双击 "双击安装.dmg"
 2. 在弹出的窗口中双击 "ScreenSync Installer"
-3. 按照图形界面提示完成配置
+3. 如果被拦截：系统设置 → 隐私与安全性 → 仍要打开
+4. 跟随安装向导完成所有配置
 
-步骤 3：导入 Figma 插件
+步骤 2：导入 Figma 插件
 1. 打开 Figma Desktop 应用
 2. 菜单：Plugins → Development → Import plugin from manifest
 3. 浏览并选择：{安装目录}/figma-plugin/manifest.json
 4. 点击确认完成导入
 
-步骤 4：开始使用
+步骤 3：开始使用
 1. 在 Figma 中运行 "ScreenSync" 插件
 2. 选择同步模式
 3. 在 iPhone 上按照提示配置快捷指令
