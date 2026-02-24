@@ -190,22 +190,21 @@ function main() {
 
   fs.writeFileSync(plistPath, plistContent, 'utf8');
 
-  const serverAlreadyRunning = portReady();
-
   const label = 'com.screensync.server';
   const uidRes = run('id -u');
   let loaded = false;
 
-  // Mirror Electron behaviour: use legacy launchctl load/unload which does NOT
-  // kill a running server process.  The LaunchAgent is only needed for future
-  // reboots; the currently running server (started by start_server earlier in
-  // the install flow) must stay alive.
-  // Re-enable the label first in case a previous run (or Electron cleanup) disabled it
+  // Re-enable the label in case a previous install disabled it
   if (uidRes.ok && uidRes.out) {
     const domain = `gui/${uidRes.out}`;
     run(`launchctl enable ${domain}/${label} 2>/dev/null`);
   }
 
+  // Kill any stale server so the LaunchAgent can start cleanly (no port conflict)
+  run('lsof -ti :8888 | xargs kill -9 2>/dev/null');
+  sleepSec(1);
+
+  // Unload old agent, then load the new plist (RunAtLoad will start the server)
   run(`launchctl unload ${shQuote(plistPath)} 2>/dev/null`);
   sleepSec(1);
   const loadRes = run(`launchctl load ${shQuote(plistPath)}`);
@@ -228,16 +227,8 @@ function main() {
     process.exit(1);
   }
 
-  // If the server was already running before we configured the LaunchAgent,
-  // it is still running — no need to poll or fallback-spawn.
-  if (serverAlreadyRunning) {
-    output({ success: true, message: '服务器已启动并配置为开机自动启动' });
-    process.exit(0);
-  }
-
-  // Server was not running — LaunchAgent's RunAtLoad should start it.
-  // Poll for up to 15 seconds.
-  for (let i = 0; i < 15; i++) {
+  // Poll for server to be ready (LaunchAgent's RunAtLoad starts it)
+  for (let i = 0; i < 20; i++) {
     sleepSec(1);
     if (portReady()) {
       output({ success: true, message: '服务器已启动并配置为开机自动启动' });
@@ -245,7 +236,7 @@ function main() {
     }
   }
 
-  // Fallback: directly spawn start.js.
+  // Fallback: LaunchAgent didn't bring up the server; spawn directly
   run(`${shQuote(nodePath)} ${shQuote(startScript)} >/tmp/screensync-server.log 2>/tmp/screensync-server-error.log &`);
   for (let i = 0; i < 8; i++) {
     sleepSec(1);

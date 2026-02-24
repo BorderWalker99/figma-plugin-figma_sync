@@ -1443,21 +1443,20 @@ pub fn setup_autostart(install_path: String) -> InstallResult {
         return InstallResult { success: false, message: None, error: Some(e.to_string()), cancelled: None };
     }
 
-    // Mirror Electron: do NOT kill the running server.  The server was already
-    // started by start_server earlier in the install flow; we only need to
-    // register the LaunchAgent for future reboots.
-    let server_already_running = run_cmd_ok("lsof -i :8888 -sTCP:LISTEN");
-
     let label = "com.screensync.server";
     let mut launch_loaded = false;
 
-    // Re-enable the label first in case a previous install disabled it
+    // Re-enable the label in case a previous install disabled it
     if let Ok(uid) = run_cmd("id -u") {
         if !uid.is_empty() {
             let domain = format!("gui/{uid}");
             let _ = run_cmd(&format!("launchctl enable {domain}/{label} 2>/dev/null"));
         }
     }
+
+    // Kill any stale server so the LaunchAgent can start cleanly (no port conflict)
+    let _ = run_cmd("lsof -ti :8888 | xargs kill -9 2>/dev/null");
+    std::thread::sleep(std::time::Duration::from_secs(1));
 
     let _ = run_cmd(&format!("launchctl unload \"{}\" 2>/dev/null", plist_path.display()));
     std::thread::sleep(std::time::Duration::from_millis(500));
@@ -1486,17 +1485,7 @@ pub fn setup_autostart(install_path: String) -> InstallResult {
         };
     }
 
-    // If the server was already running before we touched the LaunchAgent,
-    // it is still alive — return immediately (matches Electron behaviour).
-    if server_already_running {
-        return InstallResult {
-            success: true,
-            message: Some("服务器已启动并配置为开机自动启动".into()),
-            error: None, cancelled: None,
-        };
-    }
-
-    // Server was not running; LaunchAgent's RunAtLoad should start it.
+    // LaunchAgent's RunAtLoad starts the server; poll until ready.
     for _ in 0..15 {
         std::thread::sleep(std::time::Duration::from_secs(1));
         if run_cmd_ok("lsof -i :8888 -sTCP:LISTEN") {
