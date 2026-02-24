@@ -1382,44 +1382,13 @@ figma.ui.onmessage = async (msg) => {
   }
   
   // 处理服务器修复请求
+  // Figma 插件沙箱无法访问 child_process，直接通知 UI 层尝试其他方式
   if (msg.type === 'repair-server') {
-    try {
-      const { exec } = require('child_process');
-      const installPath = msg.installPath || '/Applications/ScreenSync - SourceCode';
-      
-      exec('launchctl start com.screensync.server 2>&1', (error, stdout, stderr) => {
-        if (error) {
-          const startCommand = `cd "${installPath}" && npm start > /dev/null 2>&1 &`;
-          exec(startCommand, (error2, stdout2, stderr2) => {
-            if (error2) {
-              figma.ui.postMessage({
-                type: 'repair-server-response',
-                success: false,
-                message: '自动启动失败，请手动启动服务器'
-              });
-            } else {
-              figma.ui.postMessage({
-                type: 'repair-server-response',
-                success: true,
-                message: '服务器已自动启动，正在重新连接...'
-              });
-            }
-          });
-        } else {
-          figma.ui.postMessage({
-            type: 'repair-server-response',
-            success: true,
-            message: '服务器已自动启动，正在重新连接...'
-          });
-        }
-      });
-    } catch (error) {
-      figma.ui.postMessage({
-        type: 'repair-server-response',
-        success: false,
-        message: '自动修复失败: ' + error.message
-      });
-    }
+    figma.ui.postMessage({
+      type: 'repair-server-response',
+      success: false,
+      message: '请打开 ScreenSync 主应用以启动服务器'
+    });
     return;
   }
   

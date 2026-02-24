@@ -596,6 +596,13 @@
     .completion-icon svg {
       width: 40px !important;
       height: 40px !important;
+      stroke: white !important;
+      stroke-width: 2.8 !important;
+    }
+
+    #step5.active {
+      align-items: center;
+      justify-content: center;
     }
 
     .spinner {
@@ -923,15 +930,16 @@
     </div>
 
     <!-- Step 5: Complete -->
-    <div class="step" id="step5" style="display: flex; flex-direction: column; align-items: center; justify-content: center;">
-      <div style="width: 88px; height: 88px; background: #5EC269; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin-bottom: 20px;">
-        <svg width="40" height="40" viewBox="0 0 24 24" fill="none">
-          <path d="M18 7L9.5 17L6 13" stroke="white" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
+    <div class="step" id="step5">
+      <div style="width: 88px; height: 88px; background: var(--unified-green); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 16px var(--unified-green-glow);">
+        <div class="completion-icon">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M20 6L9 17L4 12"/>
+          </svg>
+        </div>
       </div>
       <h2 class="step-title" style="margin: 0;">安装完成</h2>
-
-      <div class="button-group" style="justify-content: center; margin-top: 24px;">
+      <div class="button-group" style="justify-content: center; margin-top: 0;">
         <button class="btn btn-primary" id="step5Finish" style="min-width: 120px;">
           我知道了
         </button>

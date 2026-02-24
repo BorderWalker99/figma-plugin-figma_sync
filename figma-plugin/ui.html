@@ -4983,43 +4983,33 @@
       }, 300);
     }
     
-    // 修复服务器连接（自动启动服务器）
+    // 修复服务器连接（尝试检测服务器是否可达后重连）
     function repairServerConnection() {
-      log('🔧 正在尝试自动启动服务器...');
-      // showToast('正在启动服务器...', 'loading'); // 移除 loading toast，避免视觉干扰
+      log('🔧 正在检测服务器状态...');
       
-      // 触发后端自动启动服务器
-      parent.postMessage({
-        pluginMessage: {
-          type: 'repair-server',
-          installPath: serverInstallPath || '/Applications/ScreenSync - SourceCode'
-        }
-      }, '*');
-      
-      // 🚀 优化：缩短等待时间（从 7s 减少到 3s）
-      setTimeout(() => {
-        log('🔄 服务器已启动，正在连接...');
-        connect();
-        
-        // 🚀 优化：缩短检查时间（从 3s 减少到 2s）
-        setTimeout(() => {
-          if (!ws || ws.readyState !== WebSocket.OPEN) {
-            if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-              log('⚠️  仍未连接，继续尝试...');
-              reconnectAttempts++;
-              attemptReconnect();
-            } else {
-              log('❌ 自动修复失败');
+      fetch('http://localhost:8888/health', { mode: 'no-cors' })
+        .then(() => {
+          log('🔄 服务器可达，正在重新连接 WebSocket...');
+          connect();
+          setTimeout(() => {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+              log('❌ WebSocket 连接失败，显示帮助');
               updateStatus('disconnected', t('status_reconnect'));
               reconnectAttempts = 0;
+              showServerStartHelp();
+            } else {
+              reconnectAttempts = 0;
+              log('✅ 服务器已连接成功');
+              showToast(t('toast_server_started'), 'success');
             }
-          } else {
-            reconnectAttempts = 0;
-            log('✅ 服务器已启动并连接成功');
-            showToast(t('toast_server_started'), 'success');
-          }
-        }, 2000);
-      }, 3000);
+          }, 2000);
+        })
+        .catch(() => {
+          log('❌ 服务器不可达，请先启动 ScreenSync 主应用');
+          updateStatus('disconnected', t('status_reconnect'));
+          reconnectAttempts = 0;
+          showServerStartHelp();
+        });
     }
     
     // 显示服务器启动帮助
@@ -5058,7 +5048,8 @@
       `;
       
       // 替换主界面内容
-      document.querySelector('.container').innerHTML = helpHtml;
+      const container = document.querySelector('.app') || document.body;
+      container.innerHTML = helpHtml;
       
       // 定义重试函数
       window.retryStartServer = function() {
