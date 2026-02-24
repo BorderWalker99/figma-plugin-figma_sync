@@ -85,6 +85,14 @@ fn screensync_deps() -> PathBuf {
     home_dir().join(".screensync").join("deps")
 }
 
+fn screensync_app_dir() -> PathBuf {
+    home_dir().join(".screensync").join("app")
+}
+
+fn shell_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\"'\"'"))
+}
+
 fn darwin_version() -> u32 {
     Command::new("uname")
         .arg("-r")
@@ -1184,6 +1192,57 @@ pub fn setup_config(install_path: String, sync_mode: String, local_folder: Strin
             result.insert("error".into(), e.to_string().into());
         }
     }
+    result
+}
+
+#[tauri::command]
+pub fn prepare_runtime_install(install_path: String) -> HashMap<String, serde_json::Value> {
+    let mut result = HashMap::new();
+    let source = Path::new(&install_path);
+    let target = screensync_app_dir();
+
+    if !source.join("package.json").exists() {
+        result.insert("success".into(), false.into());
+        result.insert(
+            "error".into(),
+            format!("源目录缺少 package.json: {install_path}").into(),
+        );
+        return result;
+    }
+
+    if let (Ok(src_canon), Ok(dst_canon)) = (source.canonicalize(), target.canonicalize()) {
+        if src_canon == dst_canon {
+            result.insert("success".into(), true.into());
+            result.insert("path".into(), target.to_string_lossy().to_string().into());
+            return result;
+        }
+    }
+
+    if let Some(parent) = target.parent() {
+        if let Err(e) = fs::create_dir_all(parent) {
+            result.insert("success".into(), false.into());
+            result.insert("error".into(), format!("创建目录失败: {e}").into());
+            return result;
+        }
+    }
+
+    let src = shell_quote(&source.to_string_lossy());
+    let dst = shell_quote(&target.to_string_lossy());
+    let rsync_cmd = format!(
+        "rsync -a --delete --exclude '.DS_Store' --exclude '*.log' {src}/ {dst}/"
+    );
+
+    if let Err(e) = run_cmd(&rsync_cmd) {
+        result.insert("success".into(), false.into());
+        result.insert("error".into(), format!("复制项目文件失败: {e}").into());
+        return result;
+    }
+
+    let target_str = target.to_string_lossy().to_string();
+    strip_quarantine(&target_str);
+
+    result.insert("success".into(), true.into());
+    result.insert("path".into(), target_str.into());
     result
 }
 

@@ -21,6 +21,7 @@ fn main() {
             commands::enable_anywhere,
             commands::install_all_dependencies,
             commands::install_dependencies,
+            commands::prepare_runtime_install,
             commands::setup_config,
             commands::start_server,
             commands::copy_to_clipboard,

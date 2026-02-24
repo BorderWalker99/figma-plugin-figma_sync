@@ -400,6 +400,18 @@ async function setupConfiguration() {
 
   try { await invoke('enable_anywhere'); } catch {}
 
+  const runtimeInstallResult = await invoke('prepare_runtime_install', { installPath });
+  if (!runtimeInstallResult.success || !runtimeInstallResult.path) {
+    configStatus.innerHTML = `
+      <div class="status-item error">
+        <div class="status-icon"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
+        <div class="status-content"><div class="status-label">迁移失败</div><div class="status-detail">${runtimeInstallResult.error || '无法迁移到稳定目录'}</div></div>
+      </div>`;
+    document.getElementById('step4Buttons').style.display = 'flex';
+    return;
+  }
+  installPath = runtimeInstallResult.path;
+
   const localFolder = selectedMode === 'drive'
     ? installPath.replace(/[^/]+$/, '') + 'ScreenSyncImg'
     : (await getHomeDir()) + '/Library/Mobile Documents/com~apple~CloudDocs/ScreenSyncImg';

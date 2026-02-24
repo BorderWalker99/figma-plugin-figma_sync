@@ -3147,7 +3147,7 @@ const { checkAndNotifyUpdates, handlePluginUpdate, handleServerUpdate, handleFul
 
 
 const PORT = process.env.PORT || 8888;
-const HOST = process.env.HOST || '0.0.0.0';
+const HOST = process.env.HOST || '::';
 
 // 启动服务器，添加错误处理
 try {

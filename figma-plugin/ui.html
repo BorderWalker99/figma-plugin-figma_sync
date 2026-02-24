@@ -4837,7 +4837,7 @@
     // Request language setting from clientStorage on startup
     postToPlugin('get-language');
     
-    const SERVER_URL = 'ws://localhost:8888';
+    const SERVER_URL = 'ws://127.0.0.1:8888';
     const connectionId = 'sync-session-1';
     
     // ─── Communication Helpers ──────────────────────────────────────────────
@@ -4987,7 +4987,7 @@
     function repairServerConnection() {
       log('🔧 正在检测服务器状态...');
       
-      fetch('http://localhost:8888/health', { mode: 'no-cors' })
+      fetch('http://127.0.0.1:8888/health', { mode: 'no-cors' })
         .then(() => {
           log('🔄 服务器可达，正在重新连接 WebSocket...');
           connect();
