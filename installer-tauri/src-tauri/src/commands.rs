@@ -1289,7 +1289,14 @@ pub fn setup_autostart(install_path: String) -> InstallResult {
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
-    <false/>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+        <key>Crashed</key>
+        <true/>
+    </dict>
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
@@ -1324,8 +1331,8 @@ pub fn setup_autostart(install_path: String) -> InstallResult {
         };
     }
 
-    // Poll port 8888 until the server is actually listening (up to ~15s).
-    for _ in 0..15 {
+    // Poll port 8888 until the server is actually listening (up to ~12s).
+    for _ in 0..12 {
         std::thread::sleep(std::time::Duration::from_secs(1));
         if run_cmd_ok("lsof -i :8888 -sTCP:LISTEN") {
             return InstallResult {
@@ -1336,7 +1343,30 @@ pub fn setup_autostart(install_path: String) -> InstallResult {
         }
     }
 
-    // launchctl loaded OK but server not yet on port — still a partial success
+    // Fallback: launchctl-managed process didn't bind port in time.
+    // Spawn server directly as a detached process so the user isn't left without a server.
+    let start_script = Path::new(&install_path).join("start.js");
+    if start_script.exists() {
+        let _ = Command::new(&node_path)
+            .arg(start_script.to_string_lossy().to_string())
+            .current_dir(&install_path)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn();
+
+        // Give the fallback spawn a few seconds
+        for _ in 0..5 {
+            std::thread::sleep(std::time::Duration::from_secs(1));
+            if run_cmd_ok("lsof -i :8888 -sTCP:LISTEN") {
+                return InstallResult {
+                    success: true,
+                    message: Some("服务器已启动（直接启动模式），自启动已配置".into()),
+                    error: None, cancelled: None,
+                };
+            }
+        }
+    }
+
     InstallResult {
         success: true,
         message: Some("自启动已配置，服务器正在启动中".into()),
