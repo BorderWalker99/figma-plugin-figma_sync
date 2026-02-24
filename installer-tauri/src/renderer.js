@@ -249,14 +249,11 @@ window.recheckDependencies = checkSystemRequirements;
 async function installMissingDependencies() {
   const actionBtn = document.getElementById('step2ActionBtn');
   const checks = document.getElementById('systemChecks');
-  const logContainer = document.getElementById('step2Log');
+  let _depLogBuffer = [];
 
   actionBtn.disabled = true;
   actionBtn.classList.add('keep-raised');
   actionBtn.innerHTML = '<svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg> 正在安装...';
-
-  logContainer.style.display = 'block';
-  logContainer.innerHTML = '';
 
   const depIndices = { homebrew: 0, node: 1, imagemagick: 2, ffmpeg: 3, gifsicle: 4 };
   const displayNames = { homebrew: 'Homebrew', node: 'Node.js', imagemagick: 'ImageMagick', ffmpeg: 'FFmpeg', gifsicle: 'Gifsicle' };
@@ -297,15 +294,7 @@ async function installMissingDependencies() {
   });
 
   const unlistenLog = await listen('dep-install-log', (event) => {
-    const lines = event.payload.data.split('\n');
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      const logLine = document.createElement('div');
-      logLine.style.cssText = 'padding: 1px 0; word-break: break-all; white-space: pre-wrap;';
-      logLine.textContent = line;
-      logContainer.appendChild(logLine);
-    }
-    logContainer.scrollTop = logContainer.scrollHeight;
+    _depLogBuffer.push(event.payload.data);
   });
 
   try {
@@ -318,7 +307,7 @@ async function installMissingDependencies() {
     if (result.success) {
       showToast('所有依赖安装完成', 'success');
       actionBtn.innerHTML = '<svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg> 正在验证...';
-      setTimeout(() => { logContainer.style.display = 'none'; checkSystemRequirements(); }, 1500);
+      setTimeout(() => { checkSystemRequirements(); }, 1500);
     } else {
       if (result.cancelled) showToast('已取消安装', 'error');
       else showToast(result.error || '安装失败', 'error');
@@ -455,32 +444,22 @@ window.finishInstallation = async function() {
   try {
     button.classList.add('keep-raised');
     button.disabled = true;
-    button.textContent = '正在启动服务器';
-
-    const startResult = await invoke('start_server', { installPath });
-    if (!startResult.success) {
-      button.classList.remove('keep-raised');
-      button.disabled = false;
-      button.textContent = originalText;
-      showToast('服务器启动失败', 'error');
-      return;
-    }
 
     if (selectedMode === 'icloud') {
       button.textContent = '正在配置 iCloud 文件夹';
       await invoke('setup_icloud_keep_downloaded');
     }
 
-    button.textContent = '正在配置自启动';
+    button.textContent = '正在启动服务器...';
     const autostartResult = await invoke('setup_autostart', { installPath });
 
     if (autostartResult.success) {
       button.textContent = '配置完成';
-      showToast('服务自启动已配置完成', 'success');
+      showToast(autostartResult.message || '服务已启动并配置自启动', 'success');
       setTimeout(() => invoke('quit_app'), 1500);
     } else {
-      button.textContent = '启动成功（自启失败）';
-      showToast('服务器已启动', 'warning');
+      button.textContent = '启动失败';
+      showToast(autostartResult.error || '自启动配置失败', 'error');
       setTimeout(() => invoke('quit_app'), 2000);
     }
   } catch (err) {

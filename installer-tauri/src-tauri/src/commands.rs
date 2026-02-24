@@ -1308,16 +1308,39 @@ pub fn setup_autostart(install_path: String) -> InstallResult {
         return InstallResult { success: false, message: None, error: Some(e.to_string()), cancelled: None };
     }
 
-    // Unload, wait, load
+    // Kill any existing server so the fresh launchctl-managed one can take over cleanly.
+    let _ = run_cmd("lsof -ti :8888 | xargs kill -9 2>/dev/null");
+    std::thread::sleep(std::time::Duration::from_millis(500));
+
+    // Unload previous agent (if any), then load the new one.
     let _ = run_cmd(&format!("launchctl unload \"{}\" 2>/dev/null", plist_path.display()));
-    std::thread::sleep(std::time::Duration::from_secs(1));
+    std::thread::sleep(std::time::Duration::from_millis(500));
     let load_result = run_cmd(&format!("launchctl load \"{}\"", plist_path.display()));
 
-    if load_result.is_ok() {
-        std::thread::sleep(std::time::Duration::from_secs(3));
-        InstallResult { success: true, message: Some("服务器已配置为开机自动启动".into()), error: None, cancelled: None }
-    } else {
-        InstallResult { success: false, message: None, error: Some("LaunchAgent 加载失败".into()), cancelled: None }
+    if load_result.is_err() {
+        return InstallResult {
+            success: false, message: None,
+            error: Some("LaunchAgent 加载失败".into()), cancelled: None,
+        };
+    }
+
+    // Poll port 8888 until the server is actually listening (up to ~15s).
+    for _ in 0..15 {
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        if run_cmd_ok("lsof -i :8888 -sTCP:LISTEN") {
+            return InstallResult {
+                success: true,
+                message: Some("服务器已启动并配置为开机自动启动".into()),
+                error: None, cancelled: None,
+            };
+        }
+    }
+
+    // launchctl loaded OK but server not yet on port — still a partial success
+    InstallResult {
+        success: true,
+        message: Some("自启动已配置，服务器正在启动中".into()),
+        error: None, cancelled: None,
     }
 }
 

@@ -517,6 +517,7 @@
       margin: 0;
       padding: 0;
       margin-top: auto;
+      justify-content: flex-end;
     }
 
     /* Step 1: force Electron-like welcome layout */
@@ -859,7 +860,7 @@
         </div>
       </div>
 
-      <div class="log-container" id="step2Log" style="display: none; max-height: 150px; margin-top: 16px; font-size: 11px;"></div>
+      <!-- log container removed: logs collected in memory only -->
 
       <div class="button-group" id="step2Buttons" style="display: none;">
         <div style="flex:1"></div>
@@ -924,12 +925,10 @@
     <!-- Step 5: Complete -->
     <div class="step" id="step5" style="justify-content: center; gap: 16px;">
       <div class="step-header" style="margin-bottom: 0; margin-top: -12px;">
-        <div style="width: 80px; height: 80px; background: var(--unified-green); border-radius: 50%; color: white; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; box-shadow: 0 4px 16px var(--unified-green-glow);">
-          <div class="completion-icon" style="transform: translateY(4px);">
-            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M20 6L9 17L4 12" stroke="white" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-          </div>
+        <div style="width: 80px; height: 80px; background: var(--unified-green); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; box-shadow: 0 4px 16px var(--unified-green-glow);">
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none">
+            <path d="M20 6L9 17L4 12" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
         </div>
         <h2 class="step-title">安装完成</h2>
       </div>
