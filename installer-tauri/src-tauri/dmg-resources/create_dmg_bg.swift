@@ -48,23 +48,24 @@ for radius in stride(from: 180.0, through: 20.0, by: -10.0) {
     ))
 }
 
-// ── Single curved arrow pointing directly at the app icon ──
-let arrowColor = CGColor(red: 0.25, green: 0.83, blue: 0.41, alpha: 0.85)
+// ── Single curved arrow pointing AT the app icon (from right side) ──
+let arrowColor = CGColor(red: 0.25, green: 0.83, blue: 0.41, alpha: 0.8)
 g.setStrokeColor(arrowColor)
-g.setLineWidth(5.0)
+g.setLineWidth(4.0)
 g.setLineCap(.round)
 
+// Arrow starts from upper-right, curves down to point at the icon
+let startPt = CGPoint(x: iconCx + 320, y: iconCy + 200)  // upper-right
+let ctrlPt  = CGPoint(x: iconCx + 200, y: iconCy - 30)   // control point
+let endPt   = CGPoint(x: iconCx + 60,  y: iconCy + 20)    // tip near icon
 let arrowPath = CGMutablePath()
-let startPt = CGPoint(x: iconCx - 300, y: iconCy + 200)
-let ctrlPt  = CGPoint(x: iconCx - 180, y: iconCy - 20)
-let endPt   = CGPoint(x: iconCx - 60,  y: iconCy + 30)
 arrowPath.move(to: startPt)
 arrowPath.addQuadCurve(to: endPt, control: ctrlPt)
 g.addPath(arrowPath)
 g.strokePath()
 
-// Arrowhead
-let headLen: CGFloat = 24
+// Arrowhead pointing at the icon
+let headLen: CGFloat = 22
 let t: CGFloat = 0.98
 let tangentX = 2 * (1 - t) * (ctrlPt.x - startPt.x) + 2 * t * (endPt.x - ctrlPt.x)
 let tangentY = 2 * (1 - t) * (ctrlPt.y - startPt.y) + 2 * t * (endPt.y - ctrlPt.y)
@@ -96,19 +97,19 @@ func drawText(_ text: String, font: NSFont, color: NSColor, center: CGPoint) {
     str.draw(in: rect)
 }
 
-// "双击安装" - main title above the icon
-let titleFont = NSFont(name: "PingFangSC-Semibold", size: 52) ?? NSFont.boldSystemFont(ofSize: 52)
+// "双击安装" - positioned directly above the icon
+// Icon is at CG (660, 380). Place text ~120px above icon center.
+let titleFont = NSFont(name: "PingFangSC-Semibold", size: 36) ?? NSFont.boldSystemFont(ofSize: 36)
 drawText("双击安装",
     font: titleFont,
     color: NSColor.white,
-    center: CGPoint(x: CGFloat(W) / 2, y: CGFloat(H) - 120))
+    center: CGPoint(x: iconCx, y: iconCy + 160))
 
-// English subtitle
-let subFont = NSFont(name: "PingFangSC-Regular", size: 26) ?? NSFont.systemFont(ofSize: 26)
+let subFont = NSFont(name: "PingFangSC-Regular", size: 20) ?? NSFont.systemFont(ofSize: 20)
 drawText("Double click to install",
     font: subFont,
-    color: NSColor(red: 0.67, green: 0.67, blue: 0.80, alpha: 1.0),
-    center: CGPoint(x: CGFloat(W) / 2, y: CGFloat(H) - 185))
+    color: NSColor(red: 0.67, green: 0.67, blue: 0.80, alpha: 0.8),
+    center: CGPoint(x: iconCx, y: iconCy + 115))
 
 // Bottom hint — accurate instructions for all macOS versions
 let hintFont = NSFont(name: "PingFangSC-Regular", size: 19) ?? NSFont.systemFont(ofSize: 19)

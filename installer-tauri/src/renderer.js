@@ -1,6 +1,17 @@
 // Tauri API (withGlobalTauri enabled in tauri.conf.json)
-const { invoke } = window.__TAURI__.core;
-const { listen } = window.__TAURI__.event;
+let invoke, listen;
+try {
+  invoke = window.__TAURI__.core.invoke;
+  listen = window.__TAURI__.event.listen;
+} catch (e) {
+  // Tauri API not yet available — try alternative paths
+  try {
+    invoke = window.__TAURI__.invoke;
+    listen = window.__TAURI__.event.listen;
+  } catch (e2) {
+    document.title = 'JS Error: ' + e.message;
+  }
+}
 
 // Alert
 window.showAlert = function(message, title = '提示') {
@@ -44,11 +55,15 @@ function showStep(step) {
 }
 
 window.nextStep = function() {
-  if (currentStep === 1 && !installPath) {
-    showToast('请先选择项目文件夹', 'error');
-    return;
+  try {
+    if (currentStep === 1 && !installPath) {
+      showToast('请先选择项目文件夹', 'error');
+      return;
+    }
+    if (currentStep < 5) showStep(currentStep + 1);
+  } catch (err) {
+    showToast('步骤切换失败: ' + err.message, 'error');
   }
-  if (currentStep < 5) showStep(currentStep + 1);
 };
 
 window.prevStep = function() {
@@ -417,7 +432,7 @@ async function copyUserId(userId) {
 }
 
 window.finishInstallation = async function() {
-  const button = document.querySelector('#step5 .btn-primary');
+  const button = document.getElementById('step5Finish');
   if (!button) return;
   const originalText = button.textContent;
 
@@ -460,7 +475,29 @@ window.finishInstallation = async function() {
   }
 };
 
+window.onerror = function(msg, src, line, col, err) {
+  document.title = `Error: ${msg} (${src}:${line})`;
+};
+
 document.addEventListener('DOMContentLoaded', async () => {
   showStep(1);
-  await detectProjectRoot();
+
+  // Tauri 2.x injects a CSP nonce which silently disables 'unsafe-inline',
+  // so all event handlers MUST be attached via addEventListener.
+  const bind = (id, handler) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('click', handler);
+  };
+
+  bind('step1Next', () => window.nextStep());
+  bind('step3Next', () => window.nextStep());
+  bind('step4Next', () => window.nextStep());
+  bind('step5Finish', () => window.finishInstallation());
+  bind('alertCloseBtn', () => window.closeAlert());
+
+  try {
+    await detectProjectRoot();
+  } catch (err) {
+    showToast('初始化失败: ' + err.message, 'error');
+  }
 });

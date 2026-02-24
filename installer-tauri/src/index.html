@@ -785,7 +785,7 @@
       </div>
 
       <div class="button-group" style="justify-content: center; margin-top: 0; padding-bottom: 20px;">
-        <button class="btn btn-primary" id="step1Next" onclick="nextStep()" style="min-width: 120px; padding: 10px 12px 10px 20px; font-size: 15px;">
+        <button class="btn btn-primary" id="step1Next" style="min-width: 120px; padding: 10px 12px 10px 20px; font-size: 15px;">
           开始安装
           <svg viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
         </button>
@@ -867,7 +867,7 @@
 
       <div class="button-group" id="step3Buttons" style="display: none;">
         <div style="flex:1"></div>
-        <button class="btn btn-primary" onclick="nextStep()" id="step3Next" disabled>
+        <button class="btn btn-primary" id="step3Next" disabled>
           下一步
           <svg viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
         </button>
@@ -893,7 +893,7 @@
 
       <div class="button-group" id="step4Buttons" style="display: none;">
         <div style="flex:1"></div>
-        <button class="btn btn-primary" onclick="nextStep()" id="step4Next" disabled>
+        <button class="btn btn-primary" id="step4Next" disabled>
           下一步
           <svg viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
         </button>
@@ -914,7 +914,7 @@
       </div>
 
       <div class="button-group" style="justify-content: center; margin-top: 0;">
-        <button class="btn btn-primary" onclick="finishInstallation()" style="min-width: 120px;">
+        <button class="btn btn-primary" id="step5Finish" style="min-width: 120px;">
           我知道了
         </button>
       </div>
@@ -942,15 +942,11 @@
       <div class="modal-title" id="modalTitle">提示</div>
       <div class="modal-message" id="modalMessage">内容</div>
       <div class="modal-actions">
-        <button class="btn btn-primary" onclick="closeAlert()">我知道了</button>
+        <button class="btn btn-primary" id="alertCloseBtn">我知道了</button>
       </div>
     </div>
   </div>
 
   <script src="renderer.js"></script>
-  <script>
-    // Tauri polyfill: expose invoke and listen from global __TAURI__
-    // withGlobalTauri is enabled in tauri.conf.json
-  </script>
 </body>
 </html>
