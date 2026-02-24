@@ -395,6 +395,13 @@ function showErrorDetailModal(logText) {
   overlay.classList.add('show');
 }
 
+function showDiagnosticModal(text) {
+  const overlay = document.getElementById('diagnosticOverlay');
+  const content = document.getElementById('diagnosticContent');
+  content.textContent = text || '（无输出）';
+  overlay.classList.add('show');
+}
+
 async function setupConfiguration() {
   const configStatus = document.getElementById('configStatus');
 
@@ -511,6 +518,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   bind('step3Next', () => window.nextStep());
   bind('step4Next', () => window.nextStep());
   bind('step5Finish', () => window.finishInstallation());
+  bind('step5Diagnostic', async () => {
+    try {
+      const content = document.getElementById('diagnosticContent');
+      content.textContent = '正在收集诊断信息...';
+      document.getElementById('diagnosticOverlay').classList.add('show');
+      const result = await invoke('run_diagnostic', { install_path: installPath || null });
+      content.textContent = result || '（无输出）';
+    } catch (err) {
+      document.getElementById('diagnosticContent').textContent = '诊断失败: ' + (err?.message || err);
+    }
+  });
   bind('alertCloseBtn', () => window.closeAlert());
   bind('errorDetailCloseBtn', () => {
     document.getElementById('errorDetailOverlay').classList.remove('show');
@@ -519,6 +537,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     const text = document.getElementById('errorDetailContent').textContent;
     if (invoke) {
       invoke('copy_to_clipboard', { text }).then(() => showToast('日志已复制', 'success')).catch(() => {});
+    }
+  });
+  bind('diagnosticCloseBtn', () => {
+    document.getElementById('diagnosticOverlay').classList.remove('show');
+  });
+  bind('diagnosticCopyBtn', () => {
+    const text = document.getElementById('diagnosticContent').textContent;
+    if (invoke) {
+      invoke('copy_to_clipboard', { text }).then(() => showToast('已复制', 'success')).catch(() => {});
     }
   });
 

@@ -1548,6 +1548,82 @@ pub fn setup_icloud_keep_downloaded() -> InstallResult {
     InstallResult { success: true, message: Some("iCloud 文件夹已配置".into()), error: None, cancelled: None }
 }
 
+// ─── Diagnostic (macOS) ──────────────────────────────────────────────────────
+
+#[tauri::command]
+pub fn run_diagnostic(install_path: Option<String>) -> Result<String, String> {
+    #[cfg(not(target_os = "macos"))]
+    return Ok("诊断仅支持 macOS".into());
+
+    #[cfg(target_os = "macos")]
+    {
+        let mut out = String::new();
+
+        out.push_str("=== 1. LaunchAgent 列表 (grep screen) ===\n");
+        let list = run_cmd("launchctl list 2>/dev/null | grep -i screen").unwrap_or_else(|e| e);
+        out.push_str(&list);
+        out.push_str("\n\n");
+
+        out.push_str("=== 2. LaunchAgents 目录中的 ScreenSync 相关文件 ===\n");
+        let agents_dir = home_dir().join("Library/LaunchAgents");
+        if agents_dir.exists() {
+            if let Ok(entries) = fs::read_dir(&agents_dir) {
+                for e in entries.flatten() {
+                    let name = e.file_name().to_string_lossy().into_owned();
+                    if name.to_lowercase().contains("screensync") {
+                        out.push_str(&format!("  {}\n", name));
+                    }
+                }
+            }
+        }
+        out.push_str("\n");
+
+        out.push_str("=== 3. com.screensync.server.plist 内容 ===\n");
+        let plist_path = home_dir().join("Library/LaunchAgents/com.screensync.server.plist");
+        if plist_path.exists() {
+            if let Ok(content) = fs::read_to_string(&plist_path) {
+                out.push_str(&content);
+            } else {
+                out.push_str("  (无法读取)\n");
+            }
+        } else {
+            out.push_str("  (文件不存在)\n");
+        }
+        out.push_str("\n");
+
+        out.push_str("=== 4. 端口 8888 监听状态 ===\n");
+        let port = run_cmd("lsof -i :8888 -sTCP:LISTEN 2>/dev/null").unwrap_or_else(|e| e);
+        if port.is_empty() {
+            out.push_str("  (无进程监听)\n");
+        } else {
+            out.push_str(&format!("{}\n", port));
+        }
+        out.push_str("\n");
+
+        out.push_str("=== 5. 服务错误日志 (tail -30) ===\n");
+        let err_log = run_cmd("tail -30 /tmp/screensync-server-error.log 2>/dev/null").unwrap_or_else(|_| "(无或无法读取)".into());
+        out.push_str(&err_log);
+        out.push_str("\n\n");
+
+        out.push_str("=== 6. 服务标准输出 (tail -20) ===\n");
+        let out_log = run_cmd("tail -20 /tmp/screensync-server.log 2>/dev/null").unwrap_or_else(|_| "(无或无法读取)".into());
+        out.push_str(&out_log);
+
+        if let Some(ref ip) = install_path {
+            let app_log = Path::new(ip).join("server-error.log");
+            if app_log.exists() {
+                out.push_str("\n\n=== 7. 安装目录 server-error.log (tail -20) ===\n");
+                if let Ok(c) = fs::read_to_string(&app_log) {
+                    let lines: Vec<_> = c.lines().rev().take(20).collect();
+                    out.push_str(&lines.into_iter().rev().collect::<Vec<_>>().join("\n"));
+                }
+            }
+        }
+
+        Ok(out)
+    }
+}
+
 // ─── Home Dir ────────────────────────────────────────────────────────────────
 
 #[tauri::command]

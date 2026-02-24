@@ -939,7 +939,10 @@
         </div>
       </div>
       <h2 class="step-title" style="margin: 0;">安装完成</h2>
-      <div class="button-group" style="justify-content: center; margin-top: 0;">
+      <div class="button-group" style="justify-content: center; margin-top: 0; gap: 10px;">
+        <button class="btn btn-secondary" id="step5Diagnostic" style="min-width: 100px;">
+          自启动诊断
+        </button>
         <button class="btn btn-primary" id="step5Finish" style="min-width: 120px;">
           我知道了
         </button>
@@ -987,6 +990,24 @@
       <div id="errorDetailContent" style="background: #1a1a1a; color: #d4d4d4; padding: 14px; border-radius: 8px; font-family: 'SF Mono', Monaco, Menlo, monospace; font-size: 11px; max-height: 45vh; overflow-y: auto; white-space: pre-wrap; word-break: break-all; margin-top: 12px; border: 1px solid var(--border);"></div>
       <div style="display: flex; justify-content: flex-end; margin-top: 12px;">
         <button class="btn btn-primary" id="errorDetailCloseBtn" style="padding: 8px 20px;">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="diagnosticOverlay" class="overlay">
+    <div class="modal" style="width: 520px; max-height: 85vh; text-align: left;">
+      <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+        <div>
+          <div class="modal-title" style="font-size: 16px; margin-bottom: 4px;">自启动诊断</div>
+          <div style="font-size: 12px; color: var(--text-secondary);">插件连接不上时，请把以下信息复制发送给开发者</div>
+        </div>
+        <button class="btn" id="diagnosticCopyBtn" style="min-width: auto; padding: 6px 14px; font-size: 12px; flex-shrink: 0;">
+          复制
+        </button>
+      </div>
+      <div id="diagnosticContent" style="background: #1a1a1a; color: #d4d4d4; padding: 14px; border-radius: 8px; font-family: 'SF Mono', Monaco, Menlo, monospace; font-size: 11px; max-height: 50vh; overflow-y: auto; white-space: pre-wrap; word-break: break-all; margin-top: 12px; border: 1px solid var(--border);"></div>
+      <div style="display: flex; justify-content: flex-end; margin-top: 12px;">
+        <button class="btn btn-primary" id="diagnosticCloseBtn" style="padding: 8px 20px;">关闭</button>
       </div>
     </div>
   </div>

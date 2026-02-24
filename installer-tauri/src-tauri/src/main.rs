@@ -27,6 +27,7 @@ fn main() {
             commands::copy_to_clipboard,
             commands::setup_autostart,
             commands::setup_icloud_keep_downloaded,
+            commands::run_diagnostic,
             commands::get_home_dir,
             commands::quit_app,
         ])

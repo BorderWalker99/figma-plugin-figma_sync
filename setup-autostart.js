@@ -82,6 +82,65 @@ function output(result) {
   process.stdout.write(`${JSON.stringify(result)}\n`);
 }
 
+/**
+ * Resolve the Node path that the user would use when running `npm start` manually.
+ * Prefer the login shell's `which node` so we match nvm/homebrew in ~/.zshrc.
+ * This avoids LaunchAgent using a different node than manual runs (e.g. firewall
+ * or native module mismatch).
+ */
+function resolveNodePath() {
+  const candidates = [
+    () => run('bash -l -c "which node"'),
+    () => run('bash -c "which node"'),
+    () => ({ ok: true, out: process.execPath }),
+    () => run('test -x /opt/homebrew/bin/node && echo /opt/homebrew/bin/node'),
+    () => run('test -x /usr/local/bin/node && echo /usr/local/bin/node'),
+    () => {
+      const local = path.join(os.homedir(), '.screensync', 'deps', 'node', 'bin', 'node');
+      return fs.existsSync(local) ? { ok: true, out: local } : { ok: false, out: '' };
+    },
+  ];
+  for (const fn of candidates) {
+    try {
+      const r = fn();
+      if (r.ok && r.out && r.out.trim().length > 0) {
+        return r.out.trim().split('\n')[0].trim();
+      }
+    } catch (_) {}
+  }
+  return process.execPath;
+}
+
+/**
+ * Unload and remove any old ScreenSync-related LaunchAgents to avoid conflicts
+ * with previous Electron installs or stale plists.
+ */
+function cleanOldLaunchAgents() {
+  const agentsDir = path.join(os.homedir(), 'Library', 'LaunchAgents');
+  if (!fs.existsSync(agentsDir)) return;
+
+  const uidRes = run('id -u');
+  const domain = uidRes.ok && uidRes.out ? `gui/${uidRes.out}` : null;
+
+  const files = fs.readdirSync(agentsDir);
+  for (const f of files) {
+    if (!f.toLowerCase().includes('screensync')) continue;
+    const plistPath = path.join(agentsDir, f);
+    if (!fs.statSync(plistPath).isFile()) continue;
+
+    const label = f.replace(/\.plist$/, '');
+    if (domain) {
+      run(`launchctl bootout ${domain}/${label} 2>/dev/null`);
+      run(`launchctl disable ${domain}/${label} 2>/dev/null`);
+    }
+    run(`launchctl unload ${shQuote(plistPath)} 2>/dev/null`);
+    try {
+      fs.unlinkSync(plistPath);
+    } catch (_) {}
+  }
+  sleepSec(1);
+}
+
 function main() {
   const installPath = process.argv[2];
   if (!installPath || !fs.existsSync(installPath)) {
@@ -89,7 +148,7 @@ function main() {
     process.exit(1);
   }
 
-  const nodePath = process.execPath;
+  const nodePath = resolveNodePath();
   const startScript = path.join(installPath, 'start.js');
   if (!fs.existsSync(startScript)) {
     output({ success: false, error: `未找到 start.js: ${startScript}` });
@@ -98,6 +157,9 @@ function main() {
 
   const launchAgentsDir = path.join(os.homedir(), 'Library', 'LaunchAgents');
   fs.mkdirSync(launchAgentsDir, { recursive: true });
+
+  // Clean up any old ScreenSync LaunchAgents (e.g. from Electron) to avoid conflicts
+  cleanOldLaunchAgents();
 
   const plistName = 'com.screensync.server.plist';
   const plistPath = path.join(launchAgentsDir, plistName);
