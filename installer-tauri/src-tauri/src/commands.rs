@@ -1596,6 +1596,27 @@ pub fn run_diagnostic(install_path: Option<String>) -> Result<String, String> {
         }
         out.push_str("\n");
 
+        out.push_str("=== 3b. LaunchAgent 禁用状态检查 ===\n");
+        let disabled_check = run_cmd("launchctl print-disabled gui/$(id -u) 2>/dev/null | grep -i screensync")
+            .unwrap_or_else(|_| "(无法检查)".into());
+        if disabled_check.is_empty() {
+            out.push_str("  (未在禁用列表中 — 正常)\n");
+        } else {
+            out.push_str(&format!("{}\n", disabled_check));
+        }
+        out.push_str("\n");
+
+        out.push_str("=== 3c. LaunchAgent 是否已注册到 launchd ===\n");
+        let registered = run_cmd("launchctl list | grep com.screensync.server")
+            .unwrap_or_else(|_| "(未注册)".into());
+        if registered.is_empty() {
+            out.push_str("  ❌ com.screensync.server 未注册 — 自启动不会生效\n");
+            out.push_str("  修复命令: launchctl enable gui/$(id -u)/com.screensync.server && launchctl load ~/Library/LaunchAgents/com.screensync.server.plist\n");
+        } else {
+            out.push_str(&format!("  ✅ {}\n", registered));
+        }
+        out.push_str("\n");
+
         out.push_str("=== 4. 端口 8888 监听状态 ===\n");
         let port = run_cmd("lsof -i :8888 -sTCP:LISTEN 2>/dev/null").unwrap_or_else(|e| e);
         if port.is_empty() {
