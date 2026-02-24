@@ -129,39 +129,49 @@ function main() {
 
   fs.writeFileSync(plistPath, plistContent, 'utf8');
 
-  // Ensure no stale process keeps port 8888.
-  run('lsof -ti :8888 | xargs kill -9 2>/dev/null');
-  sleepSec(1);
+  const serverAlreadyRunning = portReady();
 
   const label = 'com.screensync.server';
   const uidRes = run('id -u');
   let loaded = false;
 
-  if (uidRes.ok && uidRes.out) {
+  // Mirror Electron behaviour: use legacy launchctl load/unload which does NOT
+  // kill a running server process.  The LaunchAgent is only needed for future
+  // reboots; the currently running server (started by start_server earlier in
+  // the install flow) must stay alive.
+  run(`launchctl unload ${shQuote(plistPath)} 2>/dev/null`);
+  sleepSec(1);
+  const loadRes = run(`launchctl load ${shQuote(plistPath)}`);
+  if (loadRes.ok || (loadRes.out && loadRes.out.includes('already loaded'))) {
+    loaded = true;
+  }
+
+  if (!loaded && uidRes.ok && uidRes.out) {
     const domain = `gui/${uidRes.out}`;
     run(`launchctl bootout ${domain}/${label} 2>/dev/null`);
     sleepSec(1);
     const bootstrap = run(`launchctl bootstrap ${domain} ${shQuote(plistPath)}`);
     if (bootstrap.ok) {
       run(`launchctl enable ${domain}/${label} 2>/dev/null`);
-      run(`launchctl kickstart -k ${domain}/${label} 2>/dev/null`);
       loaded = true;
     }
   }
 
   if (!loaded) {
-    run(`launchctl unload ${shQuote(plistPath)} 2>/dev/null`);
-    sleepSec(1);
-    const loadRes = run(`launchctl load ${shQuote(plistPath)}`);
-    loaded = loadRes.ok;
-  }
-
-  if (!loaded) {
-    output({ success: false, error: 'LaunchAgent 加载失败（bootstrap/load 均失败）' });
+    output({ success: false, error: 'LaunchAgent 加载失败（load/bootstrap 均失败）' });
     process.exit(1);
   }
 
-  for (let i = 0; i < 12; i++) {
+  // If the server was already running before we configured the LaunchAgent,
+  // it is still running — no need to poll or fallback-spawn.
+  if (serverAlreadyRunning) {
+    output({ success: true, message: '服务器已启动并配置为开机自动启动' });
+    process.exit(0);
+  }
+
+  // Server was not running — LaunchAgent's RunAtLoad should start it.
+  // Poll for up to 15 seconds.
+  for (let i = 0; i < 15; i++) {
     sleepSec(1);
     if (portReady()) {
       output({ success: true, message: '服务器已启动并配置为开机自动启动' });
@@ -169,9 +179,9 @@ function main() {
     }
   }
 
-  // Fallback: directly spawn start.js once.
+  // Fallback: directly spawn start.js.
   run(`${shQuote(nodePath)} ${shQuote(startScript)} >/tmp/screensync-server.log 2>/tmp/screensync-server-error.log &`);
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 8; i++) {
     sleepSec(1);
     if (portReady()) {
       output({ success: true, message: '服务器已启动（直接启动模式），自启动已配置' });

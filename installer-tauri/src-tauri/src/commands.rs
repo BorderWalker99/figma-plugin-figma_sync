@@ -1443,33 +1443,34 @@ pub fn setup_autostart(install_path: String) -> InstallResult {
         return InstallResult { success: false, message: None, error: Some(e.to_string()), cancelled: None };
     }
 
-    // Kill any existing server so the fresh launchctl-managed one can take over cleanly.
-    let _ = run_cmd("lsof -ti :8888 | xargs kill -9 2>/dev/null");
-    std::thread::sleep(std::time::Duration::from_millis(500));
+    // Mirror Electron: do NOT kill the running server.  The server was already
+    // started by start_server earlier in the install flow; we only need to
+    // register the LaunchAgent for future reboots.
+    let server_already_running = run_cmd_ok("lsof -i :8888 -sTCP:LISTEN");
 
-    // Prefer modern launchctl flow (bootstrap/kickstart), fallback to legacy load/unload.
+    // Use legacy launchctl load/unload (like Electron) — it does not kill the
+    // currently running server process.
     let label = "com.screensync.server";
     let mut launch_loaded = false;
 
-    if let Ok(uid) = run_cmd("id -u") {
-        if !uid.is_empty() {
-            let domain = format!("gui/{uid}");
-            let _ = run_cmd(&format!("launchctl bootout {domain}/{label} 2>/dev/null"));
-            std::thread::sleep(std::time::Duration::from_millis(300));
-
-            if run_cmd(&format!("launchctl bootstrap {domain} \"{}\"", plist_path.display())).is_ok() {
-                let _ = run_cmd(&format!("launchctl enable {domain}/{label} 2>/dev/null"));
-                let _ = run_cmd(&format!("launchctl kickstart -k {domain}/{label} 2>/dev/null"));
-                launch_loaded = true;
-            }
-        }
+    let _ = run_cmd(&format!("launchctl unload \"{}\" 2>/dev/null", plist_path.display()));
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    if run_cmd(&format!("launchctl load \"{}\"", plist_path.display())).is_ok() {
+        launch_loaded = true;
     }
 
     if !launch_loaded {
-        let _ = run_cmd(&format!("launchctl unload \"{}\" 2>/dev/null", plist_path.display()));
-        std::thread::sleep(std::time::Duration::from_millis(500));
-        if run_cmd(&format!("launchctl load \"{}\"", plist_path.display())).is_ok() {
-            launch_loaded = true;
+        if let Ok(uid) = run_cmd("id -u") {
+            if !uid.is_empty() {
+                let domain = format!("gui/{uid}");
+                let _ = run_cmd(&format!("launchctl bootout {domain}/{label} 2>/dev/null"));
+                std::thread::sleep(std::time::Duration::from_millis(300));
+
+                if run_cmd(&format!("launchctl bootstrap {domain} \"{}\"", plist_path.display())).is_ok() {
+                    let _ = run_cmd(&format!("launchctl enable {domain}/{label} 2>/dev/null"));
+                    launch_loaded = true;
+                }
+            }
         }
     }
 
@@ -1480,8 +1481,18 @@ pub fn setup_autostart(install_path: String) -> InstallResult {
         };
     }
 
-    // Poll port 8888 until the server is actually listening (up to ~12s).
-    for _ in 0..12 {
+    // If the server was already running before we touched the LaunchAgent,
+    // it is still alive — return immediately (matches Electron behaviour).
+    if server_already_running {
+        return InstallResult {
+            success: true,
+            message: Some("服务器已启动并配置为开机自动启动".into()),
+            error: None, cancelled: None,
+        };
+    }
+
+    // Server was not running; LaunchAgent's RunAtLoad should start it.
+    for _ in 0..15 {
         std::thread::sleep(std::time::Duration::from_secs(1));
         if run_cmd_ok("lsof -i :8888 -sTCP:LISTEN") {
             return InstallResult {
