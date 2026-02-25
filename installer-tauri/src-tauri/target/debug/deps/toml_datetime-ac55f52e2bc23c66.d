@@ -1,8 +1,0 @@
-/Applications/ScreenSync - SourceCode/installer-tauri/src-tauri/target/debug/deps/toml_datetime-ac55f52e2bc23c66.d: /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/toml_datetime-0.7.5+spec-1.1.0/src/lib.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/toml_datetime-0.7.5+spec-1.1.0/src/datetime.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/toml_datetime-0.7.5+spec-1.1.0/src/de.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/toml_datetime-0.7.5+spec-1.1.0/src/ser.rs
-
-/Applications/ScreenSync - SourceCode/installer-tauri/src-tauri/target/debug/deps/libtoml_datetime-ac55f52e2bc23c66.rmeta: /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/toml_datetime-0.7.5+spec-1.1.0/src/lib.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/toml_datetime-0.7.5+spec-1.1.0/src/datetime.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/toml_datetime-0.7.5+spec-1.1.0/src/de.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/toml_datetime-0.7.5+spec-1.1.0/src/ser.rs
-
-/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/toml_datetime-0.7.5+spec-1.1.0/src/lib.rs:
-/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/toml_datetime-0.7.5+spec-1.1.0/src/datetime.rs:
-/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/toml_datetime-0.7.5+spec-1.1.0/src/de.rs:
-/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/toml_datetime-0.7.5+spec-1.1.0/src/ser.rs:

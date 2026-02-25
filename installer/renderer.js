@@ -686,26 +686,14 @@ async function installDependencies() {
     }
     document.getElementById('step3Next').disabled = false;
   } else {
-    // 显示红色错误通知栏
-    errorAlert.innerHTML = `
-      <div class="alert alert-error">
-        <div class="alert-icon" style="flex-shrink: 0; color: var(--danger);">
-          <svg viewBox="0 0 24 24" fill="none">
-            <circle cx="12" cy="12" r="10" fill="currentColor"/>
-            <path d="M12 8v5M12 16.5v.5" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-        </div>
-        <div>
-          <div style="font-weight: 600; margin-bottom: 4px;">依赖安装失败</div>
-          <div style="opacity: 0.9; font-size: 12px; white-space: pre-wrap; word-break: break-word;">${result.error}</div>
-        </div>
-      </div>`;
-    errorAlert.style.display = 'block';
-    
-    // 重置进度条
+    logOutput += '\n--- 错误信息 ---\n' + (result.error || '未知错误');
     progressBar.style.width = '0%';
     if (statusLabel) {
-      statusLabel.textContent = '安装失败';
+      statusLabel.innerHTML = `<span style="color: var(--danger);">安装失败</span><span style="display: inline-block; width: 8px;"></span><a id="viewErrorLink" href="#" style="color: var(--accent); font-size: 12px; text-decoration: underline; cursor: pointer;">查看原因</a>`;
+      document.getElementById('viewErrorLink').addEventListener('click', (e) => {
+        e.preventDefault();
+        showErrorDetailModal(logOutput);
+      });
     }
   }
   
@@ -851,11 +839,73 @@ window.finishInstallation = async function() {
   }
 }
 
+// Error detail modal
+function showErrorDetailModal(logText) {
+  const overlay = document.getElementById('errorDetailOverlay');
+  const content = document.getElementById('errorDetailContent');
+  content.textContent = logText || '（无日志）';
+  overlay.classList.add('show');
+}
+
+// Diagnostic modal
+function showDiagnosticModal(text) {
+  const overlay = document.getElementById('diagnosticOverlay');
+  const content = document.getElementById('diagnosticContent');
+  content.textContent = text || '（无输出）';
+  overlay.classList.add('show');
+}
+
 // 初始化
 document.addEventListener('DOMContentLoaded', async () => {
-  // 立即显示第一步（封面页），确保 Header 隐藏
   showStep(1);
-  
-  // 自动检测项目根目录（后台运行，不阻塞 UI）
+
+  // Diagnostic button
+  const diagBtn = document.getElementById('step5Diagnostic');
+  if (diagBtn) {
+    diagBtn.addEventListener('click', async () => {
+      const content = document.getElementById('diagnosticContent');
+      content.textContent = '正在收集诊断信息...';
+      document.getElementById('diagnosticOverlay').classList.add('show');
+      try {
+        const result = await ipcRenderer.invoke('run-diagnostic', installPath || null);
+        content.textContent = result || '（无输出）';
+      } catch (err) {
+        content.textContent = '诊断失败: ' + (err?.message || err);
+      }
+    });
+  }
+
+  // Error detail overlay
+  const errorDetailCloseBtn = document.getElementById('errorDetailCloseBtn');
+  if (errorDetailCloseBtn) {
+    errorDetailCloseBtn.addEventListener('click', () => {
+      document.getElementById('errorDetailOverlay').classList.remove('show');
+    });
+  }
+  const errorDetailCopyBtn = document.getElementById('errorDetailCopyBtn');
+  if (errorDetailCopyBtn) {
+    errorDetailCopyBtn.addEventListener('click', async () => {
+      const text = document.getElementById('errorDetailContent').textContent;
+      await ipcRenderer.invoke('copy-to-clipboard', text);
+      showToast('日志已复制', 'success');
+    });
+  }
+
+  // Diagnostic overlay
+  const diagnosticCloseBtn = document.getElementById('diagnosticCloseBtn');
+  if (diagnosticCloseBtn) {
+    diagnosticCloseBtn.addEventListener('click', () => {
+      document.getElementById('diagnosticOverlay').classList.remove('show');
+    });
+  }
+  const diagnosticCopyBtn = document.getElementById('diagnosticCopyBtn');
+  if (diagnosticCopyBtn) {
+    diagnosticCopyBtn.addEventListener('click', async () => {
+      const text = document.getElementById('diagnosticContent').textContent;
+      await ipcRenderer.invoke('copy-to-clipboard', text);
+      showToast('已复制', 'success');
+    });
+  }
+
   const success = await detectProjectRoot();
 });

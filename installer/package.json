@@ -16,18 +16,17 @@
     "asar": true,
     "afterPack": "./afterPack.js",
     "dmg": {
-      "background": null,
-      "backgroundColor": "#ffffff",
+      "background": "dmg-background.png",
       "contents": [
         {
-          "x": 270,
-          "y": 190,
+          "x": 330,
+          "y": 185,
           "type": "file"
         }
       ],
       "window": {
-        "width": 540,
-        "height": 380
+        "width": 660,
+        "height": 400
       }
     },
     "mac": {

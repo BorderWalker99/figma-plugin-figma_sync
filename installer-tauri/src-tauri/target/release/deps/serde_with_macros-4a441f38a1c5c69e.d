@@ -1,8 +1,0 @@
-/Applications/ScreenSync - SourceCode/installer-tauri/src-tauri/target/release/deps/serde_with_macros-4a441f38a1c5c69e.d: /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/serde_with_macros-3.16.1/src/lib.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/serde_with_macros-3.16.1/src/apply.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/serde_with_macros-3.16.1/src/lazy_bool.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/serde_with_macros-3.16.1/src/utils.rs
-
-/Applications/ScreenSync - SourceCode/installer-tauri/src-tauri/target/release/deps/libserde_with_macros-4a441f38a1c5c69e.dylib: /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/serde_with_macros-3.16.1/src/lib.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/serde_with_macros-3.16.1/src/apply.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/serde_with_macros-3.16.1/src/lazy_bool.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/serde_with_macros-3.16.1/src/utils.rs
-
-/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/serde_with_macros-3.16.1/src/lib.rs:
-/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/serde_with_macros-3.16.1/src/apply.rs:
-/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/serde_with_macros-3.16.1/src/lazy_bool.rs:
-/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/serde_with_macros-3.16.1/src/utils.rs:

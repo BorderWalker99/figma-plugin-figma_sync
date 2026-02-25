@@ -55,4 +55,20 @@ exports.default = async function(context) {
 
   console.log(`  ✅ Removed ${removedCount} language packs (${(removedSize / 1024 / 1024).toFixed(1)} MB)`);
   console.log(`  ✅ Kept: ${keepLanguages.join(', ')}`);
+
+  // Ad-hoc code signing: CRITICAL for macOS Gatekeeper behavior.
+  // Without ANY signature → macOS says "damaged, move to Trash" (no workaround in UI).
+  // With ad-hoc signature → macOS says "cannot verify developer" and
+  //   System Settings → Privacy & Security shows "Open Anyway" button.
+  const appPath = path.join(appOutDir, 'ScreenSync Installer.app');
+  if (fs.existsSync(appPath)) {
+    console.log('🔏 Ad-hoc signing the app...');
+    try {
+      const { execSync } = require('child_process');
+      execSync(`codesign --sign - --force --deep "${appPath}"`, { stdio: 'inherit' });
+      console.log('  ✅ App signed (ad-hoc) — users can use "Open Anyway" in System Settings');
+    } catch (e) {
+      console.warn('  ⚠️  Ad-hoc signing failed:', e.message);
+    }
+  }
 };

@@ -1734,6 +1734,95 @@ ipcMain.handle('setup-icloud-keep-downloaded', async () => {
   });
 });
 
+// 自启动诊断
+ipcMain.handle('run-diagnostic', async (event, diagnosticInstallPath) => {
+  const homeDir = os.homedir();
+  const lines = [];
+
+  function run(cmd) {
+    try {
+      return exec(cmd, { encoding: 'utf8', timeout: 5000 }).toString().trim();
+    } catch (e) {
+      return e.stderr ? e.stderr.toString().trim() : `(error: ${e.message})`;
+    }
+  }
+  function runSync(cmd) {
+    try {
+      return require('child_process').execSync(cmd, { encoding: 'utf8', timeout: 5000 }).trim();
+    } catch (e) {
+      return `(error: ${e.message})`;
+    }
+  }
+
+  lines.push('=== ScreenSync 自启动诊断 ===');
+  lines.push(`时间: ${new Date().toLocaleString()}`);
+  lines.push(`安装路径: ${diagnosticInstallPath || '(未知)'}`);
+  lines.push('');
+
+  // Node.js
+  const nodePath = findExecutable('node');
+  lines.push(`[Node.js] 路径: ${nodePath || '未找到'}`);
+  if (nodePath) lines.push(`[Node.js] 版本: ${runSync(`"${nodePath}" --version`)}`);
+  lines.push('');
+
+  // LaunchAgent
+  const plistPath = path.join(homeDir, 'Library', 'LaunchAgents', 'com.screensync.server.plist');
+  lines.push(`[LaunchAgent] plist: ${fs.existsSync(plistPath) ? '存在' : '不存在'}`);
+  if (fs.existsSync(plistPath)) {
+    try {
+      const content = fs.readFileSync(plistPath, 'utf8');
+      const progMatch = content.match(/<string>([^<]*node[^<]*)<\/string>/);
+      const pathMatch = content.match(/<string>([^<]*start\.js[^<]*)<\/string>/);
+      if (progMatch) lines.push(`[LaunchAgent] Node: ${progMatch[1]}`);
+      if (pathMatch) lines.push(`[LaunchAgent] Script: ${pathMatch[1]}`);
+    } catch (e) {
+      lines.push(`[LaunchAgent] 读取失败: ${e.message}`);
+    }
+  }
+
+  const launchctlList = runSync('launchctl list | grep screensync');
+  lines.push(`[LaunchAgent] launchctl list: ${launchctlList || '(未注册)'}`);
+  lines.push('');
+
+  // Port 8888
+  const lsofResult = runSync('lsof -i :8888 -sTCP:LISTEN');
+  lines.push(`[端口 8888] ${lsofResult || '(无进程监听)'}`);
+  lines.push('');
+
+  // Server logs
+  const logPaths = [
+    diagnosticInstallPath ? path.join(diagnosticInstallPath, 'server.log') : null,
+    diagnosticInstallPath ? path.join(diagnosticInstallPath, 'server-error.log') : null,
+    '/tmp/screensync-server.log',
+    '/tmp/screensync-server-error.log',
+  ].filter(Boolean);
+
+  for (const lp of logPaths) {
+    if (fs.existsSync(lp)) {
+      try {
+        const content = fs.readFileSync(lp, 'utf8');
+        const tail = content.split('\n').slice(-20).join('\n');
+        if (tail.trim()) {
+          lines.push(`[日志] ${lp} (最后20行):`);
+          lines.push(tail);
+          lines.push('');
+        }
+      } catch (e) {
+        lines.push(`[日志] ${lp}: 读取失败 - ${e.message}`);
+      }
+    }
+  }
+
+  // Connectivity test
+  lines.push('[连接测试]');
+  const curlResult = runSync('curl -s -o /dev/null -w "%{http_code}" --connect-timeout 3 http://localhost:8888/health 2>&1');
+  lines.push(`  localhost:8888/health → HTTP ${curlResult}`);
+  const curl127 = runSync('curl -s -o /dev/null -w "%{http_code}" --connect-timeout 3 http://127.0.0.1:8888/health 2>&1');
+  lines.push(`  127.0.0.1:8888/health → HTTP ${curl127}`);
+
+  return lines.join('\n');
+});
+
 // 退出应用
 ipcMain.handle('quit-app', () => {
   console.log('收到退出请求，正在退出应用...');

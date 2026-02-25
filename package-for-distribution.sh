@@ -17,50 +17,41 @@ echo -e "${BLUE}║  ScreenSync 用户分发打包脚本          ║${NC}"
 echo -e "${BLUE}║  (双架构独立打包版本)                 ║${NC}"
 echo -e "${BLUE}╚════════════════════════════════════════╝${NC}\n"
 
-# 构建 Tauri 安装器 (.app only, DMG 由自定义脚本生成)
-echo -e "${YELLOW}🔨 正在构建最新版 GUI 安装器 (Tauri)...${NC}"
-cd installer-tauri
+# 构建 Electron 安装器 (双架构 DMG)
+echo -e "${YELLOW}🔨 正在构建最新版 GUI 安装器 (Electron)...${NC}"
+cd installer
 
-source "$HOME/.cargo/env" 2>/dev/null || true
-rustup target add x86_64-apple-darwin aarch64-apple-darwin 2>/dev/null || true
+# 确保依赖已安装
+if [ ! -d "node_modules" ]; then
+    echo -e "${YELLOW}📦 安装 Electron 依赖...${NC}"
+    npm install
+fi
 
-# Tauri CLI rejects CI=1 (only accepts true/false), unset to avoid build errors
-unset CI
+# 清理旧构建
+rm -rf dist
 
-echo -e "   ${YELLOW}构建 Intel 版本...${NC}"
-cargo tauri build --target x86_64-apple-darwin --bundles app
-echo -e "   ${YELLOW}构建 Apple Silicon 版本...${NC}"
-cargo tauri build --target aarch64-apple-darwin --bundles app
+echo -e "   ${YELLOW}构建双架构 DMG...${NC}"
+npm run build:mac
 
-# 定位构建产物 (.app bundles)
-TAURI_BASE="src-tauri/target"
-APP_INTEL=$(find "$TAURI_BASE/x86_64-apple-darwin/release/bundle/macos" -name "*.app" -type d 2>/dev/null | head -1)
-APP_ARM=$(find "$TAURI_BASE/aarch64-apple-darwin/release/bundle/macos" -name "*.app" -type d 2>/dev/null | head -1)
+# 定位构建产物
+DMG_INTEL=$(ls dist/*-1.0.1.dmg 2>/dev/null | head -1)
+DMG_ARM=$(ls dist/*-1.0.1-arm64.dmg 2>/dev/null | head -1)
 
-if [ -z "$APP_INTEL" ] || [ -z "$APP_ARM" ]; then
-    echo -e "${RED}❌ 错误：需要同时存在 Intel 和 Apple Silicon 版本的 .app${NC}"
-    echo -e "   Intel .app: ${APP_INTEL:-未找到}"
-    echo -e "   ARM .app: ${APP_ARM:-未找到}"
+if [ -z "$DMG_INTEL" ] || [ -z "$DMG_ARM" ]; then
+    echo -e "${RED}❌ 错误：需要同时存在 Intel 和 Apple Silicon 版本的 DMG${NC}"
+    echo -e "   Intel DMG: ${DMG_INTEL:-未找到}"
+    echo -e "   ARM DMG: ${DMG_ARM:-未找到}"
     exit 1
 fi
 
-# 使用自定义脚本生成干净的 DMG (仅含 app, 无 Applications 快捷方式)
-echo -e "   ${YELLOW}创建 Intel DMG...${NC}"
-./create-clean-dmg.sh "$APP_INTEL" "$TAURI_BASE/ScreenSync-Installer-Intel.dmg"
-echo -e "   ${YELLOW}创建 Apple Silicon DMG...${NC}"
-./create-clean-dmg.sh "$APP_ARM" "$TAURI_BASE/ScreenSync-Installer-Apple.dmg"
-
-DMG_INTEL="$TAURI_BASE/ScreenSync-Installer-Intel.dmg"
-DMG_ARM="$TAURI_BASE/ScreenSync-Installer-Apple.dmg"
-
 cd ..
 
-echo -e "${GREEN}✅ Intel DMG: installer-tauri/$DMG_INTEL${NC}"
-echo -e "${GREEN}✅ Apple Silicon DMG: installer-tauri/$DMG_ARM${NC}\n"
+echo -e "${GREEN}✅ Intel DMG: installer/$DMG_INTEL${NC}"
+echo -e "${GREEN}✅ Apple Silicon DMG: installer/$DMG_ARM${NC}\n"
 
 # 从这里开始引用相对路径前缀
-DMG_INTEL="installer-tauri/$DMG_INTEL"
-DMG_ARM="installer-tauri/$DMG_ARM"
+DMG_INTEL="installer/$DMG_INTEL"
+DMG_ARM="installer/$DMG_ARM"
 
 # 获取当前目录名和版本号
 CURRENT_DIR=$(basename "$PWD")

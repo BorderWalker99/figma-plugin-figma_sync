@@ -1,9 +1,0 @@
-/Applications/ScreenSync - SourceCode/installer-tauri/src-tauri/target/debug/deps/tauri_runtime-b17fdece43a4aa2d.d: /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/tauri-runtime-2.10.0/src/lib.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/tauri-runtime-2.10.0/src/dpi.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/tauri-runtime-2.10.0/src/monitor.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/tauri-runtime-2.10.0/src/webview.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/tauri-runtime-2.10.0/src/window.rs
-
-/Applications/ScreenSync - SourceCode/installer-tauri/src-tauri/target/debug/deps/libtauri_runtime-b17fdece43a4aa2d.rmeta: /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/tauri-runtime-2.10.0/src/lib.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/tauri-runtime-2.10.0/src/dpi.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/tauri-runtime-2.10.0/src/monitor.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/tauri-runtime-2.10.0/src/webview.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/tauri-runtime-2.10.0/src/window.rs
-
-/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/tauri-runtime-2.10.0/src/lib.rs:
-/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/tauri-runtime-2.10.0/src/dpi.rs:
-/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/tauri-runtime-2.10.0/src/monitor.rs:
-/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/tauri-runtime-2.10.0/src/webview.rs:
-/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/tauri-runtime-2.10.0/src/window.rs:

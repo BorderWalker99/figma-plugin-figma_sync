@@ -1,8 +1,0 @@
-cargo:rerun-if-changed=permissions
-cargo:PERMISSION_FILES_PATH=/Applications/ScreenSync - SourceCode/installer-tauri/src-tauri/target/debug/build/tauri-plugin-fs-761013445bc64d60/out/tauri-plugin-fs-permission-files
-cargo:rerun-if-env-changed=REMOVE_UNUSED_COMMANDS
-cargo:GLOBAL_SCOPE_SCHEMA_PATH=/Applications/ScreenSync - SourceCode/installer-tauri/src-tauri/target/debug/build/tauri-plugin-fs-761013445bc64d60/out/global-scope.json
-cargo:GLOBAL_API_SCRIPT_PATH=/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/tauri-plugin-fs-2.4.5/api-iife.js
-cargo:rustc-check-cfg=cfg(mobile)
-cargo:rustc-check-cfg=cfg(desktop)
-cargo:rustc-cfg=desktop

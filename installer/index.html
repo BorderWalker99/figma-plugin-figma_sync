@@ -517,6 +517,29 @@
       margin: 0;
       padding: 0;
       margin-top: auto;
+      justify-content: flex-end;
+    }
+
+    /* Step 1: Welcome layout */
+    #step1 {
+      justify-content: space-between;
+    }
+
+    #step1 .step-header {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      margin: 0;
+      text-align: center;
+    }
+
+    #step1 .button-group {
+      width: 100%;
+      justify-content: center;
+      margin-top: 0;
+      padding-bottom: 20px;
     }
 
     /* Alerts — Glass card */
@@ -573,6 +596,13 @@
     .completion-icon svg {
       width: 40px !important;
       height: 40px !important;
+      stroke: white !important;
+      stroke-width: 2.8 !important;
+    }
+
+    #step5.active {
+      align-items: center;
+      justify-content: center;
     }
 
     .spinner {
@@ -776,16 +806,16 @@
   <div class="content">
     <!-- Step 1: Welcome -->
     <div class="step active" id="step1">
-      <div class="step-header" style="flex: 1; display: flex; flex-direction: column; justify-content: center; margin: 0;">
+      <div class="step-header">
         <div style="margin-bottom: 24px;">
           <img src="https://raw.githubusercontent.com/BorderWalker99/figma-plugin-figma_sync/refs/heads/main/images/logo.svg" width="80" height="80" style="filter: drop-shadow(0 4px 12px rgba(0,0,0,0.1));" />
         </div>
-        <h1 style="font-family: 'Archivo Black', sans-serif; font-size: 32px; margin: 0 0 12px 0; color: var(--text-primary); letter-spacing: -0.02em;">ScreenSync</h1>
+        <h1 style="font-family: 'Archivo Black', sans-serif; font-size: 32px; margin: 0 0 4px 0; color: var(--text-primary); letter-spacing: -0.02em;">ScreenSync</h1>
         <p style="font-size: 16px; color: var(--text-secondary); margin: 0;">自动化传输并整理截图</p>
       </div>
 
-      <div class="button-group" style="justify-content: center; margin-top: 0; padding-bottom: 20px;">
-        <button class="btn btn-primary" onclick="nextStep()" style="min-width: 120px; padding: 10px 12px 10px 20px; font-size: 15px;">
+      <div class="button-group">
+        <button class="btn btn-primary" id="step1Next" onclick="nextStep()" style="min-width: 120px; padding: 10px 12px 10px 20px; font-size: 15px;">
           开始安装
           <svg viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
         </button>
@@ -901,20 +931,20 @@
     </div>
 
     <!-- Step 5: Complete -->
-    <div class="step" id="step5" style="justify-content: center; gap: 16px;">
-      <div class="step-header" style="margin-bottom: 0; margin-top: -12px;">
-        <div style="width: 80px; height: 80px; background: var(--unified-green); border-radius: 50%; color: white; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; box-shadow: 0 4px 16px var(--unified-green-glow);">
-          <div class="completion-icon" style="transform: translateY(4px);">
-            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M20 6L9 17L4 12" stroke="white" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-          </div>
+    <div class="step" id="step5">
+      <div style="width: 88px; height: 88px; background: var(--unified-green); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 16px var(--unified-green-glow);">
+        <div class="completion-icon">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M20 6L9 17L4 12"/>
+          </svg>
         </div>
-        <h2 class="step-title">安装完成</h2>
       </div>
-
-      <div class="button-group" style="justify-content: center; margin-top: 0;">
-        <button class="btn btn-primary" onclick="finishInstallation()" style="min-width: 120px;">
+      <h2 class="step-title" style="margin: 0;">安装完成</h2>
+      <div class="button-group" style="justify-content: center; margin-top: 0; gap: 10px;">
+        <button class="btn btn-secondary" id="step5Diagnostic" style="min-width: 100px;">
+          自启动诊断
+        </button>
+        <button class="btn btn-primary" id="step5Finish" onclick="finishInstallation()" style="min-width: 120px;">
           我知道了
         </button>
       </div>
@@ -943,6 +973,42 @@
       <div class="modal-message" id="modalMessage">内容</div>
       <div class="modal-actions">
         <button class="btn btn-primary" onclick="closeAlert()">我知道了</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="errorDetailOverlay" class="overlay">
+    <div class="modal" style="width: 460px; max-height: 80vh; text-align: left;">
+      <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+        <div>
+          <div class="modal-title" style="font-size: 16px; margin-bottom: 4px;">失败详情</div>
+          <div style="font-size: 12px; color: var(--text-secondary);">请把失败日志复制发送给开发者</div>
+        </div>
+        <button class="btn" id="errorDetailCopyBtn" style="min-width: auto; padding: 6px 14px; font-size: 12px; flex-shrink: 0;">
+          复制日志
+        </button>
+      </div>
+      <div id="errorDetailContent" style="background: #1a1a1a; color: #d4d4d4; padding: 14px; border-radius: 8px; font-family: 'SF Mono', Monaco, Menlo, monospace; font-size: 11px; max-height: 45vh; overflow-y: auto; white-space: pre-wrap; word-break: break-all; margin-top: 12px; border: 1px solid var(--border);"></div>
+      <div style="display: flex; justify-content: flex-end; margin-top: 12px;">
+        <button class="btn btn-primary" id="errorDetailCloseBtn" style="padding: 8px 20px;">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="diagnosticOverlay" class="overlay">
+    <div class="modal" style="width: 520px; max-height: 85vh; text-align: left;">
+      <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+        <div>
+          <div class="modal-title" style="font-size: 16px; margin-bottom: 4px;">自启动诊断</div>
+          <div style="font-size: 12px; color: var(--text-secondary);">插件连接不上时，请把以下信息复制发送给开发者</div>
+        </div>
+        <button class="btn" id="diagnosticCopyBtn" style="min-width: auto; padding: 6px 14px; font-size: 12px; flex-shrink: 0;">
+          复制
+        </button>
+      </div>
+      <div id="diagnosticContent" style="background: #1a1a1a; color: #d4d4d4; padding: 14px; border-radius: 8px; font-family: 'SF Mono', Monaco, Menlo, monospace; font-size: 11px; max-height: 50vh; overflow-y: auto; white-space: pre-wrap; word-break: break-all; margin-top: 12px; border: 1px solid var(--border);"></div>
+      <div style="display: flex; justify-content: flex-end; margin-top: 12px;">
+        <button class="btn btn-primary" id="diagnosticCloseBtn" style="padding: 8px 20px;">关闭</button>
       </div>
     </div>
   </div>

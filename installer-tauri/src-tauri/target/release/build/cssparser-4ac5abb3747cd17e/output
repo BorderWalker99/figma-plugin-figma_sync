@@ -1,2 +1,0 @@
-cargo:rustc-cfg=rustc_has_pr45225
-cargo:rerun-if-changed=/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/cssparser-0.29.6/src/tokenizer.rs

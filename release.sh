@@ -99,11 +99,10 @@ echo -e "   ${GREEN}✅ figma-plugin/code.js 版本号已更新: v${NEW_VERSION}
 sed -i '' "1,10s/\"version\": \"[^\"]*\"/\"version\": \"${NEW_VERSION}\"/" package.json
 echo -e "   ${GREEN}✅ package.json 版本号已更新: v${NEW_VERSION}${NC}"
 
-# 更新 Tauri 安装器版本号
-sed -i '' "s/\"version\": \"[^\"]*\"/\"version\": \"${NEW_VERSION}\"/" installer-tauri/src-tauri/tauri.conf.json
-sed -i '' "s/^version = \"[^\"]*\"/version = \"${NEW_VERSION}\"/" installer-tauri/src-tauri/Cargo.toml
-sed -i '' "s/v[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*/v${NEW_VERSION}/g" installer-tauri/src/index.html
-echo -e "   ${GREEN}✅ Tauri 安装器版本号已更新: v${NEW_VERSION}${NC}"
+# 更新 Electron 安装器版本号
+sed -i '' "1,10s/\"version\": \"[^\"]*\"/\"version\": \"${NEW_VERSION}\"/" installer/package.json
+sed -i '' "s/v[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*/v${NEW_VERSION}/g" installer/index.html
+echo -e "   ${GREEN}✅ Electron 安装器版本号已更新: v${NEW_VERSION}${NC}"
 
 # 更新服务器版本号 (VERSION.txt)
 sed -i '' "s/版本: .*/版本: ${NEW_VERSION}/g" VERSION.txt
@@ -134,8 +133,6 @@ echo -e "   ${YELLOW}正在打包服务器...${NC}"
 # 先清理日志和临时文件
 find . -maxdepth 1 -name "*.log" -delete 2>/dev/null || true
 rm -f .user-config.json .sync-mode 2>/dev/null || true
-# Tauri CLI rejects CI=1 (only accepts true/false)
-unset CI
 if ./package-for-distribution.sh > /dev/null 2>&1; then
     INTEL_TAR="ScreenSync-Intel.tar.gz"
     APPLE_TAR="ScreenSync-Apple.tar.gz"

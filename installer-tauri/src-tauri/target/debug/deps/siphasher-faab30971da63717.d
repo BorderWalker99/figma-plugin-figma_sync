@@ -1,9 +1,0 @@
-/Applications/ScreenSync - SourceCode/installer-tauri/src-tauri/target/debug/deps/siphasher-faab30971da63717.d: /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/siphasher-1.0.2/src/lib.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/siphasher-1.0.2/src/common.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/siphasher-1.0.2/src/sip.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/siphasher-1.0.2/src/sip128.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/siphasher-1.0.2/src/../README.md
-
-/Applications/ScreenSync - SourceCode/installer-tauri/src-tauri/target/debug/deps/libsiphasher-faab30971da63717.rmeta: /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/siphasher-1.0.2/src/lib.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/siphasher-1.0.2/src/common.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/siphasher-1.0.2/src/sip.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/siphasher-1.0.2/src/sip128.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/siphasher-1.0.2/src/../README.md
-
-/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/siphasher-1.0.2/src/lib.rs:
-/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/siphasher-1.0.2/src/common.rs:
-/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/siphasher-1.0.2/src/sip.rs:
-/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/siphasher-1.0.2/src/sip128.rs:
-/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/siphasher-1.0.2/src/../README.md:

@@ -204,6 +204,17 @@ function main() {
   run('lsof -ti :8888 | xargs kill -9 2>/dev/null');
   sleepSec(1);
 
+  // Clear old log files so diagnostic only shows errors from this run
+  const logPaths = [
+    path.join(installPath, 'server.log'),
+    path.join(installPath, 'server-error.log'),
+    '/tmp/screensync-server.log',
+    '/tmp/screensync-server-error.log',
+  ];
+  for (const lp of logPaths) {
+    try { fs.writeFileSync(lp, '', 'utf8'); } catch (_) {}
+  }
+
   // Unload old agent, then load the new plist (RunAtLoad will start the server)
   run(`launchctl unload ${shQuote(plistPath)} 2>/dev/null`);
   sleepSec(1);

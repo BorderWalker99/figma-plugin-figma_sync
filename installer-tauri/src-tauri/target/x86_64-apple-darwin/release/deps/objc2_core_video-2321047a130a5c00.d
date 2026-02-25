@@ -1,9 +1,0 @@
-/Applications/ScreenSync - SourceCode/installer-tauri/src-tauri/target/x86_64-apple-darwin/release/deps/objc2_core_video-2321047a130a5c00.d: /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/objc2-core-video-0.3.2/src/lib.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/objc2-core-video-0.3.2/src/generated/mod.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/objc2-core-video-0.3.2/src/generated/CVBase.rs
-
-/Applications/ScreenSync - SourceCode/installer-tauri/src-tauri/target/x86_64-apple-darwin/release/deps/libobjc2_core_video-2321047a130a5c00.rlib: /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/objc2-core-video-0.3.2/src/lib.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/objc2-core-video-0.3.2/src/generated/mod.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/objc2-core-video-0.3.2/src/generated/CVBase.rs
-
-/Applications/ScreenSync - SourceCode/installer-tauri/src-tauri/target/x86_64-apple-darwin/release/deps/libobjc2_core_video-2321047a130a5c00.rmeta: /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/objc2-core-video-0.3.2/src/lib.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/objc2-core-video-0.3.2/src/generated/mod.rs /Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/objc2-core-video-0.3.2/src/generated/CVBase.rs
-
-/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/objc2-core-video-0.3.2/src/lib.rs:
-/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/objc2-core-video-0.3.2/src/generated/mod.rs:
-/Users/sucao/.cargo/registry/src/mirrors.tuna.tsinghua.edu.cn-4dc01642fd091eda/objc2-core-video-0.3.2/src/generated/CVBase.rs:
