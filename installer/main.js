@@ -142,7 +142,7 @@ ipcMain.handle('get-project-root', async () => {
   }
   
   // 打包后的路径通常是: .../ScreenSync Installer.app/Contents/Resources/app.asar
-  // 我们需要向上找到 .app，然后再向上一级找到 UserPackage 根目录
+  // 我们需要向上找到 .app，然后再向上一级找到安装包根目录
   let currentPath = appPath;
   
   // 1. 先找到 .app 包
@@ -152,10 +152,10 @@ ipcMain.handle('get-project-root', async () => {
   
   console.log('找到 .app 路径:', currentPath);
   
-  // 2. .app 的父目录就是 UserPackage 根目录
+  // 2. .app 的父目录就是安装包根目录（ScreenSync-Apple 或 ScreenSync-Intel）
   const userPackageRoot = path.dirname(currentPath);
   
-  console.log('UserPackage 根目录:', userPackageRoot);
+  console.log('安装包根目录:', userPackageRoot);
   
   // 3. 验证该目录下的"项目文件"子目录是否有 package.json（新结构）
   const projectFilesPath = path.join(userPackageRoot, '项目文件');
@@ -284,9 +284,9 @@ ipcMain.handle('get-project-root', async () => {
 // 手动选择项目根目录
 ipcMain.handle('select-project-root', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
-    title: '选择 ScreenSync-UserPackage 文件夹',
+    title: '选择 ScreenSync 安装包文件夹',
     properties: ['openDirectory'],
-    message: '请选择解压后的 ScreenSync-UserPackage 文件夹，或者其中的"项目文件"文件夹'
+    message: '请选择解压后的 ScreenSync-Apple 或 ScreenSync-Intel 文件夹，或者其中的"项目文件"文件夹'
   });
 
   if (result.canceled || result.filePaths.length === 0) {
@@ -301,16 +301,16 @@ ipcMain.handle('select-project-root', async () => {
     return { success: true, path: selectedPath };
   }
   
-  // 检查 2: 是 UserPackage 根目录（包含 "项目文件/package.json"）
+  // 检查 2: 是安装包根目录（包含 "项目文件/package.json"）
   const projectFilesPath = path.join(selectedPath, '项目文件');
   if (fs.existsSync(path.join(projectFilesPath, 'package.json'))) {
-    console.log('✅ 手动选择的是 UserPackage，自动定位到项目文件:', projectFilesPath);
+    console.log('✅ 手动选择的是安装包根目录，自动定位到项目文件:', projectFilesPath);
     return { success: true, path: projectFilesPath };
   }
 
   return { 
     success: false, 
-    error: '选择的文件夹不正确。\n\n请选择包含 "package.json" 的文件夹，或者解压后的 "ScreenSync-UserPackage" 文件夹。' 
+    error: '选择的文件夹不正确。\n\n请选择包含 "package.json" 的文件夹，或者解压后的 "ScreenSync-Apple" / "ScreenSync-Intel" 文件夹。' 
   };
 });
 

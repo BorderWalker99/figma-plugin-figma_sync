@@ -115,7 +115,7 @@ function showManualSelectionUI() {
     <div class="alert-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="currentColor"/><path d="M12 8v5M12 16.5v.5" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
     <div style="flex:1">
       <div style="font-weight:600;margin-bottom:4px;">未找到项目文件</div>
-      <div style="font-size:12px;opacity:0.9;margin-bottom:8px;">无法自动定位安装包位置，请手动选择解压后的 "ScreenSync-UserPackage" 文件夹。</div>
+      <div style="font-size:12px;opacity:0.9;margin-bottom:8px;">无法自动定位安装包位置，请手动选择解压后的 ScreenSync 安装包文件夹（如 ScreenSync-Apple 或 ScreenSync-Intel）。</div>
       <button id="selectPathBtn" class="btn btn-secondary" style="background:rgba(255,255,255,0.9);color:#333;font-size:12px;padding:4px 12px;">选择文件夹</button>
     </div>
   `;
