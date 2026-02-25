@@ -4415,6 +4415,7 @@
         timeline_loading_layers: '正在加载图层...',
         timeline_loading_preview: '加载预览中...',
         timeline_no_frame_size: '无法获取Frame尺寸',
+        timeline_video_not_local: '该录屏来自其他设备，请重新拖入文件',
         // Buttons
         btn_sync_now: '立即同步',
         btn_syncing: '同步中',
@@ -4620,6 +4621,7 @@
         timeline_loading_layers: 'Loading layers...',
         timeline_loading_preview: 'Loading preview...',
         timeline_no_frame_size: 'Cannot get Frame size',
+        timeline_video_not_local: 'This recording is from another device. Please re-import the file.',
         // Buttons
         btn_sync_now: 'Sync Now',
         btn_syncing: 'Syncing',
@@ -7136,7 +7138,6 @@
         toast.classList.add('show');
       }, 10);
       
-      // Hide toast after 2 seconds
       toastTimer = setTimeout(() => {
         toast.classList.remove('show');
         setTimeout(() => {
@@ -7144,7 +7145,7 @@
           messageEl.textContent = '';
           toastTimer = null;
         }, 300);
-      }, 2000);
+      }, 5000);
     }
 
     function showToastWithAction(message, actionText, actionCallback) {
@@ -7208,7 +7209,6 @@
         toast.classList.add('show');
       }, 10);
       
-      // Hide toast after 3 seconds (longer for action)
       toastTimer = setTimeout(() => {
         toast.classList.remove('show');
         setTimeout(() => {
@@ -7216,7 +7216,7 @@
           messageEl.innerHTML = '';
           toastTimer = null;
         }, 300);
-      }, 3000);
+      }, 5000);
     }
 
     function closeSettings() {
@@ -9326,6 +9326,11 @@
             }
         } else {
             console.warn(`🎞️ [时间线] 帧提取失败: layerId=${data.layerId}, error=${data.error}`);
+            
+            if (data.errorCode === 'cache-missing') {
+                showToast(t('timeline_video_not_local'), 'warning');
+            }
+            
             // 帧提取失败时也要清除等待状态
             if (pendingPlayback) {
                 pendingPlayback = false;

@@ -25,130 +25,71 @@ let serverCheckTimer = null; // Server 缓存检查超时计时器
 let isTimelineEditorOpen = false;
 let timelineFrameId = null;
 let lastTimelineLayerIds = []; // 用于检测图层顺序变化
+let structuralRefreshTimer = null; // debounce 定时器
 
 // 刷新时间线图层列表（用于检测到增删/重排序时）
-async function refreshTimelineLayers(frame) {
+// force=true 时跳过 orderChanged 检查（由 documentchange 检测触发时使用）
+async function refreshTimelineLayers(frame, force) {
   if (!frame || frame.type !== 'FRAME') return;
   
   try {
-    // 获取当前图层ID顺序
     const currentLayerIds = frame.children.map(c => c.id);
     
-    // 检查顺序是否变化
-    const orderChanged = lastTimelineLayerIds.length !== currentLayerIds.length ||
-      !lastTimelineLayerIds.every((id, i) => id === currentLayerIds[i]);
-    
-    if (!orderChanged) return; // 没有变化，不需要刷新
+    if (!force) {
+      const orderChanged = currentLayerIds.length !== lastTimelineLayerIds.length ||
+        !lastTimelineLayerIds.every((id, i) => id === currentLayerIds[i]);
+      if (!orderChanged) return;
+    }
     
     lastTimelineLayerIds = currentLayerIds;
     
-    // 重新导出所有图层
+    // 重新导出所有图层（与初始加载逻辑一致：先尝试 exportAsync，失败再降级）
     const exportPromises = frame.children.map(async (child) => {
       try {
-        // 🛡️ 首先检查是否是视频节点（在 exportAsync 之前检查，避免触发验证错误）
-        let videoId = null;
-        let isVideoLayer = false;
-        let childName = '';
-        
-        // 🛡️ 安全获取节点名称
-        try {
-          childName = child.name || '';
-        } catch (nameErr) {
-          // 无法获取名称，可能是正在加载的视频节点
-          return {
-            id: child.id,
-            name: '加载中...',
-            type: child.type,
-            thumbnail: null,
-            isVideoLayer: true,
-            videoId: null,
-            width: 0,
-            height: 0,
-            x: 0,
-            y: 0
-          };
-        }
-        
-        // 先通过名称判断是否可能是视频（在访问 fills 之前）
-        const lowerName = childName.toLowerCase();
-        const videoExtensions = ['.mp4', '.mov', '.webm', '.avi', '.mkv'];
-        const videoKeywords = ['screenrecording', 'video'];
-        const looksLikeVideo = videoExtensions.some(ext => lowerName.endsWith(ext)) ||
-                             videoKeywords.some(kw => lowerName.includes(kw));
-        
-        // 🛡️ 如果名称看起来像视频，仍读取 pluginData 但跳过 exportAsync
-        if (looksLikeVideo) {
-          let earlyVideoId = null;
-          let earlyOrigFilename = null;
-          let earlyGifCacheId = null;
-          try { const v = child.getPluginData('videoId'); if (v) earlyVideoId = v; } catch (e) {}
-          try { const o = child.getPluginData('originalFilename'); if (o) earlyOrigFilename = o; } catch (e) {}
-          try { const c = child.getPluginData('gifCacheId'); if (c) earlyGifCacheId = c; } catch (e) {}
-          return {
-            id: child.id,
-            name: childName,
-            type: child.type,
-            thumbnail: null,
-            isVideoLayer: true,
-            videoId: earlyVideoId,
-            originalFilename: earlyOrigFilename,
-            gifCacheId: earlyGifCacheId,
-            width: child.width || 0,
-            height: child.height || 0,
-            x: child.x || 0,
-            y: child.y || 0
-          };
-        }
-        
-        let originalFilename = null;
-        let gifCacheId = null;
-        try {
-          const pluginDataStr = child.getPluginData('videoId');
-          if (pluginDataStr) {
-            videoId = pluginDataStr;
-            isVideoLayer = true;
-          }
-        } catch (e) {}
-        try {
-          const origName = child.getPluginData('originalFilename');
-          if (origName) originalFilename = origName;
-        } catch (e) {}
-        try {
-          const cid = child.getPluginData('gifCacheId');
-          if (cid) gifCacheId = cid;
-        } catch (e) {}
-        
-        // 🛡️ 安全检查 fills（避免触发视频验证错误）
-        if (!isVideoLayer) {
-          try {
-            if ('fills' in child && Array.isArray(child.fills)) {
-              for (const fill of child.fills) {
-                if (fill.type === 'VIDEO') {
-                  isVideoLayer = true;
-                  break;
-                }
-              }
-            }
-          } catch (fillErr) {
-            // 无法访问 fills，假设是视频图层
-            isVideoLayer = true;
-          }
-        }
-        
-        // GIF 检测
-        if (!isVideoLayer && lowerName.endsWith('.gif')) {
-          isVideoLayer = true;
-        }
-        
-        // 🛡️ 现在安全地导出缩略图
         const bytes = await child.exportAsync({
           format: 'PNG',
           constraint: { type: 'HEIGHT', value: 800 }
         });
         
+        let videoId = null;
+        let isVideoLayer = false;
+        let originalFilename = null;
+        let gifCacheId = null;
+        
+        try {
+          const v = child.getPluginData('videoId');
+          if (v) { videoId = v; isVideoLayer = true; }
+        } catch (e) {}
+        try {
+          const o = child.getPluginData('originalFilename');
+          if (o) originalFilename = o;
+        } catch (e) {}
+        try {
+          const c = child.getPluginData('gifCacheId');
+          if (c) gifCacheId = c;
+        } catch (e) {}
+        
+        if (!isVideoLayer && 'fills' in child && Array.isArray(child.fills)) {
+          try {
+            for (const fill of child.fills) {
+              if (fill.type === 'VIDEO') { isVideoLayer = true; break; }
+            }
+          } catch (e) { isVideoLayer = true; }
+        }
+        
+        if (!isVideoLayer) {
+          const lowerName = (child.name || '').toLowerCase();
+          const videoExts = ['.gif', '.mp4', '.mov', '.webm', '.avi', '.mkv'];
+          const videoKw = ['screenrecording', 'video'];
+          if (videoExts.some(ext => lowerName.endsWith(ext)) ||
+              videoKw.some(kw => lowerName.includes(kw))) {
+            isVideoLayer = true;
+          }
+        }
+        
         return {
           id: child.id,
-          name: childName,
+          name: child.name,
           type: child.type,
           thumbnail: figma.base64Encode(bytes),
           width: child.width,
@@ -161,20 +102,30 @@ async function refreshTimelineLayers(frame) {
           gifCacheId: gifCacheId
         };
       } catch (err) {
-        // 导出失败，可能是正在加载的视频节点
         let safeName = '';
         try { safeName = child.name || ''; } catch (e) { safeName = '加载中...'; }
+        let fallbackVideoId = null;
+        let fallbackIsVideo = false;
+        let fallbackOrigFilename = null;
         let fallbackGifCacheId = null;
+        try { const v = child.getPluginData('videoId'); if (v) { fallbackVideoId = v; fallbackIsVideo = true; } } catch (e) {}
+        try { const o = child.getPluginData('originalFilename'); if (o) fallbackOrigFilename = o; } catch (e) {}
         try { const c = child.getPluginData('gifCacheId'); if (c) fallbackGifCacheId = c; } catch (e) {}
-        
+        if (!fallbackIsVideo) {
+          try {
+            if ('fills' in child && Array.isArray(child.fills)) {
+              fallbackIsVideo = child.fills.some(f => f.type === 'VIDEO');
+            }
+          } catch (e) { fallbackIsVideo = true; }
+        }
         return {
           id: child.id,
           name: safeName,
           type: child.type,
           thumbnail: null,
-          isVideoLayer: true, // 假设是视频图层
-          videoId: null,
-          originalFilename: null,
+          isVideoLayer: fallbackIsVideo,
+          videoId: fallbackVideoId,
+          originalFilename: fallbackOrigFilename,
           gifCacheId: fallbackGifCacheId
         };
       }
@@ -2297,7 +2248,8 @@ figma.ui.onmessage = async (msg) => {
   if (msg.type === 'timeline-editor-closed') {
     isTimelineEditorOpen = false;
     timelineFrameId = null;
-    lastTimelineLayerIds = []; // 重置图层顺序缓存
+    lastTimelineLayerIds = [];
+    if (structuralRefreshTimer) { clearTimeout(structuralRefreshTimer); structuralRefreshTimer = null; }
     return;
   }
 
@@ -2605,44 +2557,45 @@ figma.on('documentchange', (event) => {
       }
       
       // 🎬 时间线编辑器：检测图层增删和重排序
-      // 不依赖 change.node.parent（CREATE 时 parent 可能尚未就位），
-      // 而是直接比较 frame.children 与缓存的 lastTimelineLayerIds
-      const structuralChanges = event.documentChanges.filter(change => 
-        change.type === 'CREATE' || change.type === 'DELETE'
-      );
-      
-      if (structuralChanges.length > 0) {
-        const frame = figma.getNodeById(timelineFrameId);
-        if (frame && frame.type === 'FRAME') {
-          const currentChildIds = frame.children.map(c => c.id);
-          const needsRefresh = currentChildIds.length !== lastTimelineLayerIds.length ||
-            !currentChildIds.every((id, i) => id === lastTimelineLayerIds[i]);
+      // 每次 documentchange 都检查 frame.children 是否与缓存不同，
+      // 比仅依赖 CREATE/DELETE 事件类型更可靠
+      const frame_sc = figma.getNodeById(timelineFrameId);
+      if (frame_sc && frame_sc.type === 'FRAME') {
+        const currentChildIds = frame_sc.children.map(c => c.id);
+        const structurallyChanged = currentChildIds.length !== lastTimelineLayerIds.length ||
+          !currentChildIds.every((id, i) => id === lastTimelineLayerIds[i]);
+        
+        if (structurallyChanged) {
+          // 先计算新增图层，再更新缓存
+          const prevIds = new Set(lastTimelineLayerIds);
+          const newIds = currentChildIds.filter(id => !prevIds.has(id));
           
-          if (needsRefresh) {
-            // 检查新增的图层是否可能是视频（需要延迟）
-            const newIds = currentChildIds.filter(id => !lastTimelineLayerIds.includes(id));
-            let hasVideoCreate = false;
-            for (const id of newIds) {
-              try {
-                const n = figma.getNodeById(id);
-                if (n) {
-                  const nm = (n.name || '').toLowerCase();
-                  if (nm.endsWith('.mp4') || nm.endsWith('.mov') || nm.endsWith('.webm') || nm.includes('screenrecording')) {
-                    hasVideoCreate = true;
-                    break;
-                  }
+          // 立即更新缓存，防止同一变化多次触发刷新
+          lastTimelineLayerIds = [...currentChildIds];
+          let hasVideoCreate = false;
+          for (const id of newIds) {
+            try {
+              const n = figma.getNodeById(id);
+              if (n) {
+                const nm = (n.name || '').toLowerCase();
+                if (nm.endsWith('.mp4') || nm.endsWith('.mov') || nm.endsWith('.webm') || nm.includes('screenrecording')) {
+                  hasVideoCreate = true;
+                  break;
                 }
-              } catch (e) { hasVideoCreate = true; break; }
-            }
-            
-            const delay = hasVideoCreate ? 3000 : 500;
-            setTimeout(() => {
-              const f = figma.getNodeById(timelineFrameId);
-              if (f && f.type === 'FRAME') {
-                refreshTimelineLayers(f);
               }
-            }, delay);
+            } catch (e) { hasVideoCreate = true; break; }
           }
+          
+          // 用 debounce 防止快速连续的变化触发多次刷新
+          if (structuralRefreshTimer) clearTimeout(structuralRefreshTimer);
+          const delay = hasVideoCreate ? 3000 : 800;
+          structuralRefreshTimer = setTimeout(() => {
+            structuralRefreshTimer = null;
+            const f = figma.getNodeById(timelineFrameId);
+            if (f && f.type === 'FRAME') {
+              refreshTimelineLayers(f, true);
+            }
+          }, delay);
         }
       }
     }
