@@ -88,9 +88,9 @@ let mainWindow;
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 600,
-    height: 500,
+    height: 620,
     minWidth: 600,
-    minHeight: 500,
+    minHeight: 620,
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
@@ -129,155 +129,94 @@ app.on('window-all-closed', () => {
 // IPC 处理函数
 // 自动检测项目根目录
 ipcMain.handle('get-project-root', async () => {
-  // 获取 Installer.app 的实际路径
-  // app.getAppPath() 返回 .app 内部的 Resources 路径
   let appPath = app.getAppPath();
-  
   console.log('原始 appPath:', appPath);
-  
-  // 如果是打包后的应用（app.asar），需要特殊处理
+
   if (appPath.includes('.asar')) {
-    // 移除 .asar 及其后的路径
     appPath = appPath.replace(/\.asar.*$/, '.asar');
   }
-  
-  // 打包后的路径通常是: .../ScreenSync Installer.app/Contents/Resources/app.asar
-  // 我们需要向上找到 .app，然后再向上一级找到安装包根目录
-  let currentPath = appPath;
-  
-  // 1. 先找到 .app 包
-  while (currentPath !== '/' && !currentPath.endsWith('.app')) {
-    currentPath = path.dirname(currentPath);
+
+  // 找到 .app 包路径
+  let dotAppPath = appPath;
+  while (dotAppPath !== '/' && !dotAppPath.endsWith('.app')) {
+    dotAppPath = path.dirname(dotAppPath);
   }
-  
-  console.log('找到 .app 路径:', currentPath);
-  
-  // 2. .app 的父目录就是安装包根目录（ScreenSync-Apple 或 ScreenSync-Intel）
-  const userPackageRoot = path.dirname(currentPath);
-  
-  console.log('安装包根目录:', userPackageRoot);
-  
-  // 3. 验证该目录下的"项目文件"子目录是否有 package.json（新结构）
-  const projectFilesPath = path.join(userPackageRoot, '项目文件');
-  const packageJsonPath = path.join(projectFilesPath, 'package.json');
-  
-  if (fs.existsSync(packageJsonPath)) {
-    console.log('✅ 找到 package.json:', packageJsonPath);
-    // 返回"项目文件"目录作为项目根目录
-    return projectFilesPath;
+  console.log('.app 路径:', dotAppPath);
+
+  // 辅助: 在指定目录查找 项目文件/package.json
+  function findProjectFiles(dir) {
+    if (!dir || dir === '/') return null;
+    const pf = path.join(dir, '项目文件', 'package.json');
+    if (fs.existsSync(pf)) return path.join(dir, '项目文件');
+    const direct = path.join(dir, 'package.json');
+    if (fs.existsSync(direct)) return dir;
+    return null;
   }
-  
-  // 兼容旧结构：检查根目录是否直接有 package.json
-  const oldPackageJsonPath = path.join(userPackageRoot, 'package.json');
-  if (fs.existsSync(oldPackageJsonPath)) {
-    console.log('✅ 找到 package.json（旧结构）:', oldPackageJsonPath);
-    return userPackageRoot;
-  }
-  
-  console.warn('⚠️ 未在预期位置找到 package.json，尝试备用路径');
-  
-  // 备用方案：检查当前目录及其父目录（包括"项目文件"子目录）
-  // 注意：必须排除 appPath 本身（如果它是 asar），因为 Electron fs 可能会错误地认为 asar 里的 package.json 是我们我们要找的
-  const fallbackPaths = [
-    // appPath, // 移除这个，防止定位到 installer 自己的 asar
-    path.dirname(appPath),
-    path.dirname(path.dirname(appPath)),
-    path.dirname(path.dirname(path.dirname(appPath)))
-  ];
-  
-  for (const testPath of fallbackPaths) {
-    // 先检查"项目文件"子目录（新结构）
-    const projectFilesTestPath = path.join(testPath, '项目文件');
-    const testPackageJsonNew = path.join(projectFilesTestPath, 'package.json');
-    if (fs.existsSync(testPackageJsonNew)) {
-      console.log('✅ 备用路径找到 package.json（新结构）:', testPackageJsonNew);
-      return projectFilesTestPath;
-    }
-    
-    // 再检查直接路径（旧结构兼容）
-    const testPackageJson = path.join(testPath, 'package.json');
-    if (fs.existsSync(testPackageJson)) {
-      console.log('✅ 备用路径找到 package.json（旧结构）:', testPackageJson);
-      return testPath;
-    }
-  }
-  
-  // 4. 特殊处理：如果是在 DMG 中运行，尝试反向查找 DMG 文件路径
-  // 例如 appPath 是 /Volumes/ScreenSync Installer/ScreenSync Installer.app
-  // 则 userPackageRoot 是 /Volumes/ScreenSync Installer
-  // 我们需要找到这个 Volume 对应的 DMG 镜像文件路径
-  if (appPath.startsWith('/Volumes/')) {
-    console.log('⚠️ 检测到在 Volume 中运行，尝试查找 DMG 源文件路径...');
-    
-    try {
-      // 获取挂载点名称 (例如 /Volumes/ScreenSync Installer)
-      const volumePath = appPath.split('.app')[0].substring(0, appPath.split('.app')[0].lastIndexOf('/'));
-      console.log('挂载点:', volumePath);
-      
-      // 使用 hdiutil info -plist 获取挂载信息
-      const infoXml = require('child_process').execSync('hdiutil info -plist', { encoding: 'utf8' });
-      
-      // 简单的解析逻辑 (不引入 xml2js 依赖)
-      // 寻找 volumePath 附近出现的 image-path
-      // 注意：这里是一个简化的解析，可能不够健壮，但在这个受控场景下通常有效
-      
-      // 1. 找到包含 volumePath 的 dict 块
-      const volumeIndex = infoXml.indexOf(volumePath);
-      if (volumeIndex !== -1) {
-        // 截取相关片段，向前寻找 image-path
-        // 这比较 hacky，但 hdiutil 的输出结构相对固定
-        // 更好的方式是解析 plist，但为了减少依赖，我们尝试直接匹配
-        
-        // 尝试直接从系统挂载信息中找
-        // 另一种方法：既然我们知道用户通常是从 tar 包解压的
-        // 那么 DMG 文件旁边应该有 "项目文件" 文件夹
-        
-        // 让我们换个思路：直接解析 hdiutil info 的输出
-        // hdiutil info 输出包含 image-path 和 mount-point
-        
-        const lines = require('child_process').execSync('hdiutil info', { encoding: 'utf8' }).split('\n');
-        let dmgImagePath = '';
-        
-        // 找到包含 volumePath 的行的索引
-        let volumeLineIndex = -1;
-        for (let i = 0; i < lines.length; i++) {
-          if (lines[i].includes(volumePath)) {
-            volumeLineIndex = i;
-            break;
-          }
-        }
-        
-        // 从 volumePath 行向上查找最近的 image-path
-        if (volumeLineIndex !== -1) {
-          for (let i = volumeLineIndex; i >= 0; i--) {
-            if (lines[i].startsWith('image-path')) {
-              dmgImagePath = lines[i].split(': ')[1].trim();
-              break;
-            }
-          }
-        }
-        
-        if (dmgImagePath) {
-          console.log('✅ 找到 DMG 源文件路径:', dmgImagePath);
-          // DMG 文件所在的目录
-          const dmgDir = path.dirname(dmgImagePath);
-          const projectFilesFromDmg = path.join(dmgDir, '项目文件');
-          const packageJsonFromDmg = path.join(projectFilesFromDmg, 'package.json');
-          
-          if (fs.existsSync(packageJsonFromDmg)) {
-            console.log('✅ 通过 DMG 源路径找到 package.json:', packageJsonFromDmg);
-            return projectFilesFromDmg;
-          }
-        }
+
+  // ====== 策略 1: DMG 回溯（从 DMG 运行时的主要路径） ======
+  // 分发结构: ScreenSync-Apple/双击安装.dmg + ScreenSync-Apple/项目文件/
+  // 用 hdiutil info 找到 DMG 源文件，在其同级目录找 项目文件/
+  try {
+    const { execSync } = require('child_process');
+    const hdiOutput = execSync('hdiutil info', { encoding: 'utf8', timeout: 5000 });
+    const lines = hdiOutput.split('\n');
+
+    // 收集所有 { imagePath, mountPoints } 对
+    let currentImage = '';
+    const mounts = [];
+    for (const line of lines) {
+      if (line.startsWith('image-path')) {
+        currentImage = line.replace(/^image-path\s*:\s*/, '').trim();
       }
-    } catch (e) {
-      console.error('反向查找 DMG 路径失败:', e);
+      if (line.includes('/Volumes/') && currentImage) {
+        const mountPoint = line.replace(/.*?(\/Volumes\/\S.*)/, '$1').trim();
+        mounts.push({ image: currentImage, mount: mountPoint });
+      }
+    }
+
+    // 找到当前 app 所在的挂载点
+    const appVolume = mounts.find(m => dotAppPath.startsWith(m.mount));
+    if (appVolume) {
+      console.log('DMG 回溯: 挂载点 =', appVolume.mount, ', DMG =', appVolume.image);
+      const dmgDir = path.dirname(appVolume.image);
+      const found = findProjectFiles(dmgDir);
+      if (found) {
+        console.log('✅ 通过 DMG 回溯找到项目:', found);
+        return found;
+      }
+      // DMG 可能在子目录，再查父目录
+      const parentFound = findProjectFiles(path.dirname(dmgDir));
+      if (parentFound) {
+        console.log('✅ 通过 DMG 父目录找到项目:', parentFound);
+        return parentFound;
+      }
+    }
+  } catch (e) {
+    console.warn('DMG 回溯失败:', e.message);
+  }
+
+  // ====== 策略 2: 直接从 .app 父目录查找 ======
+  // 当 .app 不在 DMG 而是直接在安装包文件夹中时
+  const parentDir = path.dirname(dotAppPath);
+  const directFound = findProjectFiles(parentDir);
+  if (directFound) {
+    console.log('✅ 从 .app 父目录找到项目:', directFound);
+    return directFound;
+  }
+
+  // ====== 策略 3: 向上遍历最多 3 级父目录 ======
+  let searchDir = parentDir;
+  for (let i = 0; i < 3; i++) {
+    searchDir = path.dirname(searchDir);
+    if (searchDir === '/') break;
+    const upFound = findProjectFiles(searchDir);
+    if (upFound) {
+      console.log('✅ 从祖先目录找到项目:', upFound);
+      return upFound;
     }
   }
-  
-  console.error('❌ 无法找到 package.json');
-  // 最后的退路：不要返回 userPackageRoot，因为这可能是只读的 Volume 根目录
-  // 直接返回 null，让前端提示用户手动选择
+
+  console.error('❌ 所有策略均未找到 package.json');
   return null;
 });
 
@@ -1732,95 +1671,6 @@ ipcMain.handle('setup-icloud-keep-downloaded', async () => {
       });
     }
   });
-});
-
-// 自启动诊断
-ipcMain.handle('run-diagnostic', async (event, diagnosticInstallPath) => {
-  const homeDir = os.homedir();
-  const lines = [];
-
-  function run(cmd) {
-    try {
-      return exec(cmd, { encoding: 'utf8', timeout: 5000 }).toString().trim();
-    } catch (e) {
-      return e.stderr ? e.stderr.toString().trim() : `(error: ${e.message})`;
-    }
-  }
-  function runSync(cmd) {
-    try {
-      return require('child_process').execSync(cmd, { encoding: 'utf8', timeout: 5000 }).trim();
-    } catch (e) {
-      return `(error: ${e.message})`;
-    }
-  }
-
-  lines.push('=== ScreenSync 自启动诊断 ===');
-  lines.push(`时间: ${new Date().toLocaleString()}`);
-  lines.push(`安装路径: ${diagnosticInstallPath || '(未知)'}`);
-  lines.push('');
-
-  // Node.js
-  const nodePath = findExecutable('node');
-  lines.push(`[Node.js] 路径: ${nodePath || '未找到'}`);
-  if (nodePath) lines.push(`[Node.js] 版本: ${runSync(`"${nodePath}" --version`)}`);
-  lines.push('');
-
-  // LaunchAgent
-  const plistPath = path.join(homeDir, 'Library', 'LaunchAgents', 'com.screensync.server.plist');
-  lines.push(`[LaunchAgent] plist: ${fs.existsSync(plistPath) ? '存在' : '不存在'}`);
-  if (fs.existsSync(plistPath)) {
-    try {
-      const content = fs.readFileSync(plistPath, 'utf8');
-      const progMatch = content.match(/<string>([^<]*node[^<]*)<\/string>/);
-      const pathMatch = content.match(/<string>([^<]*start\.js[^<]*)<\/string>/);
-      if (progMatch) lines.push(`[LaunchAgent] Node: ${progMatch[1]}`);
-      if (pathMatch) lines.push(`[LaunchAgent] Script: ${pathMatch[1]}`);
-    } catch (e) {
-      lines.push(`[LaunchAgent] 读取失败: ${e.message}`);
-    }
-  }
-
-  const launchctlList = runSync('launchctl list | grep screensync');
-  lines.push(`[LaunchAgent] launchctl list: ${launchctlList || '(未注册)'}`);
-  lines.push('');
-
-  // Port 8888
-  const lsofResult = runSync('lsof -i :8888 -sTCP:LISTEN');
-  lines.push(`[端口 8888] ${lsofResult || '(无进程监听)'}`);
-  lines.push('');
-
-  // Server logs
-  const logPaths = [
-    diagnosticInstallPath ? path.join(diagnosticInstallPath, 'server.log') : null,
-    diagnosticInstallPath ? path.join(diagnosticInstallPath, 'server-error.log') : null,
-    '/tmp/screensync-server.log',
-    '/tmp/screensync-server-error.log',
-  ].filter(Boolean);
-
-  for (const lp of logPaths) {
-    if (fs.existsSync(lp)) {
-      try {
-        const content = fs.readFileSync(lp, 'utf8');
-        const tail = content.split('\n').slice(-20).join('\n');
-        if (tail.trim()) {
-          lines.push(`[日志] ${lp} (最后20行):`);
-          lines.push(tail);
-          lines.push('');
-        }
-      } catch (e) {
-        lines.push(`[日志] ${lp}: 读取失败 - ${e.message}`);
-      }
-    }
-  }
-
-  // Connectivity test
-  lines.push('[连接测试]');
-  const curlResult = runSync('curl -s -o /dev/null -w "%{http_code}" --connect-timeout 3 http://localhost:8888/health 2>&1');
-  lines.push(`  localhost:8888/health → HTTP ${curlResult}`);
-  const curl127 = runSync('curl -s -o /dev/null -w "%{http_code}" --connect-timeout 3 http://127.0.0.1:8888/health 2>&1');
-  lines.push(`  127.0.0.1:8888/health → HTTP ${curl127}`);
-
-  return lines.join('\n');
 });
 
 // 退出应用

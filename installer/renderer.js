@@ -847,33 +847,9 @@ function showErrorDetailModal(logText) {
   overlay.classList.add('show');
 }
 
-// Diagnostic modal
-function showDiagnosticModal(text) {
-  const overlay = document.getElementById('diagnosticOverlay');
-  const content = document.getElementById('diagnosticContent');
-  content.textContent = text || '（无输出）';
-  overlay.classList.add('show');
-}
-
 // 初始化
 document.addEventListener('DOMContentLoaded', async () => {
   showStep(1);
-
-  // Diagnostic button
-  const diagBtn = document.getElementById('step5Diagnostic');
-  if (diagBtn) {
-    diagBtn.addEventListener('click', async () => {
-      const content = document.getElementById('diagnosticContent');
-      content.textContent = '正在收集诊断信息...';
-      document.getElementById('diagnosticOverlay').classList.add('show');
-      try {
-        const result = await ipcRenderer.invoke('run-diagnostic', installPath || null);
-        content.textContent = result || '（无输出）';
-      } catch (err) {
-        content.textContent = '诊断失败: ' + (err?.message || err);
-      }
-    });
-  }
 
   // Error detail overlay
   const errorDetailCloseBtn = document.getElementById('errorDetailCloseBtn');
@@ -888,22 +864,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       const text = document.getElementById('errorDetailContent').textContent;
       await ipcRenderer.invoke('copy-to-clipboard', text);
       showToast('日志已复制', 'success');
-    });
-  }
-
-  // Diagnostic overlay
-  const diagnosticCloseBtn = document.getElementById('diagnosticCloseBtn');
-  if (diagnosticCloseBtn) {
-    diagnosticCloseBtn.addEventListener('click', () => {
-      document.getElementById('diagnosticOverlay').classList.remove('show');
-    });
-  }
-  const diagnosticCopyBtn = document.getElementById('diagnosticCopyBtn');
-  if (diagnosticCopyBtn) {
-    diagnosticCopyBtn.addEventListener('click', async () => {
-      const text = document.getElementById('diagnosticContent').textContent;
-      await ipcRenderer.invoke('copy-to-clipboard', text);
-      showToast('已复制', 'success');
     });
   }
 
