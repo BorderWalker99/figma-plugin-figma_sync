@@ -485,16 +485,14 @@ window.recheckDependencies = checkSystemRequirements;
 async function installMissingDependencies() {
   const actionBtn = document.getElementById('step2ActionBtn');
   const checks = document.getElementById('systemChecks');
-  const logContainer = document.getElementById('step2Log');
 
   // Disable button, show spinner
   actionBtn.disabled = true;
   actionBtn.classList.add('keep-raised');
   actionBtn.innerHTML = '<svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg> 正在安装...';
 
-  // Show log container
-  logContainer.style.display = 'block';
-  logContainer.innerHTML = '';
+  // Collect logs internally but never show the terminal to users
+  let step2LogBuffer = '';
 
   const depIndices = { homebrew: 0, node: 1, imagemagick: 2, ffmpeg: 3, gifsicle: 4 };
   const displayNames = { homebrew: 'Homebrew', node: 'Node.js', imagemagick: 'ImageMagick', ffmpeg: 'FFmpeg', gifsicle: 'Gifsicle' };
@@ -533,7 +531,7 @@ async function installMissingDependencies() {
         <div class="status-icon"><svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg></div>
         <div class="status-content">
           <div class="status-label">${displayNames[dep]}</div>
-          <div class="status-detail" style="color: var(--accent);">${message}</div>
+          <div class="status-detail" style="color: var(--accent);">正在安装...</div>
         </div>
       `;
     } else if (status === 'done') {
@@ -551,23 +549,22 @@ async function installMissingDependencies() {
         <div class="status-icon"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
         <div class="status-content">
           <div class="status-label">${displayNames[dep]}</div>
-          <div class="status-detail" style="color: var(--danger);">${message}</div>
+          <div class="status-detail" style="color: var(--danger);">安装失败<span style="display: inline-block; width: 12px;"></span><a href="#" class="view-error-link" style="color: var(--accent); font-size: 12px; text-decoration: underline; cursor: pointer;">查看详情</a></div>
         </div>
       `;
+      const link = item.querySelector('.view-error-link');
+      if (link) {
+        link.addEventListener('click', (e) => {
+          e.preventDefault();
+          showErrorDetailModal(step2LogBuffer);
+        });
+      }
     }
   };
 
-  // Real-time log output
+  // Collect log output silently (no visible terminal)
   const logHandler = (event, data) => {
-    const lines = data.data.split('\n');
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      const logLine = document.createElement('div');
-      logLine.style.cssText = 'padding: 1px 0; word-break: break-all; white-space: pre-wrap;';
-      logLine.textContent = line;
-      logContainer.appendChild(logLine);
-    }
-    logContainer.scrollTop = logContainer.scrollHeight;
+    step2LogBuffer += data.data;
   };
 
   ipcRenderer.on('dep-install-progress', progressHandler);
@@ -587,7 +584,6 @@ async function installMissingDependencies() {
       actionBtn.innerHTML = '<svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg> 正在验证...';
 
       setTimeout(() => {
-        logContainer.style.display = 'none';
         checkSystemRequirements();
       }, 1500);
     } else {
@@ -631,7 +627,7 @@ async function installDependencies() {
   progressBar.classList.remove('success');
   progressBar.style.width = '10%';
   if (statusLabel) {
-    statusLabel.textContent = '正在安装依赖...';
+    statusLabel.textContent = '正在安装...';
   }
   
   // 创建日志显示区域（默认隐藏，出错时显示）
@@ -689,7 +685,7 @@ async function installDependencies() {
     logOutput += '\n--- 错误信息 ---\n' + (result.error || '未知错误');
     progressBar.style.width = '0%';
     if (statusLabel) {
-      statusLabel.innerHTML = `<span style="color: var(--danger);">安装失败</span><span style="display: inline-block; width: 8px;"></span><a id="viewErrorLink" href="#" style="color: var(--accent); font-size: 12px; text-decoration: underline; cursor: pointer;">查看原因</a>`;
+      statusLabel.innerHTML = `<span style="color: var(--danger);">安装失败</span><span style="display: inline-block; width: 12px;"></span><a id="viewErrorLink" href="#" style="color: var(--accent); font-size: 12px; text-decoration: underline; cursor: pointer;">查看详情</a>`;
       document.getElementById('viewErrorLink').addEventListener('click', (e) => {
         e.preventDefault();
         showErrorDetailModal(logOutput);

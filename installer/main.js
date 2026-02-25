@@ -647,7 +647,7 @@ function downloadFile(url, destPath, sendLog) {
 
 // ---- Legacy Node.js ----
 async function installLegacyNode(sendProgress, sendLog) {
-  sendProgress('node', 'installing', '正在下载 Node.js...');
+  sendProgress('node', 'installing', '正在安装...');
   sendLog('\n📦 正在安装 Node.js...\n');
 
   const nodeDir = path.join(LEGACY_DEPS_DIR, 'node');
@@ -690,7 +690,7 @@ async function installLegacyNode(sendProgress, sendLog) {
 
 // ---- Legacy FFmpeg + FFprobe ----
 async function installLegacyFFmpeg(sendProgress, sendLog) {
-  sendProgress('ffmpeg', 'installing', '正在下载 FFmpeg...');
+  sendProgress('ffmpeg', 'installing', '正在安装...');
   sendLog('\n📦 正在安装 FFmpeg...\n');
 
   fs.mkdirSync(LEGACY_BIN_DIR, { recursive: true });
@@ -741,7 +741,7 @@ async function installLegacyFFmpeg(sendProgress, sendLog) {
 
 // ---- Legacy ImageMagick ----
 async function installLegacyImageMagick(sendProgress, sendLog) {
-  sendProgress('imagemagick', 'installing', '正在安装 ImageMagick...');
+  sendProgress('imagemagick', 'installing', '正在安装...');
   sendLog('\n📦 正在安装 ImageMagick...\n');
 
   fs.mkdirSync(LEGACY_BIN_DIR, { recursive: true });
@@ -797,7 +797,7 @@ async function installLegacyImageMagick(sendProgress, sendLog) {
       sendLog('   尝试从源码编译 ImageMagick...\n');
       try {
         await execPromise('xcode-select -p', { timeout: 5000 });
-        sendProgress('imagemagick', 'installing', '正在编译 ImageMagick（需要几分钟）...');
+        sendProgress('imagemagick', 'installing', '正在安装...');
 
         const srcDir = path.join(tmpDir, 'src');
         fs.mkdirSync(srcDir, { recursive: true });
@@ -848,7 +848,7 @@ async function installLegacyImageMagick(sendProgress, sendLog) {
 
 // ---- Legacy Gifsicle ----
 async function installLegacyGifsicle(sendProgress, sendLog) {
-  sendProgress('gifsicle', 'installing', '正在安装 Gifsicle...');
+  sendProgress('gifsicle', 'installing', '正在安装...');
   sendLog('\n📦 正在安装 Gifsicle...\n');
 
   fs.mkdirSync(LEGACY_BIN_DIR, { recursive: true });
@@ -982,7 +982,7 @@ ipcMain.handle('install-all-dependencies', async (event, dependencyStatus) => {
         return { success: false, error: '已取消密码输入', cancelled: true };
       }
 
-      sendProgress('homebrew', 'installing', '正在验证密码...');
+      sendProgress('homebrew', 'installing', '正在安装...');
       sendLog('📦 正在安装 Homebrew...\n');
 
       const isAppleSilicon = process.arch === 'arm64';
@@ -1010,7 +1010,7 @@ ipcMain.handle('install-all-dependencies', async (event, dependencyStatus) => {
         }
 
         // Step 2: Download and run Homebrew installer
-        sendProgress('homebrew', 'installing', '正在安装 Homebrew...');
+        sendProgress('homebrew', 'installing', '正在安装...');
 
         const brewScript = [
           `echo "📦 正在下载并安装 Homebrew（可能需要几分钟）..."`,
@@ -1112,7 +1112,7 @@ ipcMain.handle('install-all-dependencies', async (event, dependencyStatus) => {
 
       for (const pkg of brewPackages) {
         const name = displayNames[pkg] || pkg;
-        sendProgress(pkg, 'installing', `正在安装 ${name}...`);
+        sendProgress(pkg, 'installing', '正在安装...');
         sendLog(`\n📦 正在安装 ${name}...\n`);
 
         await new Promise((resolve, reject) => {

@@ -640,6 +640,51 @@
       opacity: 1;
     }
 
+    .error-modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      padding: 16px 20px 12px;
+      border-bottom: 1px solid var(--glass-border-subtle);
+    }
+
+    .close-btn {
+      width: 26px;
+      height: 26px;
+      padding: 0;
+      border-radius: 50%;
+      background: var(--glass-bg);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid var(--glass-border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 0.25s ease;
+      flex-shrink: 0;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+    }
+
+    .close-btn svg {
+      color: var(--text-secondary);
+      stroke: currentColor;
+    }
+
+    .close-btn:hover {
+      transform: scale(1.05);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+    }
+
+    .close-btn:hover svg {
+      color: var(--text-primary);
+    }
+
+    .close-btn:active {
+      transform: scale(0.95);
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1), inset 0 1px 2px rgba(0, 0, 0, 0.05);
+    }
+
     .modal-icon {
       display: flex;
       align-items: center;
@@ -844,8 +889,6 @@
         </div>
       </div>
 
-      <div class="log-container" id="step2Log" style="display: none; max-height: 150px; margin-top: 16px; font-size: 11px;"></div>
-
       <div class="button-group" id="step2Buttons" style="display: none;">
         <div style="flex:1"></div>
         <button class="btn btn-primary" id="step2ActionBtn">
@@ -869,7 +912,6 @@
         </div>
       </div>
 
-      <div class="log-container" id="installLog" style="display: none;"></div>
       <div id="installErrorAlert" style="display: none;"></div>
 
       <div class="button-group" id="step3Buttons" style="display: none;">
@@ -952,19 +994,28 @@
   </div>
 
   <div id="errorDetailOverlay" class="overlay">
-    <div class="modal" style="width: 460px; max-height: 80vh; text-align: left;">
-      <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+    <div class="modal" style="width: 480px; max-height: 80vh; text-align: left; padding: 0;">
+      <div class="error-modal-header">
         <div>
-          <div class="modal-title" style="font-size: 16px; margin-bottom: 4px;">失败详情</div>
-          <div style="font-size: 12px; color: var(--text-secondary);">请把失败日志复制发送给开发者</div>
+          <div class="modal-title" style="font-size: 16px; margin-bottom: 2px;">失败详情</div>
+          <div style="font-size: 12px; color: var(--text-secondary);">请复制发给开发者</div>
         </div>
-        <button class="btn" id="errorDetailCopyBtn" style="min-width: auto; padding: 6px 14px; font-size: 12px; flex-shrink: 0;">
-          复制日志
+        <button class="close-btn" id="errorDetailCloseBtn">
+          <div style="width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </div>
         </button>
       </div>
-      <div id="errorDetailContent" style="background: #1a1a1a; color: #d4d4d4; padding: 14px; border-radius: 8px; font-family: 'SF Mono', Monaco, Menlo, monospace; font-size: 11px; max-height: 45vh; overflow-y: auto; white-space: pre-wrap; word-break: break-all; margin-top: 12px; border: 1px solid var(--border);"></div>
-      <div style="display: flex; justify-content: flex-end; margin-top: 12px;">
-        <button class="btn btn-primary" id="errorDetailCloseBtn" style="padding: 8px 20px;">关闭</button>
+      <div style="padding: 0 20px 16px;">
+        <div id="errorDetailContent" style="background: #1a1a1a; color: #d4d4d4; padding: 14px; border-radius: 8px; font-family: 'SF Mono', Monaco, Menlo, monospace; font-size: 11px; max-height: 45vh; overflow-y: auto; white-space: pre-wrap; word-break: break-all; border: 1px solid var(--border);"></div>
+        <div style="display: flex; justify-content: flex-end; margin-top: 12px;">
+          <button class="btn" id="errorDetailCopyBtn" style="min-width: auto; padding: 8px 16px; font-size: 13px;">
+            一键复制
+          </button>
+        </div>
       </div>
     </div>
   </div>
