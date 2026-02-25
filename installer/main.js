@@ -143,60 +143,78 @@ ipcMain.handle('get-project-root', async () => {
   }
   console.log('.app 路径:', dotAppPath);
 
-  // 辅助: 在指定目录查找 项目文件/package.json
+  // 辅助: 在指定目录查找含 start.js 的项目根
+  // 优先检查 项目文件/ 子目录（分发结构），其次直接检查目录本身
   function findProjectFiles(dir) {
     if (!dir || dir === '/') return null;
-    const pf = path.join(dir, '项目文件', 'package.json');
-    if (fs.existsSync(pf)) return path.join(dir, '项目文件');
-    const direct = path.join(dir, 'package.json');
-    if (fs.existsSync(direct)) return dir;
+    const sub = path.join(dir, '项目文件');
+    if (fs.existsSync(path.join(sub, 'package.json')) && fs.existsSync(path.join(sub, 'start.js'))) {
+      return sub;
+    }
+    if (fs.existsSync(path.join(dir, 'package.json')) && fs.existsSync(path.join(dir, 'start.js'))) {
+      return dir;
+    }
     return null;
   }
 
-  // ====== 策略 1: DMG 回溯（从 DMG 运行时的主要路径） ======
-  // 分发结构: ScreenSync-Apple/双击安装.dmg + ScreenSync-Apple/项目文件/
-  // 用 hdiutil info 找到 DMG 源文件，在其同级目录找 项目文件/
-  try {
-    const { execSync } = require('child_process');
-    const hdiOutput = execSync('hdiutil info', { encoding: 'utf8', timeout: 5000 });
-    const lines = hdiOutput.split('\n');
-
-    // 收集所有 { imagePath, mountPoints } 对
-    let currentImage = '';
-    const mounts = [];
-    for (const line of lines) {
-      if (line.startsWith('image-path')) {
-        currentImage = line.replace(/^image-path\s*:\s*/, '').trim();
-      }
-      if (line.includes('/Volumes/') && currentImage) {
-        const mountPoint = line.replace(/.*?(\/Volumes\/\S.*)/, '$1').trim();
-        mounts.push({ image: currentImage, mount: mountPoint });
-      }
-    }
-
-    // 找到当前 app 所在的挂载点
-    const appVolume = mounts.find(m => dotAppPath.startsWith(m.mount));
-    if (appVolume) {
-      console.log('DMG 回溯: 挂载点 =', appVolume.mount, ', DMG =', appVolume.image);
-      const dmgDir = path.dirname(appVolume.image);
-      const found = findProjectFiles(dmgDir);
+  // ====== 策略 0: 开发模式（未打包，没有 .app 包） ======
+  if (dotAppPath === '/') {
+    console.log('开发模式检测: 未找到 .app 包，从 appPath 向上搜索');
+    let devDir = appPath;
+    for (let i = 0; i < 5; i++) {
+      const found = findProjectFiles(devDir);
       if (found) {
-        console.log('✅ 通过 DMG 回溯找到项目:', found);
+        console.log('✅ 开发模式: 找到项目根目录:', found);
         return found;
       }
-      // DMG 可能在子目录，再查父目录
-      const parentFound = findProjectFiles(path.dirname(dmgDir));
-      if (parentFound) {
-        console.log('✅ 通过 DMG 父目录找到项目:', parentFound);
-        return parentFound;
+      const parent = path.dirname(devDir);
+      if (parent === devDir) break;
+      devDir = parent;
+    }
+  }
+
+  // ====== 策略 1: DMG 回溯（JSON 方式，最可靠） ======
+  // 分发结构: ScreenSync-Apple/双击安装.dmg + ScreenSync-Apple/项目文件/
+  // 用 hdiutil info -plist → JSON 找到 DMG 源文件路径
+  try {
+    const { execSync } = require('child_process');
+    const jsonStr = execSync('hdiutil info -plist | plutil -convert json -r -o - -',
+      { encoding: 'utf8', timeout: 8000 });
+    const hdiInfo = JSON.parse(jsonStr);
+    const images = hdiInfo.images || [];
+    console.log('DMG 回溯: 发现', images.length, '个挂载的磁盘映像');
+
+    for (const img of images) {
+      const imagePath = img['image-path'];
+      const entities = img['system-entities'] || [];
+      for (const entity of entities) {
+        const mountPoint = entity['mount-point'];
+        if (!mountPoint) continue;
+        console.log('  检查挂载点:', mountPoint, '← DMG:', imagePath);
+        if (dotAppPath.startsWith(mountPoint + '/') || dotAppPath === mountPoint) {
+          console.log('  ✓ 匹配当前 app 所在卷');
+          const dmgDir = path.dirname(imagePath);
+          // 在 DMG 同级目录查找
+          const found = findProjectFiles(dmgDir);
+          if (found) {
+            console.log('✅ 通过 DMG 回溯找到项目:', found);
+            return found;
+          }
+          // DMG 可能嵌套一层，查父目录
+          const parentFound = findProjectFiles(path.dirname(dmgDir));
+          if (parentFound) {
+            console.log('✅ 通过 DMG 父目录找到项目:', parentFound);
+            return parentFound;
+          }
+          console.warn('  ✗ DMG 目录中未找到项目文件:', dmgDir);
+        }
       }
     }
   } catch (e) {
-    console.warn('DMG 回溯失败:', e.message);
+    console.warn('DMG 回溯(JSON)失败:', e.message);
   }
 
   // ====== 策略 2: 直接从 .app 父目录查找 ======
-  // 当 .app 不在 DMG 而是直接在安装包文件夹中时
   const parentDir = path.dirname(dotAppPath);
   const directFound = findProjectFiles(parentDir);
   if (directFound) {
@@ -216,7 +234,34 @@ ipcMain.handle('get-project-root', async () => {
     }
   }
 
-  console.error('❌ 所有策略均未找到 package.json');
+  // ====== 策略 4: 搜索用户常见目录 ======
+  const homeDir = os.homedir();
+  const searchRoots = [
+    path.join(homeDir, 'Downloads'),
+    path.join(homeDir, 'Desktop'),
+    path.join(homeDir, 'Documents'),
+  ];
+  for (const root of searchRoots) {
+    if (!fs.existsSync(root)) continue;
+    try {
+      const entries = fs.readdirSync(root);
+      for (const entry of entries) {
+        if (!entry.startsWith('ScreenSync')) continue;
+        const candidate = path.join(root, entry);
+        const stat = fs.statSync(candidate);
+        if (!stat.isDirectory()) continue;
+        const found = findProjectFiles(candidate);
+        if (found) {
+          console.log('✅ 在常见目录中找到项目:', found);
+          return found;
+        }
+      }
+    } catch (e) {
+      // ignore permission errors
+    }
+  }
+
+  console.error('❌ 所有策略均未找到项目文件 (appPath:', appPath, ', dotAppPath:', dotAppPath, ')');
   return null;
 });
 
