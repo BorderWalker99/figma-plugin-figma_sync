@@ -217,7 +217,7 @@
       display: none;
       flex: 1;
       flex-direction: column;
-      gap: 24px;
+      gap: 20px;
       animation: fadeIn 0.4s var(--ease-out);
     }
 
@@ -517,6 +517,92 @@
       justify-content: center;
       margin-top: 0;
       padding-bottom: 20px;
+    }
+
+    /* Language Selection Cards */
+    .lang-cards {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      width: 100%;
+      max-width: 320px;
+    }
+
+    .lang-card {
+      position: relative;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      border-radius: var(--radius-s);
+      background: var(--glass-bg);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1.5px solid var(--glass-border-subtle);
+      cursor: pointer;
+      transition: all 0.25s ease;
+    }
+
+    .lang-card:hover {
+      border-color: var(--glass-border);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+    }
+
+    .lang-card.selected {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px var(--accent);
+    }
+
+    .lang-card .lang-icon {
+      width: 22px;
+      height: 22px;
+      flex-shrink: 0;
+    }
+
+    .lang-card .lang-icon img {
+      width: 22px;
+      height: 22px;
+      display: block;
+    }
+
+    .lang-card .lang-name {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text-primary);
+    }
+
+    .lang-card .lang-check {
+      position: absolute;
+      top: -6px;
+      right: -6px;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: var(--accent);
+      display: none;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .lang-card.selected .lang-check {
+      display: flex;
+    }
+
+    .lang-card .lang-check svg {
+      width: 10px;
+      height: 10px;
+      stroke: white;
+      stroke-width: 3;
+      fill: none;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      .lang-card {
+        background: rgba(255, 255, 255, 0.06);
+      }
+      .lang-card:hover {
+        background: rgba(255, 255, 255, 0.1);
+      }
     }
 
     /* Alerts — Glass card */
@@ -829,16 +915,29 @@
     <!-- Step 1: Welcome -->
     <div class="step active" id="step1">
       <div class="step-header">
-        <div style="margin-bottom: 24px;">
-          <img src="https://raw.githubusercontent.com/BorderWalker99/figma-plugin-figma_sync/refs/heads/main/images/logo.svg" width="80" height="80" style="filter: drop-shadow(0 4px 12px rgba(0,0,0,0.1));" />
+        <div style="margin-bottom: 20px;">
+          <img src="https://raw.githubusercontent.com/BorderWalker99/figma-plugin-figma_sync/refs/heads/main/images/logo.svg" width="72" height="72" style="filter: drop-shadow(0 4px 12px rgba(0,0,0,0.1));" />
         </div>
         <h1 style="font-family: 'Archivo Black', sans-serif; font-size: 32px; margin: 0 0 4px 0; color: var(--text-primary); letter-spacing: -0.02em;">ScreenSync</h1>
-        <p style="font-size: 16px; color: var(--text-secondary); margin: 0;">自动化传输并整理截图</p>
+        <p data-i18n="welcome_subtitle" style="font-size: 16px; color: var(--text-secondary); margin: 0;">自动化传输并整理截图</p>
+
+        <div class="lang-cards" style="margin-top: 24px;">
+          <div class="lang-card selected" id="langCardZh" onclick="selectLanguage('zh')">
+            <div class="lang-check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg></div>
+            <div class="lang-icon"><img src="https://raw.githubusercontent.com/BorderWalker99/figma-plugin-figma_sync/refs/heads/main/images/zh.svg" alt="中文"></div>
+            <div class="lang-name">中文</div>
+          </div>
+          <div class="lang-card" id="langCardEn" onclick="selectLanguage('en')">
+            <div class="lang-check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg></div>
+            <div class="lang-icon"><img src="https://raw.githubusercontent.com/BorderWalker99/figma-plugin-figma_sync/refs/heads/main/images/en.svg" alt="English"></div>
+            <div class="lang-name">English</div>
+          </div>
+        </div>
       </div>
 
       <div class="button-group">
         <button class="btn btn-primary" id="step1Next" onclick="nextStep()" style="min-width: 120px; padding: 10px 12px 10px 20px; font-size: 15px;">
-          开始安装
+          <span data-i18n="btn_start_install">开始安装</span>
           <svg viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
         </button>
       </div>
@@ -847,8 +946,8 @@
     <!-- Step 2: System Check -->
     <div class="step" id="step2">
       <div class="step-header">
-        <h2 class="step-title">环境检查</h2>
-        <p class="step-description">检查系统环境是否满足运行要求</p>
+        <h2 class="step-title" data-i18n="step2_title">环境检查</h2>
+        <p class="step-description" data-i18n="step2_desc">检查系统环境是否满足运行要求</p>
       </div>
 
       <div class="status-list" id="systemChecks">
@@ -856,35 +955,35 @@
           <div class="status-icon"><svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg></div>
           <div class="status-content">
             <div class="status-label">Homebrew</div>
-            <div class="status-detail">检查中...</div>
+            <div class="status-detail" data-i18n="checking">检查中...</div>
           </div>
         </div>
         <div class="status-item checking">
           <div class="status-icon"><svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg></div>
           <div class="status-content">
             <div class="status-label">Node.js</div>
-            <div class="status-detail">检查中...</div>
+            <div class="status-detail" data-i18n="checking">检查中...</div>
           </div>
         </div>
         <div class="status-item checking">
           <div class="status-icon"><svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg></div>
           <div class="status-content">
             <div class="status-label">ImageMagick</div>
-            <div class="status-detail">检查中...</div>
+            <div class="status-detail" data-i18n="checking">检查中...</div>
           </div>
         </div>
         <div class="status-item checking">
           <div class="status-icon"><svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg></div>
           <div class="status-content">
             <div class="status-label">FFmpeg</div>
-            <div class="status-detail">检查中...</div>
+            <div class="status-detail" data-i18n="checking">检查中...</div>
           </div>
         </div>
         <div class="status-item checking">
           <div class="status-icon"><svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg></div>
           <div class="status-content">
             <div class="status-label">Gifsicle</div>
-            <div class="status-detail">检查中...</div>
+            <div class="status-detail" data-i18n="checking">检查中...</div>
           </div>
         </div>
       </div>
@@ -893,7 +992,7 @@
         <div style="flex:1"></div>
         <button class="btn btn-primary" id="step2ActionBtn">
             <svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
-            检测中...
+            <span data-i18n="btn_checking">检测中...</span>
         </button>
       </div>
     </div>
@@ -901,12 +1000,12 @@
     <!-- Step 3: Install Dependencies -->
     <div class="step" id="step3">
       <div class="step-header">
-        <h2 class="step-title">安装依赖</h2>
-        <p class="step-description">安装项目所需的依赖包，请保持网络畅通</p>
+        <h2 class="step-title" data-i18n="step3_title">安装依赖</h2>
+        <p class="step-description" data-i18n="step3_desc">安装项目所需的依赖包，请保持网络畅通</p>
       </div>
 
       <div class="progress-container">
-        <div class="status-label" id="installStatusLabel">正在安装...</div>
+        <div class="status-label" id="installStatusLabel" data-i18n="installing">正在安装...</div>
         <div class="progress-bar">
           <div class="progress-fill" id="installProgress" style="width: 0%"></div>
         </div>
@@ -917,7 +1016,7 @@
       <div class="button-group" id="step3Buttons" style="display: none;">
         <div style="flex:1"></div>
         <button class="btn btn-primary" onclick="nextStep()" id="step3Next" disabled>
-          下一步
+          <span data-i18n="btn_next">下一步</span>
           <svg viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
         </button>
       </div>
@@ -926,16 +1025,16 @@
     <!-- Step 4: Configuration -->
     <div class="step" id="step4">
       <div class="step-header">
-        <h2 class="step-title">系统配置</h2>
-        <p class="step-description">应用配置并设置本地环境</p>
+        <h2 class="step-title" data-i18n="step4_title">系统配置</h2>
+        <p class="step-description" data-i18n="step4_desc">应用配置并设置本地环境</p>
       </div>
 
       <div class="status-list" id="configStatus">
         <div class="status-item checking">
           <div class="status-icon"><svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg></div>
           <div class="status-content">
-            <div class="status-label">配置中...</div>
-            <div class="status-detail">正在设置权限和文件夹...</div>
+            <div class="status-label" data-i18n="configuring">配置中...</div>
+            <div class="status-detail" data-i18n="setting_permissions">正在设置权限和文件夹...</div>
           </div>
         </div>
       </div>
@@ -943,7 +1042,7 @@
       <div class="button-group" id="step4Buttons" style="display: none;">
         <div style="flex:1"></div>
         <button class="btn btn-primary" onclick="nextStep()" id="step4Next" disabled>
-          下一步
+          <span data-i18n="btn_next">下一步</span>
           <svg viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
         </button>
       </div>
@@ -958,10 +1057,10 @@
           </svg>
         </div>
       </div>
-      <h2 class="step-title" style="margin: 0;">安装完成</h2>
+      <h2 class="step-title" style="margin: 0;" data-i18n="step5_title">安装完成</h2>
       <div class="button-group" style="justify-content: center; margin-top: 0;">
         <button class="btn btn-primary" id="step5Finish" onclick="finishInstallation()" style="min-width: 120px;">
-          我知道了
+          <span data-i18n="btn_done">我知道了</span>
         </button>
       </div>
     </div>
@@ -997,8 +1096,8 @@
     <div class="modal" style="width: 480px; max-height: 80vh; text-align: left; padding: 0;">
       <div class="error-modal-header">
         <div>
-          <div class="modal-title" style="font-size: 16px; margin-bottom: 2px;">失败详情</div>
-          <div style="font-size: 12px; color: var(--text-secondary);">请复制发给开发者</div>
+          <div class="modal-title" style="font-size: 16px; margin-bottom: 2px;" data-i18n="error_detail_title">失败详情</div>
+          <div style="font-size: 12px; color: var(--text-secondary);" data-i18n="error_detail_subtitle">请复制发给开发者</div>
         </div>
         <button class="close-btn" id="errorDetailCloseBtn">
           <div style="width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center;">
@@ -1013,7 +1112,7 @@
         <div id="errorDetailContent" style="background: #1a1a1a; color: #d4d4d4; padding: 14px; border-radius: 8px; font-family: 'SF Mono', Monaco, Menlo, monospace; font-size: 11px; max-height: 45vh; overflow-y: auto; white-space: pre-wrap; word-break: break-all; border: 1px solid var(--border);"></div>
         <div style="display: flex; justify-content: flex-end; margin-top: 12px;">
           <button class="btn" id="errorDetailCopyBtn" style="min-width: auto; padding: 8px 16px; font-size: 13px;">
-            一键复制
+            <span data-i18n="btn_copy">一键复制</span>
           </button>
         </div>
       </div>

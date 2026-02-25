@@ -80,6 +80,28 @@
       --text-secondary: #bababf;    /* 二级：副标题、说明文字 */
       --text-tertiary: #d0d0d5;     /* 三级：辅助信息、占位符 */
       
+      /* ==========================================================================
+         Unified Button Color Token System
+         Applied to: .btn, .neumorphic-btn, .icon-btn
+         ========================================================================== */
+      --btn-bg: rgba(142, 142, 147, 0.18);
+      --btn-bg-hover: rgba(142, 142, 147, 0.22);
+      --btn-bg-active: rgba(142, 142, 147, 0.12);
+      --btn-text: var(--text-primary);
+      --btn-icon: var(--text-secondary);
+      --btn-icon-hover: var(--text-primary);
+      --btn-shadow: 0 2px 8px rgba(0, 0, 0, 0.03), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+      --btn-shadow-hover: 0 4px 12px rgba(0, 0, 0, 0.05), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+      --btn-shadow-active: 0 2px 6px rgba(0, 0, 0, 0.03), inset 0 1px 2px rgba(0, 0, 0, 0.02);
+
+      /* ==========================================================================
+         Unified Input Color Token System
+         Applied to: .settings-select, .lang-select-display, .input-wrapper,
+                     .user-id-display, .slider (switch track)
+         ========================================================================== */
+      --input-bg: rgba(142, 142, 147, 0.08);
+      --input-bg-hover: rgba(142, 142, 147, 0.12);
+
       /* Accent Blue */
       --accent: #0066FF;
       --accent-soft: rgba(0, 102, 255, 0.1);
@@ -371,6 +393,18 @@
         --text-secondary: #636366;    /* 二级：副标题、说明文字 */
         --text-tertiary: #545456;     /* 三级：辅助信息、占位符 */
         
+        /* Unified Button Color Token - Dark Theme Override */
+        --btn-bg: rgba(118, 118, 128, 0.32);
+        --btn-bg-hover: rgba(118, 118, 128, 0.40);
+        --btn-bg-active: rgba(118, 118, 128, 0.24);
+        --btn-shadow: 0 2px 8px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+        --btn-shadow-hover: 0 4px 12px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        --btn-shadow-active: 0 1px 2px rgba(0, 0, 0, 0.1), inset 0 1px 1px rgba(0, 0, 0, 0.05);
+
+        /* Unified Input Color Token - Dark Theme Override */
+        --input-bg: rgba(118, 118, 128, 0.24);
+        --input-bg-hover: rgba(118, 118, 128, 0.32);
+
         --accent: #0A84FF;
         --accent-soft: rgba(10, 132, 255, 0.15);
         
@@ -666,7 +700,7 @@
       border-radius: 50%;
       border: 1px solid var(--glass-border-subtle);
       outline: none;
-      background: var(--glass-bg);
+      background: var(--btn-bg);
       backdrop-filter: blur(12px);
       -webkit-backdrop-filter: blur(12px);
       display: flex;
@@ -678,11 +712,7 @@
       z-index: 100;
       padding: 2px;
       overflow: visible;
-      
-      /* Liquid Glass Shadow - Ultra subtle */
-      box-shadow: 
-        0 1px 3px rgba(0, 0, 0, 0.03),
-        inset 0 1px 0 rgba(255, 255, 255, 0.4);
+      box-shadow: var(--btn-shadow);
       
       /* Fade-in animation */
       animation: glassPopIn 0.4s cubic-bezier(0.25, 0.8, 0.25, 1) forwards;
@@ -713,7 +743,7 @@
     .icon-btn svg {
       width: 16px;
       height: 16px;
-      color: var(--text-secondary);
+      color: var(--btn-icon);
       transition: all 0.25s ease;
       filter: drop-shadow(0 1px 1px rgba(255, 255, 255, 0.5));
       stroke-width: inherit; 
@@ -728,21 +758,14 @@
         .icon-btn svg {
             filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.3));
         }
-        .icon-btn {
-            box-shadow: 
-                0 2px 8px rgba(0, 0, 0, 0.2),
-                inset 0 1px 0 rgba(255, 255, 255, 0.08);
-        }
     }
 
     /* Hover State */
     .icon-btn:hover {
       transform: scale(1.05);
-      background: var(--glass-bg-hover);
+      background: var(--btn-bg-hover);
       border-color: var(--glass-border);
-      box-shadow: 
-        0 2px 6px rgba(0, 0, 0, 0.04),
-        inset 0 1px 0 rgba(255, 255, 255, 0.5);
+      box-shadow: var(--btn-shadow-hover);
     }
     
     .icon-btn:hover .neu-icon-inner {
@@ -751,32 +774,18 @@
     
     .icon-btn:hover svg {
       opacity: 1;
-      color: var(--text-primary);
+      color: var(--btn-icon-hover);
     }
 
     /* Active/Pressed State */
     .icon-btn:active {
       transform: scale(0.95);
-      background: var(--glass-bg-active);
-      box-shadow: 
-        0 1px 2px rgba(0, 0, 0, 0.02),
-        inset 0 1px 1px rgba(0, 0, 0, 0.01);
+      background: var(--btn-bg-active);
+      box-shadow: var(--btn-shadow-active);
     }
     
     .icon-btn:active .neu-icon-inner {
         background: transparent;
-    }
-    
-    @media (prefers-color-scheme: dark) {
-        .icon-btn:hover .neu-icon-inner {
-            background: rgba(255,255,255,0.1);
-        }
-    }
-    
-    @media (prefers-color-scheme: dark) {
-        .icon-btn:hover {
-            background: rgba(255,255,255,0.1);
-        }
     }
     
     /* Custom Select - Liquid Glass Style */
@@ -786,7 +795,7 @@
       box-sizing: border-box;
       height: 32px;
       font-weight: 500;
-      background-color: rgba(142, 142, 147, 0.12);
+      background-color: var(--input-bg);
       border: 2px solid transparent;
       border-radius: var(--radius-input);
       padding: 0 28px 0 10px;
@@ -794,17 +803,16 @@
       line-height: 28px;
       color: var(--text-secondary);
       cursor: pointer;
-      transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
+      transition: all 0.2s ease, width 0.15s ease;
       /* Chevron Down SVG */
       background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
       background-repeat: no-repeat;
       background-position: right 8px center;
       background-size: 14px;
-      transition: all 0.2s ease, width 0.15s ease;
     }
 
     .settings-select:hover {
-      background-color: rgba(142, 142, 147, 0.15);
+      background-color: var(--input-bg-hover);
     }
 
     .settings-select:focus,
@@ -812,20 +820,6 @@
       outline: none;
       border-color: transparent;
       box-shadow: none;
-    }
-    
-    @media (prefers-color-scheme: dark) {
-        .settings-select {
-            background-color: rgba(118, 118, 128, 0.24);
-        }
-        .settings-select:hover {
-            background-color: rgba(118, 118, 128, 0.32);
-        }
-        .settings-select:focus,
-        .settings-select:active {
-            border-color: transparent;
-            box-shadow: none;
-        }
     }
     
     /* Language Select with SVG Flags */
@@ -841,7 +835,7 @@
       align-items: center;
       gap: 6px;
       padding: 0 28px 0 10px;
-      background-color: rgba(142, 142, 147, 0.12);
+      background-color: var(--input-bg);
       border: 2px solid transparent;
       border-radius: var(--radius-input);
       font-size: 13px;
@@ -857,7 +851,7 @@
       white-space: nowrap;
     }
     .lang-select-wrapper:hover .lang-select-display {
-      background-color: rgba(142, 142, 147, 0.15);
+      background-color: var(--input-bg-hover);
     }
     .lang-select-native {
       position: absolute;
@@ -876,15 +870,6 @@
       border-radius: 2px;
       overflow: hidden;
     }
-    @media (prefers-color-scheme: dark) {
-      .lang-select-display {
-        background-color: rgba(118, 118, 128, 0.24);
-      }
-      .lang-select-wrapper:hover .lang-select-display {
-        background-color: rgba(118, 118, 128, 0.32);
-      }
-    }
-
     /* Tooltip 样式 */
     .icon-btn[data-tooltip]:not(.no-tooltip)::after {
       content: attr(data-tooltip);
@@ -1847,7 +1832,7 @@
     .neumorphic-btn {
       border: none;
       outline: none;
-      background: var(--glass-bg);
+      background: var(--btn-bg);
       backdrop-filter: blur(var(--glass-blur));
       -webkit-backdrop-filter: blur(var(--glass-blur));
       border-radius: 50%;
@@ -1856,15 +1841,11 @@
       align-items: center;
       justify-content: center;
       position: relative;
-      color: var(--text-secondary);
+      color: var(--btn-icon);
       transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
       padding: 0;
       overflow: visible;
-      
-      /* Liquid Glass Shadow - Subtle */
-      box-shadow: 
-        0 2px 8px rgba(0, 0, 0, 0.03),
-        inset 0 1px 0 rgba(255, 255, 255, 0.4);
+      box-shadow: var(--btn-shadow);
       
       /* Fade-in animation */
       animation: glassPopIn 0.4s cubic-bezier(0.25, 0.8, 0.25, 1) forwards;
@@ -1918,11 +1899,9 @@
     /* Hover State */
     .neumorphic-btn:hover {
       transform: translateY(-2px);
-      background: var(--glass-bg-hover);
+      background: var(--btn-bg-hover);
       border-color: var(--glass-border);
-      box-shadow: 
-        0 4px 12px rgba(0, 0, 0, 0.05),
-        inset 0 1px 0 rgba(255, 255, 255, 0.5);
+      box-shadow: var(--btn-shadow-hover);
     }
     
     .neumorphic-btn:hover::after {
@@ -1936,10 +1915,8 @@
     /* Pressed / Active State */
     .neumorphic-btn:active, .neumorphic-btn.pressed {
       transform: translateY(0);
-      background: var(--glass-bg-active);
-      box-shadow: 
-        0 2px 6px rgba(0, 0, 0, 0.03),
-        inset 0 1px 2px rgba(0, 0, 0, 0.02);
+      background: var(--btn-bg-active);
+      box-shadow: var(--btn-shadow-active);
     }
     
     .neumorphic-btn:active::after, .neumorphic-btn.pressed::after {
@@ -1972,17 +1949,17 @@
     }
     
     .neumorphic-btn svg {
-      color: var(--text-secondary);
+      color: var(--btn-icon);
     }
     
     .neumorphic-btn:hover svg {
         opacity: 1;
-        color: var(--text-primary);
+        color: var(--btn-icon-hover);
     }
     
     .neumorphic-btn:active svg {
         opacity: 1;
-        color: var(--text-primary);
+        color: var(--btn-icon-hover);
     }
 
     .neumorphic-btn.large svg {
@@ -2167,8 +2144,8 @@
       gap: 6px;
       transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
       position: relative;
-      background: rgba(142, 142, 147, 0.18);
-      color: var(--text-primary);
+      background: var(--btn-bg);
+      color: var(--btn-text);
     }
 
     /* Button Specular Highlight - Hidden */
@@ -2201,30 +2178,14 @@
     }
     
     .btn:hover {
-        background: rgba(142, 142, 147, 0.22);
+        background: var(--btn-bg-hover);
     }
     
     .btn:active {
-        background: rgba(142, 142, 147, 0.12);
-    }
-    
-    @media (prefers-color-scheme: dark) {
-        .btn {
-            background: rgba(118, 118, 128, 0.32);
-            color: var(--text-primary);
-        }
-        .btn:hover {
-            background: rgba(118, 118, 128, 0.40);
-        }
-        .btn:active {
-            background: rgba(118, 118, 128, 0.24);
-        }
-    }
-
-    .btn:active {
-      box-shadow: 
-        -3px -3px 6px var(--neu-shadow-light),
-        3px 3px 6px var(--neu-shadow-dark);
+        background: var(--btn-bg-active);
+        box-shadow: 
+          -3px -3px 6px var(--neu-shadow-light),
+          3px 3px 6px var(--neu-shadow-dark);
     }
     
     .btn:active::after {
@@ -2232,42 +2193,29 @@
         box-shadow: var(--neu-face-shadow-active);
     }
 
-        .btn-primary {
-      color: var(--text-primary);
-      background: rgba(142, 142, 147, 0.18);
-        }
+    .btn-primary {
+      color: var(--btn-text);
+      background: var(--btn-bg);
+    }
     
-        .btn-primary:hover {
-      background: rgba(142, 142, 147, 0.22);
-        }
+    .btn-primary:hover {
+      background: var(--btn-bg-hover);
+    }
     
     .btn-primary:active {
-        background: rgba(142, 142, 147, 0.12);
+        background: var(--btn-bg-active);
     }
     
     .btn-primary::after {
         background: transparent;
     }
-    
-    @media (prefers-color-scheme: dark) {
-        .btn-primary {
-            background: rgba(118, 118, 128, 0.32);
-            color: var(--text-primary);
-        }
-        .btn-primary:hover {
-            background: rgba(118, 118, 128, 0.40);
-        }
-        .btn-primary:active {
-            background: rgba(118, 118, 128, 0.24);
-        }
-    }
 
     .btn-secondary {
-      color: var(--text-primary);
+      color: var(--btn-text);
     }
 
     .btn-secondary:hover {
-      background: rgba(142, 142, 147, 0.22);
+      background: var(--btn-bg-hover);
         }
     
     .btn-secondary:hover::after {
@@ -2850,7 +2798,7 @@
     .input-wrapper {
       display: flex;
       align-items: center;
-      background: rgba(142, 142, 147, 0.12);
+      background: var(--input-bg);
       border-radius: var(--radius-input);
       padding: 0 14px;
       height: 36px;
@@ -2869,12 +2817,6 @@
         pointer-events: none;
         z-index: -1;
         opacity: 0;
-    }
-    
-    @media (prefers-color-scheme: dark) {
-        .input-wrapper {
-            background: rgba(118, 118, 128, 0.24);
-        }
     }
     
     .input-wrapper:focus-within {
@@ -2922,7 +2864,7 @@
     
     /* User ID Display Container - Liquid Glass Style */
     .user-id-display {
-        background: rgba(142, 142, 147, 0.12);
+        background: var(--input-bg);
         padding: 0 14px;
         height: 36px;
         border-radius: var(--radius-input);
@@ -2931,12 +2873,6 @@
         justify-content: space-between;
         position: relative;
         border: 2px solid transparent;
-    }
-    
-    @media (prefers-color-scheme: dark) {
-        .user-id-display {
-            background: rgba(118, 118, 128, 0.24);
-        }
     }
     
     /* Hide scrollbar in User ID display */
@@ -3281,7 +3217,7 @@
       left: 0;
       right: 0;
       bottom: 0;
-      background: rgba(142, 142, 147, 0.15);
+      background: var(--input-bg-hover);
       transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
       border-radius: 34px;
     }
@@ -3331,9 +3267,6 @@
     }
     
     @media (prefers-color-scheme: dark) {
-        .slider {
-            background: rgba(118, 118, 128, 0.32);
-        }
         .slider::after {
             background: #FFFFFF;
         }
@@ -8215,15 +8148,28 @@
           }
         }
       } else if (msg.type === 'language-response') {
-        // Load saved language from clientStorage
-        const lang = msg.language || 'zh';
-        currentLang = lang;
-        const langSelect = document.getElementById('languageSelect');
-        if (langSelect) {
-          langSelect.value = lang;
+        if (msg.fromStorage && msg.language) {
+          currentLang = msg.language;
+          const langSelect = document.getElementById('languageSelect');
+          if (langSelect) langSelect.value = currentLang;
+          updateLangFlag(currentLang);
+          applyLanguage();
+        } else {
+          // No language in clientStorage — fetch from server (installer preference)
+          fetch('http://localhost:8888/language')
+            .then(r => r.json())
+            .then(data => {
+              currentLang = data.language || 'zh';
+              postToPlugin('set-language', { language: currentLang });
+            })
+            .catch(() => { currentLang = 'zh'; })
+            .finally(() => {
+              const langSelect = document.getElementById('languageSelect');
+              if (langSelect) langSelect.value = currentLang;
+              updateLangFlag(currentLang);
+              applyLanguage();
+            });
         }
-        updateLangFlag(lang);
-        applyLanguage();
       } else if (msg.type === 'server-path-loaded') {
         if (msg.path) {
           serverInstallPath = msg.path;
@@ -9068,6 +9014,14 @@
         startExportGif(exportTimelineData);
     };
 
+    // ==========================================
+    // 插件焦点管理（避免快捷键与 Figma 画布冲突）
+    // ==========================================
+    let pluginHasKeyboardFocus = document.hasFocus();
+
+    window.addEventListener('focus', () => { pluginHasKeyboardFocus = true; });
+    window.addEventListener('blur', () => { pluginHasKeyboardFocus = false; });
+
     function renderTimeline(layers, frameWidth, frameHeight, preservedData = null) {
         // 清除预览缓存，因为图层列表可能已变化
         invalidatePreviewCache();
@@ -9800,53 +9754,56 @@
         }
     }
     
-    // 空格键播放/暂停
+    // 时间线快捷键（仅在插件窗口拥有焦点时生效）
     document.addEventListener('keydown', (e) => {
-        // 检查时间线编辑器或全屏预览是否打开
         const timelineOverlay = document.getElementById('timelineEditorOverlay');
         const fullscreenOverlay = document.getElementById('timelineFullscreenOverlay');
         
         const isTimelineOpen = timelineOverlay && timelineOverlay.classList.contains('show');
         const isFullscreenOpen = fullscreenOverlay && fullscreenOverlay.classList.contains('show');
-        
-        // 空格键：支持 e.code 和 e.key 两种方式，兼容不同键盘布局
+
+        if (!isTimelineOpen && !isFullscreenOpen) return;
+
+        // ESC 关闭全屏（始终允许，无需焦点检查）
+        if (isFullscreenOpen && (e.code === 'Escape' || e.key === 'Escape')) {
+            e.preventDefault();
+            closeFullscreenPreview();
+            return;
+        }
+
+        // 只有插件窗口拥有焦点时才处理快捷键
+        if (!pluginHasKeyboardFocus) return;
+
+        // 如果焦点在输入框，不拦截
+        const activeEl = document.activeElement;
+        if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA')) {
+            return;
+        }
+
+        // 空格键：播放/暂停
         const isSpaceKey = e.code === 'Space' || e.key === ' ' || e.keyCode === 32;
-        
-        if ((isTimelineOpen || isFullscreenOpen) && isSpaceKey) {
-            // 如果焦点在输入框，不拦截空格
-            const activeEl = document.activeElement;
-            if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA')) {
-                return;
-            }
-            
+        if (isSpaceKey) {
             e.preventDefault();
             e.stopPropagation();
             toggleTimelinePlayback();
+            return;
         }
         
         // 左右方向键：逐帧前进/后退（Shift + 方向键：10帧跳转）
         const isLeftKey = e.code === 'ArrowLeft' || e.key === 'ArrowLeft';
         const isRightKey = e.code === 'ArrowRight' || e.key === 'ArrowRight';
         
-        if ((isTimelineOpen || isFullscreenOpen) && (isLeftKey || isRightKey)) {
-            const activeEl = document.activeElement;
-            if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA')) {
-                return;
-            }
-            
+        if (isLeftKey || isRightKey) {
             e.preventDefault();
             e.stopPropagation();
             
-            // 如果正在播放，先暂停
             if (isTimelinePlaying) {
                 stopTimelinePlayback();
             }
             
-            // 计算一帧对应的百分比步长
             const fps = getTimelineFrameRate() || 30;
             const duration = timelineTotalDuration || 1;
             const singleFrameStep = (1 / fps / duration) * 100;
-            // Shift + 方向键：跳 10 帧；普通方向键：跳 1 帧
             const frameStep = e.shiftKey ? singleFrameStep * 10 : singleFrameStep;
             
             const coverage = getTimelineCoverageRange();
@@ -9855,13 +9812,7 @@
             
             updatePreview(newProgress);
         }
-        
-        // ESC 关闭全屏
-        if (isFullscreenOpen && (e.code === 'Escape' || e.key === 'Escape')) {
-            e.preventDefault();
-            closeFullscreenPreview();
-        }
-    }, true); // 使用捕获阶段，优先处理
+    }, true);
     
     // ==========================================
     // 全屏预览功能

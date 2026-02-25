@@ -1542,10 +1542,11 @@ figma.ui.onmessage = async (msg) => {
       const language = await figma.clientStorage.getAsync('uiLanguage');
       figma.ui.postMessage({
         type: 'language-response',
-        language: language || 'zh'
+        language: language || null,
+        fromStorage: !!language
       });
     } catch (error) {
-      figma.ui.postMessage({ type: 'language-response', language: 'zh' });
+      figma.ui.postMessage({ type: 'language-response', language: null, fromStorage: false });
     }
     return;
   }
@@ -2479,29 +2480,18 @@ figma.on('documentchange', (event) => {
   try {
     // 🎬 时间线编辑器：检测图层位置变化并实时更新预览
     if (isTimelineEditorOpen && timelineFrameId) {
-      // 位置变化 - 只更新位置
+      // 位置变化 - 只更新位置不更新缩略图
       const positionOnlyProperties = ['x', 'y'];
-      // 尺寸变化 - 需要更新位置和缩略图（缩放会改变外观）
+      // 尺寸变化 - 需要更新位置和缩略图
       const sizeProperties = ['width', 'height'];
-      // 样式变化 - 需要重新导出缩略图
-      const styleProperties = [
-        'fills', 'strokes', 'effects', 'opacity', 'blendMode', 'cornerRadius', 'rotation', 'visible',
-        // 描边细节属性（strokeWeight 等独立于 strokes 数组变化上报）
-        'strokeWeight', 'strokeAlign', 'strokeCap', 'strokeJoin', 'dashPattern', 'strokeMiterLimit',
-        // 文字属性
-        'fontSize', 'fontName', 'characters', 'textAlignHorizontal', 'textAlignVertical',
-        'textCase', 'textDecoration', 'letterSpacing', 'lineHeight',
-        // 其他视觉属性
-        'clipsContent', 'constraintProportions', 'backgrounds', 'backgroundStyleId'
-      ];
-      // 名称变化 - 需要更新图层名称（用户重命名图层）
+      // 名称变化 - 只更新名称标签
       const nameProperties = ['name'];
-      // 所有需要监听的属性
-      const allProperties = [...positionOnlyProperties, ...sizeProperties, ...styleProperties, ...nameProperties];
+      // 非视觉属性 - 不需要任何更新
+      const nonVisualProperties = ['pluginData', 'sharedPluginData', 'constraints', 'exportSettings', 'guides', 'layoutGrids', 'reactions'];
       
+      // 接受所有 PROPERTY_CHANGE，由后续逻辑按属性分类处理
       const propertyChanges = event.documentChanges.filter(change => 
-        change.type === 'PROPERTY_CHANGE' && 
-        change.properties.some(p => allProperties.includes(p))
+        change.type === 'PROPERTY_CHANGE'
       );
       
       if (propertyChanges.length > 0) {
@@ -2538,9 +2528,9 @@ figma.on('documentchange', (event) => {
                     });
                   }
                   
-                  // 检查是否有样式或尺寸变化，需要更新缩略图
+                  // 任何非"仅位置"、非"仅名称"、非"非视觉"的属性变化都重新导出缩略图
                   const needsThumbnailUpdate = change.properties.some(p => 
-                    styleProperties.includes(p) || sizeProperties.includes(p)
+                    !positionOnlyProperties.includes(p) && !nameProperties.includes(p) && !nonVisualProperties.includes(p)
                   );
                   if (needsThumbnailUpdate && 'exportAsync' in node) {
                     thumbnailUpdates.push({
@@ -2615,6 +2605,8 @@ figma.on('documentchange', (event) => {
       }
       
       // 🎬 时间线编辑器：检测图层增删和重排序
+      // 不依赖 change.node.parent（CREATE 时 parent 可能尚未就位），
+      // 而是直接比较 frame.children 与缓存的 lastTimelineLayerIds
       const structuralChanges = event.documentChanges.filter(change => 
         change.type === 'CREATE' || change.type === 'DELETE'
       );
@@ -2622,54 +2614,34 @@ figma.on('documentchange', (event) => {
       if (structuralChanges.length > 0) {
         const frame = figma.getNodeById(timelineFrameId);
         if (frame && frame.type === 'FRAME') {
-          // 检查是否有涉及此 Frame 子图层的变化
-          let needsRefresh = false;
-          
-          for (const change of structuralChanges) {
-            try {
-              if (change.type === 'CREATE') {
-                // 新建的节点如果父级是此 Frame，则需要刷新
-                const node = change.node;
-                if (!node) continue;
-                
-                // 🛡️ 安全获取 parent，避免触发视频验证错误
-                let parentId;
-                try {
-                  parentId = node.parent && node.parent.id;
-                } catch (parentErr) {
-                  continue; // 无法访问 parent，跳过
-                }
-                
-                if (parentId === timelineFrameId) {
-                  needsRefresh = true;
-                  break;
-                }
-              } else if (change.type === 'DELETE') {
-                // 删除事件：通知 UI 检查并移除对应图层
-                needsRefresh = true;
-                break;
-              }
-            } catch (e) {
-              // 节点可能已被删除，忽略
-            }
-          }
+          const currentChildIds = frame.children.map(c => c.id);
+          const needsRefresh = currentChildIds.length !== lastTimelineLayerIds.length ||
+            !currentChildIds.every((id, i) => id === lastTimelineLayerIds[i]);
           
           if (needsRefresh) {
-            // 🛡️ 延迟刷新，给视频节点足够的加载时间
-            // 对于 CREATE 事件，视频可能还在加载中
-            const hasCreateEvent = structuralChanges.some(c => c.type === 'CREATE');
-            if (hasCreateEvent) {
-              // 延迟 3 秒后刷新，让视频有足够时间加载
-              setTimeout(() => {
-                const f = figma.getNodeById(timelineFrameId);
-                if (f && f.type === 'FRAME') {
-                  refreshTimelineLayers(f);
+            // 检查新增的图层是否可能是视频（需要延迟）
+            const newIds = currentChildIds.filter(id => !lastTimelineLayerIds.includes(id));
+            let hasVideoCreate = false;
+            for (const id of newIds) {
+              try {
+                const n = figma.getNodeById(id);
+                if (n) {
+                  const nm = (n.name || '').toLowerCase();
+                  if (nm.endsWith('.mp4') || nm.endsWith('.mov') || nm.endsWith('.webm') || nm.includes('screenrecording')) {
+                    hasVideoCreate = true;
+                    break;
+                  }
                 }
-              }, 3000);
-            } else {
-              // DELETE 事件可以立即刷新
-              refreshTimelineLayers(frame);
+              } catch (e) { hasVideoCreate = true; break; }
             }
+            
+            const delay = hasVideoCreate ? 3000 : 500;
+            setTimeout(() => {
+              const f = figma.getNodeById(timelineFrameId);
+              if (f && f.type === 'FRAME') {
+                refreshTimelineLayers(f);
+              }
+            }, delay);
           }
         }
       }

@@ -81,13 +81,6 @@ async function checkAndNotifyUpdates(targetGroup, connectionId) {
       );
     }
     
-    // 回退到通用包（兼容旧版本）
-    if (!serverAsset) {
-      serverAsset = releaseInfo.assets.find(asset => 
-        asset.name.includes('ScreenSync-UserPackage') && asset.name.endsWith('.tar.gz')
-      );
-    }
-    
     // 检查插件更新
     if (pluginAsset) {
       const currentPluginVersion = getCurrentPluginVersion();
@@ -427,13 +420,6 @@ async function handleServerUpdate(targetGroup, connectionId) {
       );
     }
     
-    // 回退到通用包
-    if (!serverAsset) {
-      serverAsset = releaseInfo.assets.find(asset => 
-        asset.name.includes('ScreenSync-UserPackage') && asset.name.endsWith('.tar.gz')
-      );
-    }
-    
     if (!serverAsset) {
       throw new Error(`未找到适合 ${isAppleSilicon ? 'Apple Silicon' : 'Intel'} 的服务器包，请确保 Release 中包含 ScreenSync-Apple.tar.gz 或 ScreenSync-Intel.tar.gz`);
     }
@@ -499,9 +485,9 @@ async function handleServerUpdate(targetGroup, connectionId) {
     ];
     
     // 备份并更新文件
-    // 动态查找解压后的目录（支持 ScreenSync-Apple、ScreenSync-Intel 或 ScreenSync-UserPackage）
+    // 动态查找解压后的目录（支持 ScreenSync-Apple、ScreenSync-Intel）
     let extractedDir = null;
-    const possibleDirs = ['ScreenSync-Apple', 'ScreenSync-Intel', 'ScreenSync-UserPackage'];
+    const possibleDirs = ['ScreenSync-Apple', 'ScreenSync-Intel'];
     for (const dirName of possibleDirs) {
       const testDir = path.join(updateDir, dirName);
       if (fs.existsSync(testDir)) {
@@ -622,8 +608,7 @@ async function handleFullUpdate(targetGroup, connectionId) {
     
     console.log(`   ✅ 获取到最新版本: ${releaseInfo.tag_name}`);
     
-    // 🔧 关键修复：必须使用 Release Assets 中的完整 UserPackage
-    // GitHub 的 tarball_url 只是源码快照，不包含编译后的插件和完整文件结构
+    // 必须使用 Release Assets 中的架构包（ScreenSync-Apple / ScreenSync-Intel）
     let downloadUrl;
     let updateFilename;
     let updateSize = 0;
@@ -632,25 +617,15 @@ async function handleFullUpdate(targetGroup, connectionId) {
     const arch = process.arch; // 'arm64' for Apple Silicon, 'x64' for Intel
     const isAppleSilicon = arch === 'arm64';
     
-    // 查找对应架构的更新包，优先使用新命名格式
     let updateAsset = null;
     
     if (isAppleSilicon) {
-      // Apple Silicon: 优先找 ScreenSync-Apple，其次找 UserPackage
       updateAsset = releaseInfo.assets.find(asset => 
         asset.name.includes('ScreenSync-Apple') && asset.name.endsWith('.tar.gz')
       );
     } else {
-      // Intel: 优先找 ScreenSync-Intel，其次找 UserPackage
       updateAsset = releaseInfo.assets.find(asset => 
         asset.name.includes('ScreenSync-Intel') && asset.name.endsWith('.tar.gz')
-      );
-    }
-    
-    // 如果没找到架构特定的包，尝试找通用的 UserPackage
-    if (!updateAsset) {
-      updateAsset = releaseInfo.assets.find(asset => 
-        asset.name.includes('ScreenSync-UserPackage') && asset.name.endsWith('.tar.gz')
       );
     }
     

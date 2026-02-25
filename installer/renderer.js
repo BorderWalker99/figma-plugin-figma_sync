@@ -2,8 +2,129 @@ const { ipcRenderer } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
+// ========================================
+// i18n — Internationalization
+// ========================================
+let currentLang = 'zh';
+
+const i18n = {
+  zh: {
+    welcome_subtitle: '自动化传输并整理截图',
+    btn_start_install: '开始安装',
+    btn_next: '下一步',
+    btn_done: '我知道了',
+    btn_checking: '检测中...',
+    btn_copy: '一键复制',
+    step2_title: '环境检查',
+    step2_desc: '检查系统环境是否满足运行要求',
+    step3_title: '安装依赖',
+    step3_desc: '安装项目所需的依赖包，请保持网络畅通',
+    step4_title: '系统配置',
+    step4_desc: '应用配置并设置本地环境',
+    step5_title: '安装完成',
+    installing: '正在安装...',
+    configuring: '配置中...',
+    setting_permissions: '正在设置权限和文件夹...',
+    checking: '检查中...',
+    installed: '已安装',
+    not_installed: '未安装',
+    install_failed: '安装失败',
+    view_detail: '查看详情',
+    waiting_install: '等待安装...',
+    verifying: '正在验证...',
+    retry_install: '重试安装',
+    all_deps_installed: '所有依赖安装完成',
+    cancelled: '已取消安装',
+    deps_installed: '依赖安装完成',
+    no_homebrew: '无需安装（直接下载模式）',
+    starting_server: '正在启动服务器...',
+    configuring_icloud: '正在配置 iCloud 文件夹...',
+    configuring_autostart: '正在配置自启动...',
+    config_done: '配置完成',
+    config_failed: '配置失败',
+    server_started: '服务器启动成功',
+    server_start_failed: '服务器启动失败',
+    autostart_done: '自启动已配置',
+    autostart_failed: '自启动配置失败',
+    log_copied: '日志已复制',
+    error_detail_title: '失败详情',
+    error_detail_subtitle: '请复制发给开发者',
+    alert_title: '提示',
+    all_installed_next: '所有依赖已安装',
+    install_missing: '安装缺失依赖',
+    downloading_deps: '正在下载依赖包...',
+  },
+  en: {
+    welcome_subtitle: 'Automate screenshot transfer & organization',
+    btn_start_install: 'Start Install',
+    btn_next: 'Next',
+    btn_done: 'Got it',
+    btn_checking: 'Checking...',
+    btn_copy: 'Copy',
+    step2_title: 'Environment Check',
+    step2_desc: 'Verify system requirements are met',
+    step3_title: 'Install Dependencies',
+    step3_desc: 'Installing required packages, keep network connected',
+    step4_title: 'System Configuration',
+    step4_desc: 'Apply settings and configure local environment',
+    step5_title: 'Installation Complete',
+    installing: 'Installing...',
+    configuring: 'Configuring...',
+    setting_permissions: 'Setting permissions and folders...',
+    checking: 'Checking...',
+    installed: 'Installed',
+    not_installed: 'Not installed',
+    install_failed: 'Install failed',
+    view_detail: 'Details',
+    waiting_install: 'Waiting...',
+    verifying: 'Verifying...',
+    retry_install: 'Retry',
+    all_deps_installed: 'All dependencies installed',
+    cancelled: 'Installation cancelled',
+    deps_installed: 'Dependencies installed',
+    no_homebrew: 'Not needed (direct download)',
+    starting_server: 'Starting server...',
+    configuring_icloud: 'Configuring iCloud folder...',
+    configuring_autostart: 'Configuring autostart...',
+    config_done: 'Configuration complete',
+    config_failed: 'Configuration failed',
+    server_started: 'Server started',
+    server_start_failed: 'Server failed to start',
+    autostart_done: 'Autostart configured',
+    autostart_failed: 'Autostart configuration failed',
+    log_copied: 'Log copied',
+    error_detail_title: 'Error Details',
+    error_detail_subtitle: 'Please copy and send to the developer',
+    alert_title: 'Notice',
+    all_installed_next: 'All dependencies installed',
+    install_missing: 'Install missing dependencies',
+    downloading_deps: 'Downloading dependencies...',
+  }
+};
+
+function t(key) {
+  return (i18n[currentLang] && i18n[currentLang][key]) || i18n.zh[key] || key;
+}
+
+function applyLanguage() {
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.getAttribute('data-i18n');
+    const text = t(key);
+    if (text) el.textContent = text;
+  });
+}
+
+window.selectLanguage = function(lang) {
+  currentLang = lang;
+  document.querySelectorAll('.lang-card').forEach(c => c.classList.remove('selected'));
+  const card = document.getElementById(lang === 'zh' ? 'langCardZh' : 'langCardEn');
+  if (card) card.classList.add('selected');
+  applyLanguage();
+};
+
 // Alert 弹窗控制
-window.showAlert = function(message, title = '提示') {
+window.showAlert = function(message, title) {
+  title = title || t('alert_title');
   const overlay = document.getElementById('overlay');
   const titleEl = document.getElementById('modalTitle');
   const messageEl = document.getElementById('modalMessage');
@@ -253,7 +374,7 @@ async function checkSystemRequirements() {
   
   // 设置为加载状态
   actionBtn.disabled = true;
-  actionBtn.innerHTML = '<svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg> 检测中...';
+  actionBtn.innerHTML = `<svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg> ${t('btn_checking')}`;
   
   try {
     // ====== 首先检查 macOS 版本 ======
@@ -322,7 +443,7 @@ Homebrew 对此版本仅提供有限支持。
         <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
         <div class="status-content">
           <div class="status-label">Homebrew</div>
-          <div class="status-detail" style="color: var(--text-tertiary);">无需安装（直接下载模式）</div>
+          <div class="status-detail" style="color: var(--text-tertiary);">${t('no_homebrew')}</div>
         </div>
       `;
     } else if (homebrewResult.installed) {
@@ -331,7 +452,7 @@ Homebrew 对此版本仅提供有限支持。
         <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
         <div class="status-content">
           <div class="status-label">Homebrew</div>
-          <div class="status-detail" style="color: var(--success);">已安装</div>
+          <div class="status-detail" style="color: var(--success);">${t('installed')}</div>
         </div>
       `;
     } else {
@@ -340,7 +461,7 @@ Homebrew 对此版本仅提供有限支持。
         <div class="status-icon"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
         <div class="status-content">
           <div class="status-label">Homebrew</div>
-          <div class="status-detail" style="color: var(--danger);">未安装</div>
+          <div class="status-detail" style="color: var(--danger);">${t('not_installed')}</div>
         </div>
       `;
     }
@@ -356,7 +477,7 @@ Homebrew 对此版本仅提供有限支持。
         <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
         <div class="status-content">
           <div class="status-label">Node.js</div>
-          <div class="status-detail" style="color: var(--success);">已安装</div>
+          <div class="status-detail" style="color: var(--success);">${t('installed')}</div>
         </div>
       `;
     } else {
@@ -365,7 +486,7 @@ Homebrew 对此版本仅提供有限支持。
         <div class="status-icon"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
         <div class="status-content">
           <div class="status-label">Node.js</div>
-          <div class="status-detail" style="color: var(--danger);">未安装</div>
+          <div class="status-detail" style="color: var(--danger);">${t('not_installed')}</div>
         </div>
       `;
     }
@@ -381,7 +502,7 @@ Homebrew 对此版本仅提供有限支持。
         <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
         <div class="status-content">
           <div class="status-label">ImageMagick</div>
-          <div class="status-detail" style="color: var(--success);">已安装</div>
+          <div class="status-detail" style="color: var(--success);">${t('installed')}</div>
         </div>
       `;
     } else {
@@ -390,7 +511,7 @@ Homebrew 对此版本仅提供有限支持。
         <div class="status-icon"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
         <div class="status-content">
           <div class="status-label">ImageMagick</div>
-          <div class="status-detail" style="color: var(--danger);">未安装</div>
+          <div class="status-detail" style="color: var(--danger);">${t('not_installed')}</div>
         </div>
       `;
     }
@@ -406,7 +527,7 @@ Homebrew 对此版本仅提供有限支持。
         <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
         <div class="status-content">
           <div class="status-label">FFmpeg</div>
-          <div class="status-detail" style="color: var(--success);">已安装</div>
+          <div class="status-detail" style="color: var(--success);">${t('installed')}</div>
         </div>
       `;
     } else {
@@ -415,7 +536,7 @@ Homebrew 对此版本仅提供有限支持。
         <div class="status-icon"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
         <div class="status-content">
           <div class="status-label">FFmpeg</div>
-          <div class="status-detail" style="color: var(--danger);">未安装</div>
+          <div class="status-detail" style="color: var(--danger);">${t('not_installed')}</div>
         </div>
       `;
     }
@@ -431,7 +552,7 @@ Homebrew 对此版本仅提供有限支持。
         <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
         <div class="status-content">
           <div class="status-label">Gifsicle</div>
-          <div class="status-detail" style="color: var(--success);">已安装</div>
+          <div class="status-detail" style="color: var(--success);">${t('installed')}</div>
         </div>
       `;
     } else {
@@ -440,7 +561,7 @@ Homebrew 对此版本仅提供有限支持。
         <div class="status-icon"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
         <div class="status-content">
           <div class="status-label">Gifsicle</div>
-          <div class="status-detail" style="color: var(--danger);">未安装</div>
+          <div class="status-detail" style="color: var(--danger);">${t('not_installed')}</div>
         </div>
       `;
     }
@@ -451,27 +572,22 @@ Homebrew 对此版本仅提供有限支持。
     actionBtn.disabled = false;
     
     if (allInstalled) {
-      // 所有依赖已安装，显示下一步按钮（有 icon，恢复默认 padding）
-      actionBtn.innerHTML = '下一步 <svg viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>';
+      actionBtn.innerHTML = `${t('btn_next')} <svg viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>`;
       actionBtn.style.padding = '10px 12px 10px 20px';
       actionBtn.onclick = window.nextStep;
-      // 确保样式是 primary
       actionBtn.className = 'btn btn-primary';
     } else {
-      // 有依赖未安装，显示立即安装按钮（无 icon，左右 padding 对称）
-      actionBtn.innerHTML = '立即安装';
+      actionBtn.innerHTML = t('install_missing');
       actionBtn.style.padding = '10px 20px';
       actionBtn.onclick = installMissingDependencies;
-      // 保持 primary 样式，引导用户点击
       actionBtn.className = 'btn btn-primary';
     }
   } catch (error) {
     console.error('Environment check failed:', error);
-    showToast('环境检查失败: ' + error.message, 'error');
+    showToast(error.message, 'error');
     
-    // 出错时允许重试
     actionBtn.disabled = false;
-    actionBtn.innerHTML = '重新检测';
+    actionBtn.innerHTML = t('btn_checking');
     actionBtn.onclick = checkSystemRequirements;
   }
 }
@@ -489,9 +605,8 @@ async function installMissingDependencies() {
   // Disable button, show spinner
   actionBtn.disabled = true;
   actionBtn.classList.add('keep-raised');
-  actionBtn.innerHTML = '<svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg> 正在安装...';
+  actionBtn.innerHTML = `<svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg> ${t('installing')}`;
 
-  // Collect logs internally but never show the terminal to users
   let step2LogBuffer = '';
 
   const depIndices = { homebrew: 0, node: 1, imagemagick: 2, ffmpeg: 3, gifsicle: 4 };
@@ -513,7 +628,7 @@ async function installMissingDependencies() {
         <div class="status-icon"><svg class="spinner" viewBox="0 0 24 24" style="opacity:0.3"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg></div>
         <div class="status-content">
           <div class="status-label">${displayNames[dep]}</div>
-          <div class="status-detail" style="color: var(--text-tertiary);">等待安装...</div>
+          <div class="status-detail" style="color: var(--text-tertiary);">${t('waiting_install')}</div>
         </div>
       `;
     }
@@ -531,7 +646,7 @@ async function installMissingDependencies() {
         <div class="status-icon"><svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg></div>
         <div class="status-content">
           <div class="status-label">${displayNames[dep]}</div>
-          <div class="status-detail" style="color: var(--accent);">正在安装...</div>
+          <div class="status-detail" style="color: var(--accent);">${t('installing')}</div>
         </div>
       `;
     } else if (status === 'done') {
@@ -540,7 +655,7 @@ async function installMissingDependencies() {
         <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
         <div class="status-content">
           <div class="status-label">${displayNames[dep]}</div>
-          <div class="status-detail" style="color: var(--success);">已安装</div>
+          <div class="status-detail" style="color: var(--success);">${t('installed')}</div>
         </div>
       `;
     } else if (status === 'error') {
@@ -549,7 +664,7 @@ async function installMissingDependencies() {
         <div class="status-icon"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
         <div class="status-content">
           <div class="status-label">${displayNames[dep]}</div>
-          <div class="status-detail" style="color: var(--danger);">安装失败<span style="display: inline-block; width: 12px;"></span><a href="#" class="view-error-link" style="color: var(--accent); font-size: 12px; text-decoration: underline; cursor: pointer;">查看详情</a></div>
+          <div class="status-detail" style="color: var(--danger);">${t('install_failed')}<span style="display: inline-block; width: 12px;"></span><a href="#" class="view-error-link" style="color: var(--accent); font-size: 12px; text-decoration: underline; cursor: pointer;">${t('view_detail')}</a></div>
         </div>
       `;
       const link = item.querySelector('.view-error-link');
@@ -579,23 +694,23 @@ async function installMissingDependencies() {
     ipcRenderer.removeListener('dep-install-log', logHandler);
 
     if (result.success) {
-      showToast('所有依赖安装完成', 'success');
+      showToast(t('all_deps_installed'), 'success');
 
-      actionBtn.innerHTML = '<svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg> 正在验证...';
+      actionBtn.innerHTML = `<svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg> ${t('verifying')}`;
 
       setTimeout(() => {
         checkSystemRequirements();
       }, 1500);
     } else {
       if (result.cancelled) {
-        showToast('已取消安装', 'error');
+        showToast(t('cancelled'), 'error');
       } else {
-        showToast(result.error || '安装失败', 'error');
+        showToast(result.error || t('install_failed'), 'error');
       }
 
       actionBtn.disabled = false;
       actionBtn.classList.remove('keep-raised');
-      actionBtn.innerHTML = '重试安装';
+      actionBtn.innerHTML = t('retry_install');
       actionBtn.style.padding = '10px 20px';
       actionBtn.onclick = installMissingDependencies;
     }
@@ -604,12 +719,12 @@ async function installMissingDependencies() {
     ipcRenderer.removeListener('dep-install-progress', progressHandler);
     ipcRenderer.removeListener('dep-install-log', logHandler);
 
-    console.error('安装依赖失败:', error);
-    showToast('安装失败: ' + error.message, 'error');
+    console.error('Install failed:', error);
+    showToast(t('install_failed') + ': ' + error.message, 'error');
 
     actionBtn.disabled = false;
     actionBtn.classList.remove('keep-raised');
-    actionBtn.innerHTML = '重试安装';
+    actionBtn.innerHTML = t('retry_install');
     actionBtn.style.padding = '10px 20px';
     actionBtn.onclick = installMissingDependencies;
   }
@@ -627,7 +742,7 @@ async function installDependencies() {
   progressBar.classList.remove('success');
   progressBar.style.width = '10%';
   if (statusLabel) {
-    statusLabel.textContent = '正在安装...';
+    statusLabel.textContent = t('installing');
   }
   
   // 创建日志显示区域（默认隐藏，出错时显示）
@@ -678,14 +793,14 @@ async function installDependencies() {
     progressBar.classList.add('success');
     const statusLabel = document.getElementById('installStatusLabel');
     if (statusLabel) {
-      statusLabel.textContent = '依赖安装完成';
+      statusLabel.textContent = t('deps_installed');
     }
     document.getElementById('step3Next').disabled = false;
   } else {
     logOutput += '\n--- 错误信息 ---\n' + (result.error || '未知错误');
     progressBar.style.width = '0%';
     if (statusLabel) {
-      statusLabel.innerHTML = `<span style="color: var(--danger);">安装失败</span><span style="display: inline-block; width: 12px;"></span><a id="viewErrorLink" href="#" style="color: var(--accent); font-size: 12px; text-decoration: underline; cursor: pointer;">查看详情</a>`;
+      statusLabel.innerHTML = `<span style="color: var(--danger);">${t('install_failed')}</span><span style="display: inline-block; width: 12px;"></span><a id="viewErrorLink" href="#" style="color: var(--accent); font-size: 12px; text-decoration: underline; cursor: pointer;">${t('view_detail')}</a>`;
       document.getElementById('viewErrorLink').addEventListener('click', (e) => {
         e.preventDefault();
         showErrorDetailModal(logOutput);
@@ -713,6 +828,9 @@ async function setupConfiguration() {
     ? path.join(installPath, '../ScreenSyncImg')
     : path.join(os.homedir(), 'Library/Mobile Documents/com~apple~CloudDocs/ScreenSyncImg');
   
+  // Save language preference
+  await ipcRenderer.invoke('save-language', installPath, currentLang);
+
   const configResult = await ipcRenderer.invoke('setup-config', installPath, selectedMode, localFolder);
   
   if (configResult.success) {
@@ -724,7 +842,7 @@ async function setupConfiguration() {
       <div class="status-item success">
         <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
         <div class="status-content">
-          <div class="status-label">配置完成</div>
+          <div class="status-label">${t('config_done')}</div>
         </div>
       </div>
     `;
@@ -734,7 +852,7 @@ async function setupConfiguration() {
       <div class="status-item error">
         <div class="status-icon"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
         <div class="status-content">
-          <div class="status-label">配置失败</div>
+          <div class="status-label">${t('config_failed')}</div>
           <div class="status-detail">${configResult.error}</div>
         </div>
       </div>
@@ -771,7 +889,7 @@ window.finishInstallation = async function() {
     // 显示启动中状态
     button.classList.add('keep-raised'); // 保持凸起样式
     button.disabled = true;
-    button.textContent = '正在启动服务器';
+    button.textContent = t('starting_server');
     
     // 步骤 1：先手动启动服务器（确保依赖已安装且服务正常）
     const startResult = await ipcRenderer.invoke('start-server', installPath);
@@ -781,14 +899,14 @@ window.finishInstallation = async function() {
       button.classList.remove('keep-raised');
       button.disabled = false;
       button.textContent = originalText;
-      showToast('服务器启动失败', 'error');
+      showToast(t('server_start_failed'), 'error');
       console.error('服务器启动失败:', startResult.error);
       return; // 提前返回，不配置自启动
     }
     
     // 步骤 2：如果是 iCloud 模式，配置文件夹为"始终保留下载"
     if (selectedMode === 'icloud') {
-      button.textContent = '正在配置 iCloud 文件夹';
+      button.textContent = t('configuring_icloud');
       console.log('📁 检测到 iCloud 模式，配置文件夹为"始终保留下载"...');
       const icloudResult = await ipcRenderer.invoke('setup-icloud-keep-downloaded');
       if (icloudResult.success) {
@@ -802,13 +920,13 @@ window.finishInstallation = async function() {
     }
     
     // 步骤 3：服务器启动成功后，配置自启动
-    button.textContent = '正在配置自启动';
+    button.textContent = t('configuring_autostart');
     const autostartResult = await ipcRenderer.invoke('setup-autostart', installPath);
     
     if (autostartResult.success) {
       // 配置成功
-      button.textContent = '配置完成';
-      showToast('服务自启动已配置完成', 'success');
+      button.textContent = t('config_done');
+      showToast(t('autostart_done'), 'success');
       
       // 延迟1.5秒后关闭，让用户看到成功消息
       setTimeout(() => {
@@ -817,8 +935,8 @@ window.finishInstallation = async function() {
     } else {
       // 配置自启动失败，但服务器已启动
       console.warn('自启动配置失败:', autostartResult.error);
-      button.textContent = '启动成功（自启失败）';
-      showToast('服务器已启动', 'warning');
+      button.textContent = t('server_started');
+      showToast(t('autostart_failed'), 'warning');
       
       // 仍然关闭安装器，因为服务器已经在运行
         setTimeout(() => {
@@ -830,7 +948,7 @@ window.finishInstallation = async function() {
     button.classList.remove('keep-raised');
     button.disabled = false;
     button.textContent = originalText;
-    showToast('配置失败', 'error');
+    showToast(t('config_failed'), 'error');
     console.error('配置自启动失败:', err);
   }
 }
@@ -859,7 +977,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     errorDetailCopyBtn.addEventListener('click', async () => {
       const text = document.getElementById('errorDetailContent').textContent;
       await ipcRenderer.invoke('copy-to-clipboard', text);
-      showToast('日志已复制', 'success');
+      showToast(t('log_copied'), 'success');
     });
   }
 

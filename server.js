@@ -1559,6 +1559,19 @@ setInterval(() => {
   }
 }, CLEANUP_INTERVAL_MS);
 
+// 语言配置端点（供插件首次启动读取安装器设置的语言）
+app.get('/language', (req, res) => {
+  try {
+    if (fs.existsSync(userConfigFile)) {
+      const config = JSON.parse(fs.readFileSync(userConfigFile, 'utf8'));
+      return res.json({ language: config.language || 'zh' });
+    }
+    res.json({ language: 'zh' });
+  } catch (e) {
+    res.json({ language: 'zh' });
+  }
+});
+
 // 健康检查端点（Cloud Run 需要）
 app.get('/health', (req, res) => {
   try {

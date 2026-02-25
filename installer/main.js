@@ -88,9 +88,9 @@ let mainWindow;
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 600,
-    height: 620,
+    height: 570,
     minWidth: 600,
-    minHeight: 620,
+    minHeight: 570,
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
@@ -1310,7 +1310,7 @@ ipcMain.handle('install-dependencies', async (event, installPath) => {
       const elapsed = Date.now() - lastProgressUpdate;
       if (elapsed > 3000) { // 如果超过3秒没有输出
         event.sender.send('install-heartbeat', { 
-          message: '正在下载依赖包' 
+          message: '正在下载依赖包...' 
         });
       }
     }, 3000);
@@ -1395,6 +1395,22 @@ ipcMain.handle('install-dependencies', async (event, installPath) => {
       });
     });
   });
+});
+
+ipcMain.handle('save-language', async (event, installPath, language) => {
+  try {
+    const configPath = path.join(installPath, '.user-config.json');
+    let config = {};
+    if (fs.existsSync(configPath)) {
+      config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    }
+    config.language = language || 'zh';
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8');
+    return { success: true };
+  } catch (e) {
+    console.warn('Save language failed:', e.message);
+    return { success: false };
+  }
 });
 
 ipcMain.handle('setup-config', async (event, installPath, syncMode, localFolder) => {
