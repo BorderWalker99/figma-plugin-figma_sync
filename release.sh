@@ -217,6 +217,16 @@ fi
 # 推送到 GitHub
 echo -e "   ${YELLOW}正在推送到 GitHub...${NC}"
 CURRENT_BRANCH=$(git branch --show-current)
+# 先同步远端分支，避免 non-fast-forward 推送失败
+echo -e "   ${YELLOW}正在同步远端分支 (${CURRENT_BRANCH})...${NC}"
+if ! git pull --rebase --autostash origin "$CURRENT_BRANCH"; then
+    echo -e "   ${RED}❌ 同步远端分支失败（可能存在冲突）${NC}"
+    echo -e "   ${YELLOW}请先手动解决冲突后，再重新执行 release.sh${NC}"
+    # 如果 rebase 进行中，尝试回滚到执行前状态，避免脚本中断后停留在 rebase 状态
+    git rebase --abort > /dev/null 2>&1 || true
+    exit 1
+fi
+
 if git push origin "$CURRENT_BRANCH"; then
     echo -e "   ${GREEN}✅ 代码已推送到 GitHub ($CURRENT_BRANCH)${NC}"
 else
