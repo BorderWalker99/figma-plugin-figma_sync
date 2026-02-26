@@ -973,10 +973,7 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
         }
         
         // 构建 GIF 滤镜表达式
-        // fps 归一化：GIF 可能有可变帧延迟，必须先统一为 pipeOutputFps
-        // 否则 overlay enable=between(n,...) 的 n 计数与 pipeTotalFrames 不匹配
-        let gifFilterExpr = `fps=${pipeOutputFps},`;
-        gifFilterExpr += pipeScaleFilters.length > 0 ? pipeScaleFilters.join(',') + ',' : '';
+        let gifFilterExpr = pipeScaleFilters.length > 0 ? pipeScaleFilters.join(',') + ',' : '';
         gifFilterExpr += 'format=rgba';
         
         // 圆角遮罩
