@@ -740,6 +740,19 @@
       border-bottom: 1px solid var(--glass-border-subtle);
     }
 
+    .error-modal-title-row {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .error-modal-subtitle {
+      font-size: 12px;
+      color: var(--text-secondary);
+      line-height: 1.2;
+    }
+
     .close-btn {
       width: 26px;
       height: 26px;
@@ -1138,9 +1151,9 @@
   <div id="errorDetailOverlay" class="overlay">
     <div class="modal" style="width: 480px; max-height: 80vh; text-align: left; padding: 0;">
       <div class="error-modal-header">
-        <div>
-          <div class="modal-title" style="font-size: 16px; margin-bottom: 2px;" data-i18n="error_detail_title">失败详情</div>
-          <div style="font-size: 12px; color: var(--text-secondary);" data-i18n="error_detail_subtitle">请复制发给开发者</div>
+        <div class="error-modal-title-row">
+          <div class="modal-title" style="font-size: 16px;" data-i18n="error_detail_title">失败详情</div>
+          <div class="error-modal-subtitle" data-i18n="error_detail_subtitle">请复制发给开发者</div>
         </div>
         <button class="close-btn" id="errorDetailCloseBtn">
           <div style="width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center;">

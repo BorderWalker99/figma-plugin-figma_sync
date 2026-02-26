@@ -46,7 +46,7 @@ const i18n = {
     server_start_failed: '服务器启动失败',
     autostart_done: '自启动已配置',
     autostart_failed: '自启动配置失败',
-    log_copied: '日志已复制',
+    log_copied: '已成功复制',
     error_detail_title: '失败详情',
     error_detail_subtitle: '请复制发给开发者',
     alert_title: '提示',
@@ -92,7 +92,7 @@ const i18n = {
     server_start_failed: 'Server failed to start',
     autostart_done: 'Autostart configured',
     autostart_failed: 'Autostart configuration failed',
-    log_copied: 'Log copied',
+    log_copied: 'Copied successfully',
     error_detail_title: 'Error Details',
     error_detail_subtitle: 'Please copy and send to the developer',
     alert_title: 'Notice',
@@ -953,11 +953,52 @@ window.finishInstallation = async function() {
   }
 }
 
+function extractErrorLog(logText) {
+  const source = (logText || '').replace(/\r\n/g, '\n');
+  const lines = source.split('\n');
+  const errorLikeRegex = /(❌|⚠️|\berror\b|\bfailed\b|\btimeout\b|exit code|curl:\s*\(\d+\)|无法|失败|不可用|网络|超时|镜像源)/i;
+  const keep = [];
+  let includeNextLine = 0;
+
+  for (const line of lines) {
+    const text = line || '';
+    if (errorLikeRegex.test(text)) {
+      keep.push(text);
+      includeNextLine = 1;
+      continue;
+    }
+    if (includeNextLine > 0 && text.trim().length > 0) {
+      keep.push(text);
+      includeNextLine -= 1;
+    }
+  }
+
+  const compact = keep
+    .map(line => line.trimEnd())
+    .filter((line, index, arr) => {
+      if (!line && (index === 0 || !arr[index - 1])) return false;
+      return true;
+    });
+
+  if (compact.length > 0) {
+    return compact.join('\n');
+  }
+
+  const fallback = lines
+    .map(line => line.trimEnd())
+    .filter(line => line.length > 0)
+    .slice(-30)
+    .join('\n');
+  return fallback || '（无日志）';
+}
+
 // Error detail modal
 function showErrorDetailModal(logText) {
   const overlay = document.getElementById('errorDetailOverlay');
   const content = document.getElementById('errorDetailContent');
-  content.textContent = logText || '（无日志）';
+  const errorLog = extractErrorLog(logText);
+  content.textContent = errorLog;
+  content.dataset.copyText = errorLog;
   overlay.classList.add('show');
 }
 
@@ -975,7 +1016,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   const errorDetailCopyBtn = document.getElementById('errorDetailCopyBtn');
   if (errorDetailCopyBtn) {
     errorDetailCopyBtn.addEventListener('click', async () => {
-      const text = document.getElementById('errorDetailContent').textContent;
+      const contentEl = document.getElementById('errorDetailContent');
+      const text = (contentEl && contentEl.dataset.copyText) || (contentEl && contentEl.textContent) || '';
       await ipcRenderer.invoke('copy-to-clipboard', text);
       showToast(t('log_copied'), 'success');
     });
