@@ -9175,9 +9175,10 @@
         postToPlugin('request-timeline-layers');
     }
     
-    // 窗口大小变化时清除布局缓存
+    // 窗口大小变化时清除布局缓存并重新计算预览尺寸
     window.addEventListener('resize', () => {
         cachedScrubberLayout = null;
+        recalcPreviewLayout();
     });
 
     function closeTimelineEditor() {
@@ -9250,6 +9251,50 @@
         if (previewEl) previewEl.style.display = isLoading ? 'none' : 'flex';
         if (tracksEl) tracksEl.style.display = isLoading ? 'none' : 'block';
         if (footerEl) footerEl.style.display = isLoading ? 'none' : 'block';
+        if (!isLoading) {
+            requestAnimationFrame(() => recalcPreviewLayout());
+        }
+    }
+
+    function recalcPreviewLayout() {
+        const previewWrapper = document.getElementById('previewWrapper');
+        const previewArea = document.getElementById('timelinePreviewArea');
+        if (!previewWrapper || !previewArea) return;
+
+        const frameWidth = parseFloat(previewWrapper.dataset.frameWidth) || 0;
+        const frameHeight = parseFloat(previewWrapper.dataset.frameHeight) || 0;
+        if (frameWidth <= 0 || frameHeight <= 0) return;
+
+        const previewAreaRect = previewArea.getBoundingClientRect();
+        if (previewAreaRect.width === 0 || previewAreaRect.height === 0) return;
+
+        const availableWidth = Math.max(previewAreaRect.width - 40, 100);
+        const availableHeight = Math.max(previewAreaRect.height - 20, 100);
+
+        const scaleX = availableWidth / frameWidth;
+        const scaleY = availableHeight / frameHeight;
+        const scale = Math.min(scaleX, scaleY, 1);
+
+        const oldScale = parseFloat(previewWrapper.dataset.scale) || 0;
+        if (Math.abs(scale - oldScale) < 0.001) return;
+
+        const scaledWidth = Math.max(frameWidth * scale, 50);
+        const scaledHeight = Math.max(frameHeight * scale, 50);
+
+        previewWrapper.style.width = scaledWidth + 'px';
+        previewWrapper.style.height = scaledHeight + 'px';
+        previewWrapper.dataset.scale = scale;
+
+        if (!layersForTimeline || !layersForTimeline.length) return;
+
+        layersForTimeline.forEach(layer => {
+            const el = document.getElementById(`preview-layer-${layer.id}`);
+            if (!el) return;
+            el.style.left = ((layer.x || 0) * scale) + 'px';
+            el.style.top = ((layer.y || 0) * scale) + 'px';
+            el.style.width = (Math.max((layer.width || 50) * scale, 1)) + 'px';
+            el.style.height = (Math.max((layer.height || 50) * scale, 1)) + 'px';
+        });
     }
 
     function renderTimeline(layers, frameWidth, frameHeight, preservedData = null) {
