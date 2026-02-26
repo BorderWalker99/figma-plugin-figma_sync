@@ -2142,16 +2142,22 @@ wss.on('connection', (ws, req) => {
             }
           }
           
-          if (found) {
-            results.push({
-              filename: file.filename,
-              layerId: file.layerId,
-              found: true,
-              gifCacheId: gifCacheId,
-              driveFileId: null, // 映射文件中没有保存 driveFileId
-              ossFileId: null
-            });
-          } else {
+          if (found && gifCacheId) {
+            let cacheFileExists = false;
+            try {
+              const cached = userConfig.getGifFromCache(file.filename, gifCacheId);
+              cacheFileExists = !!(cached && cached.path && fs.existsSync(cached.path));
+            } catch (_) {}
+            if (cacheFileExists) {
+              results.push({
+                filename: file.filename,
+                layerId: file.layerId,
+                found: true,
+                gifCacheId: gifCacheId,
+                driveFileId: null,
+                ossFileId: null
+              });
+            }
           }
         }
       }
