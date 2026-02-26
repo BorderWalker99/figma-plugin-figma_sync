@@ -468,14 +468,14 @@
     /* Global Skeuomorphism Icon Shadow - Applied to all icons */
     svg, .icon-btn svg, .neumorphic-btn svg, .close-btn svg,
     .toast-icon svg, .connection-pill svg, .card-icon svg,
-    .update-banner-icon svg, .btn svg {
+    .update-banner-icon svg, .update-banner-update-btn svg.update-icon, .btn svg {
         filter: drop-shadow(0 1px 1px rgba(255, 255, 255, 0.5));
     }
     
     @media (prefers-color-scheme: dark) {
         svg, .icon-btn svg, .neumorphic-btn svg, .close-btn svg,
         .toast-icon svg, .connection-pill svg, .card-icon svg,
-        .update-banner-icon svg, .btn svg {
+        .update-banner-icon svg, .update-banner-update-btn svg.update-icon, .btn svg {
             filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.3));
         }
     }
@@ -1162,68 +1162,75 @@
       flex-shrink: 0;
     }
 
-    .update-banner-btn {
-      padding: 6px 12px;
-      border-radius: var(--radius-s);
-      font-size: 12px;
-      font-weight: 500;
-      border: none;
-      cursor: pointer;
-      transition: all 0.2s ease;
-      white-space: nowrap;
-      /* Neumorphic Button Style */
+    .update-banner-update-btn {
+      width: 26px;
+      height: 26px;
+      padding: 0;
       background: var(--neu-face-bg);
-      color: var(--text-secondary);
-      box-shadow: 
+      border: none;
+      border-radius: 50%;
+      color: var(--accent);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s ease;
+      flex-shrink: 0;
+      position: relative;
+      box-shadow:
         -2px -2px 5px var(--neu-shadow-light),
         2px 2px 5px var(--neu-shadow-dark);
     }
 
-    .update-banner-btn.primary {
-      color: var(--accent);
-      font-weight: 600;
+    .update-banner-update-btn svg.update-icon {
+      width: 12px;
+      height: 12px;
     }
 
-    .update-banner-btn.primary:hover {
+    .update-banner-update-btn:hover {
+      color: var(--accent);
       filter: brightness(1.1);
     }
-    
-    .update-banner-btn:active {
-      box-shadow: 
+
+    .update-banner-update-btn:active {
+      box-shadow:
         inset 2px 2px 5px var(--neu-shadow-dark),
         inset -2px -2px 5px var(--neu-shadow-light);
     }
-    
-    /* 透明状态：去除拟物效果，仅显示文字 */
-    .update-banner-btn.primary.transparent {
-      background: transparent;
-      color: var(--text-secondary);
-      font-weight: 500;
-      cursor: default;
-      pointer-events: none;
-      box-shadow: none;
-    }
-    
-    .update-banner-btn.primary.transparent:hover {
-      filter: none;
-      box-shadow: none;
-    }
 
-    .update-banner-btn.secondary {
-      /* Uses default neumorphic style defined in .update-banner-btn */
-    }
-
-    .update-banner-btn.secondary:hover {
-      color: var(--text-primary);
-    }
-
-    .update-banner-btn:disabled {
-      /* opacity: 0.5; */ /* Disable default opacity reduction */
-      opacity: 1; /* Keep full opacity */
+    .update-banner-update-btn:disabled {
+      opacity: 1;
       cursor: not-allowed;
-      /* box-shadow: none; */ /* Keep the shadow (button style) */
-      color: var(--text-tertiary); /* Disabled state uses quaternary */
-      /* Actually user wants to maintain button style during download, so maybe keep original color or slight change */
+    }
+
+    .update-progress-ring {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.4s ease-out;
+      z-index: 10;
+      transform: rotate(-90deg);
+      overflow: visible;
+    }
+
+    .update-progress-ring__circle {
+      fill: transparent;
+      stroke: var(--unified-green);
+      stroke-width: 2;
+      stroke-linecap: round;
+      transition: stroke-dashoffset 0.2s linear, stroke 0.3s ease;
+    }
+
+    #updateBannerNow:not(.updating) .update-progress-ring {
+      opacity: 0 !important;
+    }
+
+    #updateBannerNow.success .update-progress-ring {
+      opacity: 0;
     }
 
     .update-banner-close {
@@ -3560,7 +3567,16 @@
           <div class="update-banner-text" id="updateBannerText">发现新版本 v1.0.2</div>
         </div>
         <div class="update-banner-actions">
-          <button class="update-banner-btn primary" id="updateBannerNow" data-i18n="banner_update_now">立即更新</button>
+          <button class="update-banner-update-btn" id="updateBannerNow" data-tooltip="立即更新" data-i18n-tooltip="banner_update_now">
+            <svg class="update-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="12" y1="19" x2="12" y2="5"></line>
+              <polyline points="5 12 12 5 19 12"></polyline>
+            </svg>
+            <svg class="update-progress-ring" viewBox="0 0 26 26">
+              <circle class="update-progress-ring__circle" r="12" cx="13" cy="13"
+                style="stroke-dasharray: 75.398; stroke-dashoffset: 75.398;"/>
+            </svg>
+          </button>
           <button class="update-banner-close" id="updateBannerClose">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
               <line x1="18" y1="6" x2="6" y2="18"></line>
@@ -6964,10 +6980,23 @@
       const banner = document.getElementById('updateBanner');
       if (banner) {
         banner.classList.remove('show');
-        // 确保样式被重置（配合最小化逻辑）
         banner.style.display = '';
-        
-        // 如果当前未最小化，恢复窗口高度
+
+        const btn = document.getElementById('updateBannerNow');
+        if (btn) {
+          btn.disabled = false;
+          btn.classList.remove('updating', 'success');
+          const iconEl = btn.querySelector('.update-icon');
+          if (iconEl) { iconEl.style.opacity = ''; iconEl.style.color = ''; }
+          const ring = btn.querySelector('.update-progress-ring');
+          if (ring) { ring.style.opacity = 0; ring.style.animation = ''; }
+          const circle = btn.querySelector('.update-progress-ring__circle');
+          if (circle) {
+            circle.style.strokeDasharray = `${75.398} ${75.398}`;
+            circle.style.strokeDashoffset = 75.398;
+          }
+        }
+
         if (typeof isMinimized !== 'undefined' && !isMinimized) {
           parent.postMessage({
             pluginMessage: { type: 'resize', width: 360, height: 400 }
@@ -7004,37 +7033,59 @@
     }
     
     // 处理统一更新进度（插件 + 服务器）
+    const UPDATE_RING_CIRCUMFERENCE = 75.398; // 2 * Math.PI * 12
     function handleUpdateProgress(data) {
       const bannerBtn = document.getElementById('updateBannerNow');
-      
+      const updateRing = bannerBtn ? bannerBtn.querySelector('.update-progress-ring') : null;
+      const updateCircle = bannerBtn ? bannerBtn.querySelector('.update-progress-ring__circle') : null;
+
       if (data.status === 'downloading') {
-        // 只更新按钮文字，不显示 toast
         if (bannerBtn) {
           bannerBtn.disabled = true;
-          // 保持按钮样式，不添加 transparent 类
-          // bannerBtn.classList.add('transparent'); // 已移除
-          bannerBtn.textContent = data.progress ? t('banner_downloading') + ' ' + data.progress + '%' : t('banner_downloading') + '...';
-      }
+          bannerBtn.classList.add('updating');
+          const iconEl = bannerBtn.querySelector('.update-icon');
+          if (iconEl) iconEl.style.opacity = '0.3';
+        }
+        if (updateCircle && updateRing) {
+          updateRing.style.animation = '';
+          updateCircle.style.strokeDasharray = `${UPDATE_RING_CIRCUMFERENCE} ${UPDATE_RING_CIRCUMFERENCE}`;
+          const pct = data.progress || 0;
+          const offset = UPDATE_RING_CIRCUMFERENCE - (pct / 100) * UPDATE_RING_CIRCUMFERENCE;
+          updateCircle.style.strokeDashoffset = offset;
+          updateRing.style.opacity = 1;
+        }
       } else if (data.status === 'extracting' || data.status === 'checking' || data.status === 'installing') {
-        // 合并中间状态为“正在安装”
         if (bannerBtn) {
-          // bannerBtn.classList.add('transparent'); // 已移除
-          bannerBtn.textContent = t('banner_installing');
+          bannerBtn.classList.add('updating');
+        }
+        if (updateRing) {
+          updateRing.style.opacity = 1;
+          updateRing.style.animation = 'rotate 1s linear infinite';
+          if (updateCircle) {
+            updateCircle.style.strokeDasharray = `${UPDATE_RING_CIRCUMFERENCE * 0.25} ${UPDATE_RING_CIRCUMFERENCE * 0.75}`;
+            updateCircle.style.strokeDashoffset = '0';
+          }
         }
       } else if (data.status === 'completed') {
         const successMsg = data.message || t('banner_update_done');
         showToast(successMsg, 'success');
-        
-        // 更新按钮状态为“更新完成”
+
         if (bannerBtn) {
-          bannerBtn.textContent = t('banner_update_done');
           bannerBtn.classList.add('success');
-          
-          // 成功状态：绿色描边风格
-          bannerBtn.style.background = 'transparent';
-          bannerBtn.style.color = 'var(--success)'; 
-          bannerBtn.style.borderColor = 'var(--success)';
-          bannerBtn.style.opacity = '1';
+          bannerBtn.classList.remove('updating');
+          const iconEl = bannerBtn.querySelector('.update-icon');
+          if (iconEl) {
+            iconEl.style.opacity = '1';
+            iconEl.style.color = 'var(--unified-green)';
+          }
+        }
+        if (updateRing && updateCircle) {
+          updateRing.style.animation = '';
+          updateCircle.style.strokeDasharray = `${UPDATE_RING_CIRCUMFERENCE} ${UPDATE_RING_CIRCUMFERENCE}`;
+          updateCircle.style.strokeDashoffset = '0';
+          setTimeout(() => {
+            if (updateRing) updateRing.style.opacity = 0;
+          }, 500);
         }
         
         // 保存当前版本号到 localStorage，防止 banner 再次弹出
@@ -7069,17 +7120,20 @@
         
       } else if (data.status === 'error') {
         showToast(data.message || t('toast_update_fail'), 'error');
-        // 重置按钮状态，但保持 banner 主文字不变
         if (bannerBtn) {
           bannerBtn.disabled = false;
-          // bannerBtn.classList.remove('transparent'); // 已移除添加逻辑
-          bannerBtn.textContent = t('banner_update_now');
-          // 恢复样式
-          bannerBtn.classList.remove('success');
-          bannerBtn.style.background = '';
-          bannerBtn.style.color = '';
-          bannerBtn.style.borderColor = '';
-          bannerBtn.style.opacity = '';
+          bannerBtn.classList.remove('updating', 'success');
+          const iconEl = bannerBtn.querySelector('.update-icon');
+          if (iconEl) {
+            iconEl.style.opacity = '';
+            iconEl.style.color = '';
+          }
+        }
+        if (updateRing && updateCircle) {
+          updateRing.style.animation = '';
+          updateRing.style.opacity = 0;
+          updateCircle.style.strokeDasharray = `${UPDATE_RING_CIRCUMFERENCE} ${UPDATE_RING_CIRCUMFERENCE}`;
+          updateCircle.style.strokeDashoffset = UPDATE_RING_CIRCUMFERENCE;
         }
       }
     }
@@ -7456,16 +7510,30 @@
     
     if (updateBannerNowBtn) {
       updateBannerNowBtn.onclick = function() {
-        // 禁用按钮防止重复点击
         updateBannerNowBtn.disabled = true;
-        updateBannerNowBtn.textContent = t('banner_updating');
-        
-        // 发送更新请求到服务器
+        updateBannerNowBtn.classList.add('updating');
+        const iconEl = updateBannerNowBtn.querySelector('.update-icon');
+        if (iconEl) iconEl.style.opacity = '0.3';
+        const ring = updateBannerNowBtn.querySelector('.update-progress-ring');
+        if (ring) {
+          ring.style.opacity = 1;
+          ring.style.animation = 'rotate 1s linear infinite';
+          const circle = updateBannerNowBtn.querySelector('.update-progress-ring__circle');
+          if (circle) {
+            circle.style.strokeDasharray = `${UPDATE_RING_CIRCUMFERENCE * 0.25} ${UPDATE_RING_CIRCUMFERENCE * 0.75}`;
+            circle.style.strokeDashoffset = '0';
+          }
+        }
+
         if (!wsSend('update-full')) {
-          // WebSocket 未连接，显示错误
           showToast(t('toast_server_offline'), 'error');
           updateBannerNowBtn.disabled = false;
-          updateBannerNowBtn.textContent = t('banner_update_now');
+          updateBannerNowBtn.classList.remove('updating');
+          if (iconEl) iconEl.style.opacity = '';
+          if (ring) {
+            ring.style.opacity = 0;
+            ring.style.animation = '';
+          }
         }
       };
     }

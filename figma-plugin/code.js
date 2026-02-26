@@ -1,6 +1,6 @@
 // code.js - 智能布局版本
 
-const PLUGIN_VERSION = '1.0.3'; // 插件版本号
+const PLUGIN_VERSION = '1.0.4'; // 插件版本号
 
 
 // 🛡️ 全局错误处理，防止切换文件时崩溃
@@ -2100,7 +2100,8 @@ figma.ui.onmessage = async (msg) => {
                 ['screenrecording', 'video'].some(kw => ln.includes(kw))) isMediaLayer = true;
           }
           
-          if (isMediaLayer && !driveFileId && !ossFileId) {
+          const hasPluginMarker = !!(originalFilename || gifCacheId || child.getPluginData('videoId'));
+          if (isMediaLayer && hasPluginMarker && !driveFileId && !ossFileId) {
             unsynced.push({
               layerId: child.id,
               layerName: child.name,
