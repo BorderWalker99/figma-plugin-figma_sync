@@ -531,16 +531,18 @@
     .lang-card {
       position: relative;
       display: flex;
+      flex-direction: column;
       align-items: center;
-      gap: 10px;
-      padding: 10px 14px;
-      border-radius: var(--radius-s);
+      justify-content: center;
+      gap: 12px;
+      border-radius: var(--radius-m);
       background: var(--glass-bg);
       backdrop-filter: blur(12px);
       -webkit-backdrop-filter: blur(12px);
       border: 1.5px solid var(--glass-border-subtle);
       cursor: pointer;
       transition: all 0.25s ease;
+      min-height: 106px;
     }
 
     .lang-card:hover {
@@ -554,34 +556,37 @@
     }
 
     .lang-card .lang-icon {
-      width: 22px;
-      height: 22px;
+      width: 28px;
+      height: 28px;
       flex-shrink: 0;
     }
 
     .lang-card .lang-icon img {
-      width: 22px;
-      height: 22px;
+      width: 28px;
+      height: 28px;
       display: block;
     }
 
     .lang-card .lang-name {
-      font-size: 14px;
-      font-weight: 500;
+      font-size: 15px;
+      font-weight: 600;
+      line-height: 1.1;
       color: var(--text-primary);
     }
 
     .lang-card .lang-check {
       position: absolute;
-      top: -6px;
-      right: -6px;
-      width: 18px;
-      height: 18px;
-      border-radius: 50%;
+      top: 0;
+      right: 0;
+      width: 26px;
+      height: 22px;
+      border-radius: 0 var(--radius-s) 0 14px;
       background: var(--accent);
       display: none;
       align-items: center;
       justify-content: center;
+      padding-left: 2px;
+      padding-bottom: 2px;
     }
 
     .lang-card.selected .lang-check {
@@ -589,11 +594,12 @@
     }
 
     .lang-card .lang-check svg {
-      width: 10px;
-      height: 10px;
+      width: 14px;
+      height: 14px;
       stroke: white;
-      stroke-width: 3;
+      stroke-width: 2.8;
       fill: none;
+      padding-left: 1px;
     }
 
     @media (prefers-color-scheme: dark) {
@@ -958,7 +964,7 @@
         <h1 style="font-family: 'Archivo Black', sans-serif; font-size: 32px; margin: 0 0 4px 0; color: var(--text-primary); letter-spacing: -0.02em;">ScreenSync</h1>
         <p data-i18n="welcome_subtitle" style="font-size: 16px; color: var(--text-secondary); margin: 0;">自动化传输并整理截图</p>
 
-        <div class="lang-cards" style="margin-top: 24px;">
+        <div class="lang-cards" style="margin-top: 32px;">
           <div class="lang-card selected" id="langCardZh" onclick="selectLanguage('zh')">
             <div class="lang-check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg></div>
             <div class="lang-icon"><img src="https://raw.githubusercontent.com/BorderWalker99/figma-plugin-figma_sync/refs/heads/main/images/zh.svg" alt="中文"></div>
