@@ -1,6 +1,6 @@
 // code.js - 智能布局版本
 
-const PLUGIN_VERSION = '1.0.1'; // 插件版本号
+const PLUGIN_VERSION = '1.0.2'; // 插件版本号
 
 
 // 🛡️ 全局错误处理，防止切换文件时崩溃
@@ -776,8 +776,9 @@ figma.ui.onmessage = async (msg) => {
         return;
       }
 
-      // 3. 检查是否有未同步的 GIF（缺少原始数据）
-      // ✅ gifCacheId 也算已同步（自动缓存的文件）
+      // 3. 检查是否有需要在导出前校验的数据来源
+      // 规则：只要缺少云端 ID（drive/oss），都先走一次缓存存在性检查
+      // 这样可以拦截“有 gifCacheId 但缓存已丢失/跨设备不可用”的情况，避免误进导出选项。
       const unsyncedGifs = [];
       for (const task of validTasks) {
         for (const gifLayer of task.gifLayers) {
@@ -786,14 +787,15 @@ figma.ui.onmessage = async (msg) => {
           const gifCacheId = gifLayer.layer.getPluginData('gifCacheId');
           const originalFilename = gifLayer.layer.getPluginData('originalFilename');
           
-          // 如果既没有 driveFileId / ossFileId，也没有 gifCacheId，说明没有原始数据
-          if (!driveFileId && !ossFileId && !gifCacheId) {
+          // 缺少云端 ID 时，必须在导出前做缓存校验（即使存在 gifCacheId）
+          if (!driveFileId && !ossFileId) {
             unsyncedGifs.push({
               layerId: gifLayer.layer.id,
               layerName: gifLayer.layer.name,
               filename: originalFilename || gifLayer.layer.name,
               frameId: task.frame.id,
-              frameName: task.frame.name
+              frameName: task.frame.name,
+              hasGifCacheId: !!gifCacheId
             });
           }
         }
@@ -2318,10 +2320,12 @@ figma.ui.onmessage = async (msg) => {
           if (hasValidExtension) {
             const hadDriveFileId = node.getPluginData('driveFileId');
             const hadOssFileId = node.getPluginData('ossFileId');
+            const hadGifCacheId = node.getPluginData('gifCacheId');
             
-            if (hadDriveFileId || hadOssFileId) {
+            if (hadDriveFileId || hadOssFileId || hadGifCacheId) {
               node.setPluginData('driveFileId', '');
               node.setPluginData('ossFileId', '');
+              node.setPluginData('gifCacheId', '');
               node.setPluginData('imageHash', '');
             }
           }

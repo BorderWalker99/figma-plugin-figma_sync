@@ -5419,16 +5419,7 @@
             progressRingManual.style.opacity = 0;
             progressRingManual.style.animation = '';
           }
-          const subtitle = document.getElementById('manualSyncSubtitle');
-          if (subtitle) {
-            const completed = data.completed || data.count || 0;
-            const total = data.totalFiles || 0;
-            subtitle.style.display = '';
-            subtitle.textContent = total > 0
-              ? (currentLang === 'zh' ? `${completed}/${total} 已取消` : `${completed}/${total} cancelled`)
-              : (currentLang === 'zh' ? '已取消' : 'Cancelled');
-            setTimeout(() => hideManualSyncProgress(), 900);
-          }
+          hideManualSyncProgress();
           updateStatus('connected', '');
           showToast(t('toast_sync_cancelled'), 'info');
           log(currentLang === 'zh' ? '🛑 手动同步已取消' : '🛑 Manual sync cancelled');
@@ -7183,7 +7174,7 @@
     // ✅ 实际显示 toast 的函数（内部使用）
     function displayToast(toast, iconEl, messageEl, cleanMessage, type) {
       // Set icon
-      if (type === 'success' || type === 'error' || type === 'loading' || type === 'info' || type === 'warning') {
+      if (type === 'success' || type === 'error' || type === 'loading' || type === 'warning') {
         iconEl.innerHTML = getToastIcon(type);
         iconEl.style.display = 'flex';
       } else {
@@ -8458,11 +8449,6 @@
                         isManualSyncCancelling = true;
                         wsSend('cancel-manual-sync');
                         manualSyncBtn.setAttribute('data-tooltip', t('tooltip_syncing'));
-                        const subtitle = document.getElementById('manualSyncSubtitle');
-                        if (subtitle) {
-                            subtitle.style.display = '';
-                            subtitle.textContent = currentLang === 'zh' ? '正在取消…' : 'Cancelling...';
-                        }
                         showToast(t('toast_sync_canceling'), 'loading');
                     }
                     return;

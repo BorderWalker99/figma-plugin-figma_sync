@@ -33,6 +33,7 @@ const i18n = {
     waiting_install: '等待安装...',
     verifying: '正在验证...',
     retry_install: '重试安装',
+    reinstall: '重新安装',
     all_deps_installed: '所有依赖安装完成',
     cancelled: '已取消安装',
     deps_installed: '依赖安装完成',
@@ -79,6 +80,7 @@ const i18n = {
     waiting_install: 'Waiting...',
     verifying: 'Verifying...',
     retry_install: 'Retry',
+    reinstall: 'Reinstall',
     all_deps_installed: 'All dependencies installed',
     cancelled: 'Installation cancelled',
     deps_installed: 'Dependencies installed',
@@ -373,6 +375,7 @@ let dependencyStatus = {
   ffmpeg: null,
   gifsicle: null
 };
+let lastFailedDependency = null;
 
 // Step 2: 统一的系统检查（自动开始）
 async function checkSystemRequirements() {
@@ -583,12 +586,14 @@ Homebrew 对此版本仅提供有限支持。
     actionBtn.disabled = false;
     
     if (allInstalled) {
+      lastFailedDependency = null;
       actionBtn.innerHTML = `${t('btn_next')} <svg viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>`;
       actionBtn.style.padding = '10px 12px 10px 20px';
       actionBtn.onclick = window.nextStep;
       actionBtn.className = 'btn btn-primary';
     } else {
-      actionBtn.innerHTML = t('install_missing');
+      const failedStillMissing = !!(lastFailedDependency && dependencyStatus[lastFailedDependency] === false);
+      actionBtn.innerHTML = failedStillMissing ? t('reinstall') : t('install_missing');
       actionBtn.style.padding = '10px 20px';
       actionBtn.onclick = installMissingDependencies;
       actionBtn.className = 'btn btn-primary';
@@ -622,14 +627,15 @@ async function installMissingDependencies() {
 
   const depIndices = { homebrew: 0, node: 1, imagemagick: 2, ffmpeg: 3, gifsicle: 4 };
   const displayNames = { homebrew: 'Homebrew', node: 'Node.js', imagemagick: 'ImageMagick', ffmpeg: 'FFmpeg', gifsicle: 'Gifsicle' };
+  const depOrder = ['homebrew', 'node', 'imagemagick', 'ffmpeg', 'gifsicle'];
+  const restartIndex = depOrder.indexOf(lastFailedDependency);
 
   // Mark uninstalled deps as "waiting"
   const depsToInstall = [];
-  if (!dependencyStatus.homebrew) depsToInstall.push('homebrew');
-  if (!dependencyStatus.node) depsToInstall.push('node');
-  if (!dependencyStatus.imagemagick) depsToInstall.push('imagemagick');
-  if (!dependencyStatus.ffmpeg) depsToInstall.push('ffmpeg');
-  if (!dependencyStatus.gifsicle) depsToInstall.push('gifsicle');
+  depOrder.forEach((dep, index) => {
+    if (restartIndex >= 0 && index < restartIndex) return;
+    if (!dependencyStatus[dep]) depsToInstall.push(dep);
+  });
 
   for (const dep of depsToInstall) {
     const item = checks.children[depIndices[dep]];
@@ -661,6 +667,7 @@ async function installMissingDependencies() {
         </div>
       `;
     } else if (status === 'done') {
+      dependencyStatus[dep] = true;
       item.className = 'status-item success';
       item.innerHTML = `
         <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
@@ -670,6 +677,8 @@ async function installMissingDependencies() {
         </div>
       `;
     } else if (status === 'error') {
+      dependencyStatus[dep] = false;
+      lastFailedDependency = dep;
       item.className = 'status-item error';
       item.innerHTML = `
         <div class="status-icon"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
@@ -697,7 +706,14 @@ async function installMissingDependencies() {
   ipcRenderer.on('dep-install-log', logHandler);
 
   try {
-    const result = await ipcRenderer.invoke('install-all-dependencies', dependencyStatus);
+    const result = await ipcRenderer.invoke(
+      'install-all-dependencies',
+      dependencyStatus,
+      { restartFrom: lastFailedDependency || null }
+    );
+    if (result && result.failedDep) {
+      lastFailedDependency = result.failedDep;
+    }
 
     // Delay listener removal — IPC send is async, progress messages may still be in flight
     await new Promise(r => setTimeout(r, 300));
@@ -705,6 +721,7 @@ async function installMissingDependencies() {
     ipcRenderer.removeListener('dep-install-log', logHandler);
 
     if (result.success) {
+      lastFailedDependency = null;
       showToast(t('all_deps_installed'), 'success');
 
       actionBtn.innerHTML = `<svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg> ${t('verifying')}`;
@@ -721,7 +738,7 @@ async function installMissingDependencies() {
 
       actionBtn.disabled = false;
       actionBtn.classList.remove('keep-raised');
-      actionBtn.innerHTML = t('retry_install');
+      actionBtn.innerHTML = t('reinstall');
       actionBtn.style.padding = '10px 20px';
       actionBtn.onclick = installMissingDependencies;
     }
@@ -735,7 +752,7 @@ async function installMissingDependencies() {
 
     actionBtn.disabled = false;
     actionBtn.classList.remove('keep-raised');
-    actionBtn.innerHTML = t('retry_install');
+    actionBtn.innerHTML = t('reinstall');
     actionBtn.style.padding = '10px 20px';
     actionBtn.onclick = installMissingDependencies;
   }

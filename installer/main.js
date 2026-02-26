@@ -892,8 +892,17 @@ async function installLegacyGifsicle(sendProgress, sendLog) {
 }
 
 // Full legacy installation orchestrator
-async function installLegacyDeps(event, dependencyStatus) {
+async function installLegacyDeps(event, dependencyStatus, options = {}) {
   console.log('📦 Legacy macOS: 使用直接下载方式安装依赖');
+  const depOrder = ['homebrew', 'node', 'imagemagick', 'ffmpeg', 'gifsicle'];
+  const restartFrom = options && options.restartFrom;
+  const restartIndex = depOrder.includes(restartFrom) ? depOrder.indexOf(restartFrom) : -1;
+  const shouldInstall = (dep) => {
+    const isMissing = !dependencyStatus[dep];
+    if (!isMissing) return false;
+    if (restartIndex < 0) return true;
+    return depOrder.indexOf(dep) >= restartIndex;
+  };
 
   const sendProgress = (dep, status, message) => {
     try { event.sender.send('dep-install-progress', { dep, status, message }); } catch (e) {}
@@ -910,11 +919,24 @@ async function installLegacyDeps(event, dependencyStatus) {
     sendProgress('homebrew', 'done', '无需安装（直接下载模式）');
   }
 
+  let failedDep = null;
   try {
-    if (!dependencyStatus.node) await installLegacyNode(sendProgress, sendLog);
-    if (!dependencyStatus.ffmpeg) await installLegacyFFmpeg(sendProgress, sendLog);
-    if (!dependencyStatus.imagemagick) await installLegacyImageMagick(sendProgress, sendLog);
-    if (!dependencyStatus.gifsicle) await installLegacyGifsicle(sendProgress, sendLog);
+    if (shouldInstall('node')) {
+      failedDep = 'node';
+      await installLegacyNode(sendProgress, sendLog);
+    }
+    if (shouldInstall('imagemagick')) {
+      failedDep = 'imagemagick';
+      await installLegacyImageMagick(sendProgress, sendLog);
+    }
+    if (shouldInstall('ffmpeg')) {
+      failedDep = 'ffmpeg';
+      await installLegacyFFmpeg(sendProgress, sendLog);
+    }
+    if (shouldInstall('gifsicle')) {
+      failedDep = 'gifsicle';
+      await installLegacyGifsicle(sendProgress, sendLog);
+    }
 
     // Inject into current process PATH
     if (!process.env.PATH.includes(LEGACY_BIN_DIR)) {
@@ -928,27 +950,37 @@ async function installLegacyDeps(event, dependencyStatus) {
     return { success: true, message: '所有依赖安装完成' };
   } catch (error) {
     sendLog(`\n❌ ${error.message}\n`);
-    return { success: false, error: error.message };
+    return { success: false, error: error.message, failedDep: failedDep || null };
   }
 }
 
 // In-app dependency installation (no Terminal.app needed)
-ipcMain.handle('install-all-dependencies', async (event, dependencyStatus) => {
+ipcMain.handle('install-all-dependencies', async (event, dependencyStatus, options = {}) => {
   // Detect macOS version — use legacy direct-download mode for macOS 13 and below
   const darwinVersion = parseInt(os.release().split('.')[0], 10);
   const isLegacyMacOS = darwinVersion < 23; // Darwin 23 = macOS 14
 
   if (isLegacyMacOS) {
-    return await installLegacyDeps(event, dependencyStatus);
+    return await installLegacyDeps(event, dependencyStatus, options);
   }
   console.log('📦 开始应用内安装依赖，当前状态:', dependencyStatus);
 
-  const needsHomebrew = !dependencyStatus.homebrew;
+  const depOrder = ['homebrew', 'node', 'imagemagick', 'ffmpeg', 'gifsicle'];
+  const restartFrom = options && options.restartFrom;
+  const restartIndex = depOrder.includes(restartFrom) ? depOrder.indexOf(restartFrom) : -1;
+  const shouldInstall = (dep) => {
+    const isMissing = !dependencyStatus[dep];
+    if (!isMissing) return false;
+    if (restartIndex < 0) return true;
+    return depOrder.indexOf(dep) >= restartIndex;
+  };
+
+  const needsHomebrew = shouldInstall('homebrew');
   const brewPackages = [];
-  if (!dependencyStatus.node) brewPackages.push('node');
-  if (!dependencyStatus.imagemagick) brewPackages.push('imagemagick');
-  if (!dependencyStatus.ffmpeg) brewPackages.push('ffmpeg');
-  if (!dependencyStatus.gifsicle) brewPackages.push('gifsicle');
+  if (shouldInstall('node')) brewPackages.push('node');
+  if (shouldInstall('imagemagick')) brewPackages.push('imagemagick');
+  if (shouldInstall('ffmpeg')) brewPackages.push('ffmpeg');
+  if (shouldInstall('gifsicle')) brewPackages.push('gifsicle');
   const needsPackages = brewPackages.length > 0;
 
   if (!needsHomebrew && !needsPackages) {
@@ -962,9 +994,11 @@ ipcMain.handle('install-all-dependencies', async (event, dependencyStatus) => {
     try { event.sender.send('dep-install-log', { data }); } catch (e) {}
   };
 
+  let failedDep = null;
   try {
     // ===== Phase 1: Install Homebrew =====
     if (needsHomebrew) {
+      failedDep = 'homebrew';
       sendProgress('homebrew', 'password', '等待输入密码...');
 
       // Native macOS password dialog
@@ -1127,6 +1161,7 @@ ipcMain.handle('install-all-dependencies', async (event, dependencyStatus) => {
       const displayNames = { node: 'Node.js', imagemagick: 'ImageMagick', ffmpeg: 'FFmpeg', gifsicle: 'Gifsicle' };
 
       for (const pkg of brewPackages) {
+        failedDep = pkg;
         const name = displayNames[pkg] || pkg;
         sendProgress(pkg, 'installing', '正在安装...');
         sendLog(`\n📦 正在安装 ${name}...\n`);
@@ -1178,7 +1213,7 @@ ipcMain.handle('install-all-dependencies', async (event, dependencyStatus) => {
     return { success: true, message: '所有依赖安装完成' };
   } catch (error) {
     sendLog(`\n❌ ${error.message}\n`);
-    return { success: false, error: error.message };
+    return { success: false, error: error.message, failedDep: failedDep || null };
   }
 });
 
