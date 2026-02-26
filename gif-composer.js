@@ -60,6 +60,34 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
       throw new Error('GIF_EXPORT_CANCELLED');
     }
   };
+
+  // 自适应导出参数：在速度/体积/观感之间动态取平衡
+  const getAdaptiveProfile = ({ preSizeMB = 0, frameCount = 0, hasVideoLayers = false } = {}) => {
+    const fw = Math.max(1, Math.round((frameBounds && frameBounds.width) || 1));
+    const fh = Math.max(1, Math.round((frameBounds && frameBounds.height) || 1));
+    const pixels = fw * fh;
+
+    let score = pixels;
+    if (frameCount > 0) score *= Math.min(6, Math.max(1, frameCount / 120));
+    if (hasVideoLayers) score *= 1.15;
+
+    let videoFpsCap = 15;
+    if (score > 12_000_000 || preSizeMB > 80) videoFpsCap = 12;
+    else if (score > 6_000_000 || preSizeMB > 40) videoFpsCap = 13;
+    else if (score > 2_500_000 || preSizeMB > 20) videoFpsCap = 14;
+
+    let lossy = 80;
+    if (score > 12_000_000 || preSizeMB > 80) lossy = 102;
+    else if (score > 6_000_000 || preSizeMB > 40) lossy = 94;
+    else if (score > 2_500_000 || preSizeMB > 20) lossy = 88;
+    else if (score < 1_200_000 && preSizeMB < 8) lossy = 72;
+
+    if (gifAlgorithm === 'less_noise') lossy -= 8;
+    if (gifAlgorithm === 'smooth_gradient') lossy += 4;
+    lossy = Math.max(60, Math.min(110, Math.round(lossy)));
+
+    return { videoFpsCap, lossy };
+  };
   
   console.log('🎬 开始合成 GIF...');
   
@@ -549,12 +577,13 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
     }
   }
   
-  // 🚀 优化：并行处理所有视频/GIF 转换任务
-  // 🎨 GIF 文件也需要重新处理以应用用户选择的抖动算法
+  // 🚀 优化：并行处理所有视频转换任务
+  // 说明：GIF 在后续统一帧合成与最终编码阶段会再次走调色板+压缩，
+  // 这里不再做一次“预重编码”，避免重复计算造成导出变慢。
   await Promise.all(gifPaths.map(async (item, i) => {
     const ext = path.extname(item.path).toLowerCase();
     
-    if (ext === '.mp4' || ext === '.mov' || ext === '.gif') {
+    if (ext === '.mp4' || ext === '.mov') {
       const processedGifPath = path.join(tempDir, `processed_${i}.gif`);
       const palettePath = path.join(tempDir, `palette_${i}.png`);
       
@@ -585,7 +614,7 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
         return;
       }
       
-      const isVideo = ext === '.mp4' || ext === '.mov';
+      const isVideo = true;
       console.log(`   🔄 ${isVideo ? '转换视频' : '重新处理 GIF'} (${targetW}x${targetH}, dither=${ditherMode})...`);
       
       // 根据文件类型选择不同的处理方式
@@ -608,7 +637,12 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
       
       const idealDelay = 100 / sourceFps;
       const gifDelay = Math.max(1, Math.round(idealDelay));
-      const gifFps = 100 / gifDelay;
+      let gifFps = 100 / gifDelay;
+      const adaptive = getAdaptiveProfile({
+        preSizeMB: fileStats.size / (1024 * 1024),
+        hasVideoLayers: true
+      });
+      gifFps = Math.min(gifFps, adaptive.videoFpsCap);
       
       // 🚀 两阶段调色板生成（替代单命令 split 方案）
       // 优势：① 内存占用大幅降低（无需缓冲所有帧）② 大文件更稳定
@@ -767,20 +801,22 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
       // ⚠️ 跳过已在前面 Promise.all 中处理过的文件
       const alreadyProcessedSingle = gifInfo.path.startsWith(tempDir);
       const ext = path.extname(gifInfo.path).toLowerCase();
-      if (!alreadyProcessedSingle && (ext === '.mov' || ext === '.mp4' || ext === '.gif')) {
+      if (!alreadyProcessedSingle && (ext === '.mov' || ext === '.mp4')) {
           const tempProcessedGif = path.join(tempDir, `processed_single.gif`);
           const tempPaletteSingle = path.join(tempDir, `palette_single.png`);
-          const isVideoSingle = ext === '.mov' || ext === '.mp4';
+          const videoStatsSingle = fs.statSync(gifInfo.path);
+          const adaptiveSingle = getAdaptiveProfile({
+            preSizeMB: videoStatsSingle.size / (1024 * 1024),
+            hasVideoLayers: true
+          });
           
           // 🚀 两阶段调色板（与主预处理流程一致）
           try {
-              const vfBase = isVideoSingle ? 'fps=15,' : '';
+              const vfBase = `fps=${adaptiveSingle.videoFpsCap},`;
               // 阶段 1：生成调色板
               await execAsync(`ffmpeg -threads 0 -i "${gifInfo.path}" -vf "${vfBase}palettegen=max_colors=256:stats_mode=full" -y "${tempPaletteSingle}"`, { timeout: 60000 });
               // 阶段 2：渲染 GIF
-              const lavfi = isVideoSingle
-                ? `fps=15[v];[v][1:v]paletteuse=dither=${ditherMode}:diff_mode=rectangle`
-                : `[0:v][1:v]paletteuse=dither=${ditherMode}:diff_mode=rectangle`;
+              const lavfi = `fps=${adaptiveSingle.videoFpsCap}[v];[v][1:v]paletteuse=dither=${ditherMode}:diff_mode=rectangle`;
               await execAsync(`ffmpeg -threads 0 -i "${gifInfo.path}" -i "${tempPaletteSingle}" -lavfi "${lavfi}" -threads 0 "${tempProcessedGif}" -y`, { timeout: 180000 });
               if (fs.existsSync(tempPaletteSingle)) fs.unlinkSync(tempPaletteSingle);
               gifInfo.path = tempProcessedGif;
@@ -937,7 +973,10 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
         }
         
         // 构建 GIF 滤镜表达式
-        let gifFilterExpr = pipeScaleFilters.length > 0 ? pipeScaleFilters.join(',') + ',' : '';
+        // fps 归一化：GIF 可能有可变帧延迟，必须先统一为 pipeOutputFps
+        // 否则 overlay enable=between(n,...) 的 n 计数与 pipeTotalFrames 不匹配
+        let gifFilterExpr = `fps=${pipeOutputFps},`;
+        gifFilterExpr += pipeScaleFilters.length > 0 ? pipeScaleFilters.join(',') + ',' : '';
         gifFilterExpr += 'format=rgba';
         
         // 圆角遮罩
@@ -1002,9 +1041,13 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
         if (hasTimelineEdits && timelineData && timelineData[gifInfo.layerId] && pipeTotalFrames > 1) {
           const gifRange = timelineData[gifInfo.layerId];
           if (gifRange.start > 0 || gifRange.end < 100) {
-            const gsf = Math.max(0, Math.floor((gifRange.start / 100) * (pipeTotalFrames - 1)));
-            const gef = Math.min(pipeTotalFrames - 1, Math.ceil((gifRange.end / 100) * (pipeTotalFrames - 1)));
-            gifEnableExpr = `:enable='gte(n\\,${gsf})*lte(n\\,${gef})'`;
+            const pipeDen = Math.max(1, pipeTotalFrames - 1);
+            const gsf = Math.max(0, Math.ceil((gifRange.start / 100) * pipeDen));
+            const gef = Math.min(pipeTotalFrames - 1, Math.floor((gifRange.end / 100) * pipeDen));
+            // 预计算帧区间，避免每帧做除法表达式导致性能下降
+            gifEnableExpr = gef >= gsf
+              ? `:enable='between(n\\,${gsf}\\,${gef})'`
+              : `:enable='0'`;
           }
         }
         filterParts.push(`[${prevStream}][${gifStream}]overlay=0:0${gifEnableExpr}[composited]`);
@@ -1072,9 +1115,12 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
           const tlIdx = inputIdx++;
           
           const tlRange = timelineData[tlLayer.layerId];
-          const sf = Math.max(0, Math.floor((tlRange.start / 100) * (pipeTotalFrames - 1)));
-          const ef = Math.min(pipeTotalFrames - 1, Math.ceil((tlRange.end / 100) * (pipeTotalFrames - 1)));
-          const enableExpr = `:enable='gte(n\\,${sf})*lte(n\\,${ef})'`;
+          const pipeDen = Math.max(1, pipeTotalFrames - 1);
+          const sf = Math.max(0, Math.ceil((tlRange.start / 100) * pipeDen));
+          const ef = Math.min(pipeTotalFrames - 1, Math.floor((tlRange.end / 100) * pipeDen));
+          const enableExpr = ef >= sf
+            ? `:enable='between(n\\,${sf}\\,${ef})'`
+            : `:enable='0'`;
           
           const next = `tl${tli}`;
           filterParts.push(`[${prevStream}][${tlIdx}:v]overlay=0:0${enableExpr}[${next}]`);
@@ -1126,8 +1172,13 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
           await execAsync('which gifsicle');
           const pipePreStats = fs.statSync(pipeTempGifPath);
           const gifsicleTimeout = Math.max(60000, Math.ceil(pipePreStats.size / (1024 * 1024)) * 5000);
+          const adaptivePipe = getAdaptiveProfile({
+            preSizeMB: pipePreStats.size / (1024 * 1024),
+            frameCount: pipeTotalFrames || 0,
+            hasVideoLayers: hasVideo
+          });
           
-          await execAsync(`gifsicle -O3 --lossy=80 --no-conserve-memory --no-comments --no-names --no-extensions "${pipeTempGifPath}" -o "${outputPath}"`,
+          await execAsync(`gifsicle -O3 --lossy=${adaptivePipe.lossy} --no-conserve-memory --no-comments --no-names --no-extensions "${pipeTempGifPath}" -o "${outputPath}"`,
             { maxBuffer: 200 * 1024 * 1024, timeout: gifsicleTimeout });
           
           if (fs.existsSync(pipeTempGifPath)) fs.unlinkSync(pipeTempGifPath);
@@ -1541,9 +1592,14 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
         const preStats = fs.statSync(outputPath);
         const preSizeMB = (preStats.size / 1024 / 1024).toFixed(2);
         const gifsicleTimeout = Math.max(60000, Math.ceil(preStats.size / (1024 * 1024)) * 5000);
+        const adaptiveFinal = getAdaptiveProfile({
+          preSizeMB: preStats.size / (1024 * 1024),
+          frameCount: typeof totalOutputFrames === 'number' ? totalOutputFrames : 0,
+          hasVideoLayers: hasVideo
+        });
         
         const tempGifsicle = outputPath + '.gsopt.gif';
-        await execAsync(`gifsicle -O3 --lossy=80 --no-conserve-memory --no-comments --no-names --no-extensions "${outputPath}" -o "${tempGifsicle}"`, 
+        await execAsync(`gifsicle -O3 --lossy=${adaptiveFinal.lossy} --no-conserve-memory --no-comments --no-names --no-extensions "${outputPath}" -o "${tempGifsicle}"`, 
           { maxBuffer: 200 * 1024 * 1024, timeout: gifsicleTimeout });
         
         const postStats = fs.statSync(tempGifsicle);
@@ -1591,18 +1647,20 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
         // ⚠️ 跳过已在前面 Promise.all 中处理过的文件（路径在 tempDir 内说明已经处理过了）
         const alreadyProcessed = gifInfo.path.startsWith(tempDir);
         const ext = path.extname(gifInfo.path).toLowerCase();
-        if (!alreadyProcessed && (ext === '.mov' || ext === '.mp4' || ext === '.gif')) {
+        if (!alreadyProcessed && (ext === '.mov' || ext === '.mp4')) {
             const tempProcessedGif = path.join(tempDir, `processed_multi_${i}.gif`);
-            const isGif = ext === '.gif';
+            const videoStatsMulti = fs.statSync(gifInfo.path);
+            const adaptiveMulti = getAdaptiveProfile({
+              preSizeMB: videoStatsMulti.size / (1024 * 1024),
+              hasVideoLayers: true
+            });
             
             // 🚀 两阶段调色板（与主预处理流程一致）
             const tempPaletteMulti = path.join(tempDir, `palette_multi_${i}.png`);
             try {
-                const vfBase = !isGif ? 'fps=15,' : '';
+                const vfBase = `fps=${adaptiveMulti.videoFpsCap},`;
                 await execAsync(`ffmpeg -threads 0 -i "${gifInfo.path}" -vf "${vfBase}palettegen=max_colors=256:stats_mode=full" -y "${tempPaletteMulti}"`, { timeout: 60000 });
-                const lavfi = !isGif
-                  ? `fps=15[v];[v][1:v]paletteuse=dither=${ditherMode}:diff_mode=rectangle`
-                  : `[0:v][1:v]paletteuse=dither=${ditherMode}:diff_mode=rectangle`;
+                const lavfi = `fps=${adaptiveMulti.videoFpsCap}[v];[v][1:v]paletteuse=dither=${ditherMode}:diff_mode=rectangle`;
                 await execAsync(`ffmpeg -threads 0 -i "${gifInfo.path}" -i "${tempPaletteMulti}" -lavfi "${lavfi}" -threads 0 "${tempProcessedGif}" -y`, { timeout: 180000 });
                 if (fs.existsSync(tempPaletteMulti)) fs.unlinkSync(tempPaletteMulti);
                 gifInfo.path = tempProcessedGif;
@@ -1801,6 +1859,12 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
           resizeVf = `scale=${scaledW}:${scaledH}:flags=lanczos,crop=${gifW}:${gifH}:${cropOffsetX}:${cropOffsetY}`;
         }
         
+        // 无变换无缩放时跳过 resize（避免重复二次调色板编码）
+        const hasImageTransform = !!(imageFillInfo.imageTransform && Array.isArray(imageFillInfo.imageTransform));
+        if (!hasImageTransform && originalW === gifW && originalH === gifH) {
+          resizeVf = null;
+        }
+
         // 🚀 统一执行两阶段调色板 resize
         // 阶段 1: 分析帧间差异生成最优调色板（1 palette entry 保留透明色）
         // 阶段 2: 用调色板 + 帧差分编码渲染 GIF（diff_mode=rectangle 只编码变化区域）
@@ -2137,9 +2201,14 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
             let enableExpr = '';
             if (hasTimelineOnLayer(layer.layerId)) {
               const range = timelineData[layer.layerId];
-              const sf = Math.max(0, Math.floor((range.start / 100) * (totalSourceFrames - 1)) - trimStartFrame);
-              const ef = Math.min(totalOutputFrames - 1, Math.ceil((range.end / 100) * (totalSourceFrames - 1)) - trimStartFrame);
-              enableExpr = `:enable='gte(n\\,${sf})*lte(n\\,${ef})'`;
+              const den = Math.max(1, totalSourceFrames - 1);
+              const sfRaw = Math.ceil((range.start / 100) * den);
+              const efRaw = Math.floor((range.end / 100) * den);
+              const sf = Math.max(0, sfRaw - trimStartFrame);
+              const ef = Math.min(totalOutputFrames - 1, efRaw - trimStartFrame);
+              enableExpr = ef >= sf
+                ? `:enable='between(n\\,${sf}\\,${ef})'`
+                : `:enable='0'`;
             }
             
             const next = `p${inputIdx}`;
@@ -2154,9 +2223,14 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
             let enableExpr = '';
             if (hasTimelineOnLayer(layer.layerId)) {
               const range = timelineData[layer.layerId];
-              const sf = Math.max(0, Math.floor((range.start / 100) * (totalSourceFrames - 1)) - trimStartFrame);
-              const ef = Math.min(totalOutputFrames - 1, Math.ceil((range.end / 100) * (totalSourceFrames - 1)) - trimStartFrame);
-              enableExpr = `:enable='gte(n\\,${sf})*lte(n\\,${ef})'`;
+              const den = Math.max(1, totalSourceFrames - 1);
+              const sfRaw = Math.ceil((range.start / 100) * den);
+              const efRaw = Math.floor((range.end / 100) * den);
+              const sf = Math.max(0, sfRaw - trimStartFrame);
+              const ef = Math.min(totalOutputFrames - 1, efRaw - trimStartFrame);
+              enableExpr = ef >= sf
+                ? `:enable='between(n\\,${sf}\\,${ef})'`
+                : `:enable='0'`;
             }
             
             const next = `p${inputIdx}`;

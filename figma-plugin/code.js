@@ -68,6 +68,7 @@ async function refreshTimelineLayers(frame, force) {
           const c = child.getPluginData('gifCacheId');
           if (c) gifCacheId = c;
         } catch (e) {}
+        if (gifCacheId) isVideoLayer = true;
         
         if (!isVideoLayer && 'fills' in child && Array.isArray(child.fills)) {
           try {
@@ -80,7 +81,7 @@ async function refreshTimelineLayers(frame, force) {
         if (!isVideoLayer) {
           const lowerName = (child.name || '').toLowerCase();
           const videoExts = ['.gif', '.mp4', '.mov', '.webm', '.avi', '.mkv'];
-          const videoKw = ['screenrecording', 'video'];
+          const videoKw = ['screenrecording', 'video', 'gif'];
           if (videoExts.some(ext => lowerName.endsWith(ext)) ||
               videoKw.some(kw => lowerName.includes(kw))) {
             isVideoLayer = true;
@@ -111,6 +112,7 @@ async function refreshTimelineLayers(frame, force) {
         try { const v = child.getPluginData('videoId'); if (v) { fallbackVideoId = v; fallbackIsVideo = true; } } catch (e) {}
         try { const o = child.getPluginData('originalFilename'); if (o) fallbackOrigFilename = o; } catch (e) {}
         try { const c = child.getPluginData('gifCacheId'); if (c) fallbackGifCacheId = c; } catch (e) {}
+        if (fallbackGifCacheId) fallbackIsVideo = true;
         if (!fallbackIsVideo) {
           try {
             if ('fills' in child && Array.isArray(child.fills)) {
@@ -2071,11 +2073,51 @@ figma.ui.onmessage = async (msg) => {
       return false;
     }
     
+    // 辅助函数：收集 Frame 中未同步的 GIF/视频图层（与 export-annotated-gif 中的逻辑一致）
+    function collectUnsyncedLayers(frame) {
+      const unsynced = [];
+      for (const child of frame.children) {
+        try {
+          const driveFileId = child.getPluginData('driveFileId');
+          const ossFileId = child.getPluginData('ossFileId');
+          const gifCacheId = child.getPluginData('gifCacheId');
+          const originalFilename = child.getPluginData('originalFilename');
+          
+          let isMediaLayer = false;
+          if (originalFilename || gifCacheId || child.getPluginData('videoId')) {
+            isMediaLayer = true;
+          }
+          if (!isMediaLayer) {
+            try {
+              if ('fills' in child && Array.isArray(child.fills) && child.fills.some(f => f.type === 'VIDEO')) isMediaLayer = true;
+            } catch (e) { isMediaLayer = true; }
+          }
+          if (!isMediaLayer) {
+            const ln = child.name.toLowerCase();
+            if (['.gif', '.mp4', '.mov', '.webm'].some(ext => ln.endsWith(ext)) ||
+                ['screenrecording', 'video'].some(kw => ln.includes(kw))) isMediaLayer = true;
+          }
+          
+          if (isMediaLayer && !driveFileId && !ossFileId && !gifCacheId) {
+            unsynced.push({
+              layerId: child.id,
+              layerName: child.name,
+              filename: originalFilename || child.name,
+              frameId: frame.id,
+              frameName: frame.name
+            });
+          }
+        } catch (e) {}
+      }
+      return unsynced;
+    }
+    
     // 逐个验证所有选中节点
     let totalFrames = 0;
     let framesWithVideo = 0;
     let hasNonFrame = false;
-    const invalidFrameNames = []; // 不含录屏的 Frame 名称
+    const invalidFrameNames = [];
+    const allUnsyncedGifs = [];
     
     for (const node of selection) {
       if (node.type !== 'FRAME') {
@@ -2085,6 +2127,8 @@ figma.ui.onmessage = async (msg) => {
       totalFrames++;
       if (frameHasVideoLayer(node)) {
         framesWithVideo++;
+        const unsynced = collectUnsyncedLayers(node);
+        allUnsyncedGifs.push(...unsynced);
       } else {
         invalidFrameNames.push(node.name);
       }
@@ -2097,7 +2141,8 @@ figma.ui.onmessage = async (msg) => {
       frameCount: totalFrames,
       framesWithVideo: framesWithVideo,
       hasNonFrame: hasNonFrame,
-      invalidFrameNames: invalidFrameNames
+      invalidFrameNames: invalidFrameNames,
+      unsyncedGifs: allUnsyncedGifs
     });
     return;
   }
@@ -2153,6 +2198,7 @@ figma.ui.onmessage = async (msg) => {
             const cid = child.getPluginData('gifCacheId');
             if (cid) gifCacheId = cid;
           } catch (e) {}
+          if (gifCacheId) isVideoLayer = true;
           
           // Also check fills for video type
           if (!isVideoLayer && 'fills' in child && Array.isArray(child.fills)) {
@@ -2209,6 +2255,7 @@ figma.ui.onmessage = async (msg) => {
             const cid = child.getPluginData('gifCacheId');
             if (cid) fallbackGifCacheId = cid;
           } catch (e) {}
+          if (fallbackGifCacheId) fallbackIsVideo = true;
           if (!fallbackIsVideo) {
             try {
               if ('fills' in child && Array.isArray(child.fills)) {

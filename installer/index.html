@@ -703,7 +703,7 @@
     }
 
     .modal {
-      background: var(--glass-bg);
+      background: var(--bg-app);
       backdrop-filter: blur(var(--glass-blur));
       -webkit-backdrop-filter: blur(var(--glass-blur));
       width: 320px;
@@ -742,33 +742,70 @@
       background: var(--glass-bg);
       backdrop-filter: blur(12px);
       -webkit-backdrop-filter: blur(12px);
-      border: 1px solid var(--glass-border-subtle);
+      border: none;
       display: flex;
       align-items: center;
       justify-content: center;
       cursor: pointer;
-      transition: all 0.25s ease;
+      color: var(--text-secondary);
+      transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
+      transform: scale(1);
+      position: relative;
       flex-shrink: 0;
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+      box-shadow: none;
+    }
+
+    .close-btn::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      background: var(--glass-specular);
+      z-index: -2;
+      pointer-events: none;
+      opacity: 0.5;
+    }
+
+    .close-btn::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      background: transparent;
+      z-index: -1;
+      transition: all 0.25s ease;
+      pointer-events: none;
     }
 
     .close-btn svg {
+      position: relative;
+      z-index: 1;
+      transition: all 0.25s ease;
       color: var(--text-secondary);
       stroke: currentColor;
     }
 
     .close-btn:hover {
       transform: scale(1.05);
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 2px 8px rgba(0, 0, 0, 0.04);
     }
 
     .close-btn:hover svg {
+      opacity: 1;
       color: var(--text-primary);
+    }
+
+    .close-btn:hover::after {
+      background: transparent;
     }
 
     .close-btn:active {
       transform: scale(0.95);
-      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1), inset 0 1px 2px rgba(0, 0, 0, 0.05);
+      box-shadow: none;
+    }
+
+    .close-btn:active::after {
+      background: transparent;
     }
 
     .modal-icon {
@@ -816,7 +853,7 @@
       top: 20px;
       left: 50%;
       transform: translateX(-50%) translateY(-100px);
-      background: var(--glass-bg);
+      background: var(--bg-app);
       backdrop-filter: blur(var(--glass-blur));
       -webkit-backdrop-filter: blur(var(--glass-blur));
       border: 1px solid var(--glass-border-subtle);

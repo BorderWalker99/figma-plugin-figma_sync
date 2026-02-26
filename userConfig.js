@@ -278,11 +278,11 @@ function getBackupMode() {
   if (config.backupMode) {
     return config.backupMode;
   }
-  // 向后兼容：如果启用了截图备份，则默认为'all'；否则为'none'
+  // 向后兼容：如果启用了截图备份，则默认为'all'；否则默认为 'gif_only'
   if (config.backupScreenshots) {
     return 'all';
   }
-  return 'none';
+  return 'gif_only';
 }
 
 /**

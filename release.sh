@@ -159,6 +159,44 @@ else
     exit 1
 fi
 
+# 验证安装包内容（确保更新包完整且无明显冗余）
+echo -e "   ${YELLOW}正在校验安装包内容...${NC}"
+verify_archive() {
+    local archive="$1"
+    local missing=0
+    local has_manifest=0
+    local has_server=0
+    local has_plugin=0
+    local has_node_modules=0
+    local has_cache=0
+
+    while IFS= read -r entry; do
+        [[ "$entry" == */项目文件/update-manifest.json ]] && has_manifest=1
+        [[ "$entry" == */项目文件/server.js ]] && has_server=1
+        [[ "$entry" == */项目文件/figma-plugin/manifest.json ]] && has_plugin=1
+        [[ "$entry" == *"/node_modules/"* ]] && has_node_modules=1
+        [[ "$entry" == *"/.gif-cache/"* || "$entry" == *"/.gif_cache/"* ]] && has_cache=1
+    done < <(tar -tzf "$archive")
+
+    if [ $has_manifest -eq 0 ] || [ $has_server -eq 0 ] || [ $has_plugin -eq 0 ]; then
+        echo -e "   ${RED}❌ ${archive} 缺少必要更新内容（manifest/server/plugin）${NC}"
+        missing=1
+    fi
+    if [ $has_node_modules -eq 1 ] || [ $has_cache -eq 1 ]; then
+        echo -e "   ${RED}❌ ${archive} 包含不应发布的冗余目录（node_modules 或 cache）${NC}"
+        missing=1
+    fi
+
+    if [ $missing -eq 1 ]; then
+        return 1
+    fi
+    echo -e "   ${GREEN}✅ ${archive} 内容校验通过${NC}"
+    return 0
+}
+
+verify_archive "$INTEL_TAR"
+verify_archive "$APPLE_TAR"
+
 # ==================== 步骤 3: 提交代码 ====================
 echo -e "\n${BLUE}📤 步骤 3/5: 提交代码到 GitHub...${NC}"
 

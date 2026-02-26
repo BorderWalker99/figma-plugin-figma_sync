@@ -787,27 +787,51 @@ async function handleFullUpdate(targetGroup, connectionId) {
     }
     fs.mkdirSync(backupDir, { recursive: true });
     
-    // 需要更新的所有文件列表
-    const allFiles = [
-      // 服务器核心文件
-      'server.js',
-      'start.js',
-      'gif-composer.js',
-      // Google Drive 相关
-      'googleDrive.js',
-      'drive-watcher.js',
-      // 阿里云 OSS 相关
-      'aliyunOSS.js',
-      'aliyun-watcher.js',
-      // iCloud 相关
-      'icloud-watcher.js',
-      // 配置和工具
-      'userConfig.js',
-      'update-manager.js',
-      'update-handlers.js',
-      'package.json',
-      'VERSION.txt'
-    ];
+    // 读取更新清单（由打包脚本生成），确保“打包什么就更新什么”
+    const manifestPath = path.join(extractedDir, 'update-manifest.json');
+    let allFiles = [];
+    if (fs.existsSync(manifestPath)) {
+      try {
+        const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+        if (manifest && Array.isArray(manifest.files)) {
+          allFiles = manifest.files.filter((f) => {
+            if (typeof f !== 'string' || !f) return false;
+            if (f.includes('..')) return false;
+            if (path.isAbsolute(f)) return false;
+            return true;
+          });
+        }
+      } catch (manifestError) {
+        console.warn(`   ⚠️  update-manifest.json 解析失败，回退到内置清单: ${manifestError.message}`);
+      }
+    }
+
+    // 兼容旧包：没有 update-manifest.json 时使用内置清单
+    if (allFiles.length === 0) {
+      allFiles = [
+        'server.js',
+        'start.js',
+        'gif-composer.js',
+        'googleDrive.js',
+        'drive-watcher.js',
+        'aliyunOSS.js',
+        'aliyun-watcher.js',
+        'icloud-watcher.js',
+        'userConfig.js',
+        'setup-autostart.js',
+        'update-manager.js',
+        'update-handlers.js',
+        'com.screensync.server.plist',
+        'package.json',
+        'package-lock.json',
+        'README.md',
+        'MANUAL_INSTALL_LEGACY.md',
+        'VERSION.txt',
+        'figma-plugin/manifest.json',
+        'figma-plugin/code.js',
+        'figma-plugin/ui.html'
+      ];
+    }
     
     // 🚀 增量更新：只更新有变化的文件
     const crypto = require('crypto');
@@ -822,7 +846,7 @@ async function handleFullUpdate(targetGroup, connectionId) {
       }
     };
     
-    // 备份并更新服务器文件
+    // 备份并更新文件（含 figma-plugin 子目录）
     let updatedCount = 0;
     let skippedCount = 0;
     let newFilesCount = 0;
@@ -836,6 +860,16 @@ async function handleFullUpdate(targetGroup, connectionId) {
         console.log(`   ⚠️  源文件不存在，跳过: ${file}`);
         continue;
       }
+      // 只处理普通文件，避免把目录/特殊文件复制进来
+      try {
+        if (!fs.statSync(srcPath).isFile()) {
+          continue;
+        }
+      } catch (_) {
+        continue;
+      }
+      fs.mkdirSync(path.dirname(destPath), { recursive: true });
+      fs.mkdirSync(path.dirname(backupPath), { recursive: true });
       
       // 检查目标文件是否存在
       const destExists = fs.existsSync(destPath);
@@ -876,61 +910,6 @@ async function handleFullUpdate(targetGroup, connectionId) {
       status: 'installing',
       message: `正在更新文件... (${updatedCount} 个文件需要更新)`
     });
-    
-    // 🚀 增量更新插件文件
-    const pluginSrcDir = path.join(extractedDir, 'figma-plugin');
-    const pluginDestDir = path.join(__dirname, 'figma-plugin');
-    
-    if (fs.existsSync(pluginSrcDir) && fs.existsSync(pluginDestDir)) {
-      const pluginFiles = ['manifest.json', 'code.js', 'ui.html'];
-      const pluginBackupDir = path.join(backupDir, 'figma-plugin');
-      fs.mkdirSync(pluginBackupDir, { recursive: true });
-      
-      let pluginUpdated = 0;
-      let pluginSkipped = 0;
-      
-      for (const file of pluginFiles) {
-        const srcPath = path.join(pluginSrcDir, file);
-        const destPath = path.join(pluginDestDir, file);
-        const backupPath = path.join(pluginBackupDir, file);
-        
-        if (!fs.existsSync(srcPath)) {
-          console.log(`   ⚠️  源文件不存在，跳过: figma-plugin/${file}`);
-          continue;
-        }
-        
-        const destExists = fs.existsSync(destPath);
-        
-        if (!destExists) {
-          // 新文件
-          fs.copyFileSync(srcPath, destPath);
-          pluginUpdated++;
-          updatedCount++;
-          continue;
-        }
-        
-        // 对比文件内容
-        const srcHash = getFileHash(srcPath);
-        const destHash = getFileHash(destPath);
-        
-        if (srcHash === destHash) {
-          // 文件内容相同，跳过
-          pluginSkipped++;
-          skippedCount++;
-          continue;
-        }
-        
-        // 备份并更新
-        fs.copyFileSync(destPath, backupPath);
-        fs.copyFileSync(srcPath, destPath);
-        pluginUpdated++;
-        updatedCount++;
-      }
-      
-      console.log(`\n   📊 插件更新统计:`);
-      console.log(`      • 更新文件: ${pluginUpdated} 个`);
-      console.log(`      • 跳过文件: ${pluginSkipped} 个 (无变化)\n`);
-    }
     
     // 清理临时文件
     if (fs.existsSync(tempFile)) {

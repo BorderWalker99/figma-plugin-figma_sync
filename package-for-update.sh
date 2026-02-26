@@ -9,6 +9,7 @@ set -e
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+RED='\033[0;31m'
 NC='\033[0m'
 
 echo -e "${BLUE}╔════════════════════════════════════════╗${NC}"
@@ -47,31 +48,18 @@ if [ -d "$TEMP_DIR" ]; then
 fi
 mkdir -p "$TEMP_DIR/figma-plugin"
 
-# 复制插件文件
-echo -e "${YELLOW}📄 复制插件文件...${NC}"
-
-# 必需文件
-cp figma-plugin/manifest.json "$TEMP_DIR/figma-plugin/" 2>/dev/null || echo "   ⚠️  manifest.json 不存在"
-cp figma-plugin/code.js "$TEMP_DIR/figma-plugin/" 2>/dev/null || echo "   ⚠️  code.js 不存在"
-cp figma-plugin/ui.html "$TEMP_DIR/figma-plugin/" 2>/dev/null || echo "   ⚠️  ui.html 不存在"
-
-# 图片资源
-if [ -d "figma-plugin/images" ]; then
-    echo "   📷 复制图片资源..."
-    cp -r figma-plugin/images "$TEMP_DIR/figma-plugin/"
+# 复制插件文件（整目录同步，避免遗漏新资源/脚本）
+echo -e "${YELLOW}📄 复制插件文件（完整目录）...${NC}"
+if [ ! -f "figma-plugin/manifest.json" ] || [ ! -f "figma-plugin/code.js" ] || [ ! -f "figma-plugin/ui.html" ]; then
+    echo -e "${RED}❌ 错误: figma-plugin 缺少必要文件（manifest.json / code.js / ui.html）${NC}"
+    exit 1
 fi
 
-# qr-codes.js（如果存在）
-if [ -f "figma-plugin/qr-codes.js" ]; then
-    echo "   📄 复制 qr-codes.js..."
-    cp figma-plugin/qr-codes.js "$TEMP_DIR/figma-plugin/"
-fi
-
-# 其他可能的资源文件
-if [ -d "figma-plugin/assets" ]; then
-    echo "   📦 复制 assets 资源..."
-    cp -r figma-plugin/assets "$TEMP_DIR/figma-plugin/"
-fi
+rsync -a \
+  --exclude '.DS_Store' \
+  --exclude '*.map' \
+  --exclude 'node_modules/' \
+  "figma-plugin/" "$TEMP_DIR/figma-plugin/"
 
 # 打包成 zip
 echo -e "\n${GREEN}📦 创建压缩包...${NC}"
@@ -94,15 +82,7 @@ echo -e "${GREEN}╚════════════════════
 echo -e "${GREEN}✅ 文件包: ${PLUGIN_ZIP}${NC}"
 echo -e "${GREEN}✅ 大小: ${PACKAGE_SIZE}${NC}\n"
 echo -e "${YELLOW}📦 包含内容：${NC}"
-echo "   - manifest.json"
-echo "   - code.js"
-echo "   - ui.html"
-if [ -d "figma-plugin/images" ]; then
-    echo "   - images/ (图片资源)"
-fi
-if [ -f "figma-plugin/qr-codes.js" ]; then
-    echo "   - qr-codes.js"
-fi
+echo "   - figma-plugin/ (完整目录)"
 echo ""
 echo -e "${BLUE}💡 下一步：${NC}"
 echo "   1. 上传此文件到 GitHub Releases"

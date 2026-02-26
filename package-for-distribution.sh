@@ -33,9 +33,17 @@ rm -rf dist
 echo -e "   ${YELLOW}构建双架构 DMG...${NC}"
 npm run build:mac
 
-# 定位构建产物
-DMG_INTEL=$(ls dist/*-1.0.1.dmg 2>/dev/null | head -1)
-DMG_ARM=$(ls dist/*-1.0.1-arm64.dmg 2>/dev/null | head -1)
+# 定位构建产物（dist 已清空重建，按文件名后缀识别架构）
+DMG_INTEL=""
+DMG_ARM=""
+for dmg in dist/*.dmg; do
+    [ -e "$dmg" ] || continue
+    if [[ "$dmg" == *"-arm64.dmg" ]]; then
+        DMG_ARM="$dmg"
+    else
+        DMG_INTEL="$dmg"
+    fi
+done
 
 if [ -z "$DMG_INTEL" ] || [ -z "$DMG_ARM" ]; then
     echo -e "${RED}❌ 错误：需要同时存在 Intel 和 Apple Silicon 版本的 DMG${NC}"
@@ -113,20 +121,14 @@ create_package() {
     cp "$DMG_PATH" "$TEMP_DIR/双击安装.dmg"
     echo "   ✅ 已复制安装器 DMG"
     
-    # 5. 复制 Figma 插件文件
-    echo -e "${YELLOW}🎨 复制 Figma 插件文件...${NC}"
+    # 5. 复制 Figma 插件文件（整目录同步，避免遗漏新资源）
+    echo -e "${YELLOW}🎨 复制 Figma 插件文件（完整目录）...${NC}"
     mkdir -p "$TEMP_DIR/项目文件/figma-plugin"
-    cp figma-plugin/manifest.json "$TEMP_DIR/项目文件/figma-plugin/"
-    cp figma-plugin/code.js "$TEMP_DIR/项目文件/figma-plugin/"
-    cp figma-plugin/ui.html "$TEMP_DIR/项目文件/figma-plugin/"
-    
-    if [ -d "figma-plugin/images" ]; then
-        cp -r figma-plugin/images "$TEMP_DIR/项目文件/figma-plugin/"
-    fi
-    
-    if [ -f "figma-plugin/qr-codes.js" ]; then
-        cp figma-plugin/qr-codes.js "$TEMP_DIR/项目文件/figma-plugin/"
-    fi
+    rsync -a \
+      --exclude '.DS_Store' \
+      --exclude '*.map' \
+      --exclude 'node_modules/' \
+      "figma-plugin/" "$TEMP_DIR/项目文件/figma-plugin/"
     
     # 6. 复制 images 文件夹（logo 和 QR 码）
     if [ -d "images" ]; then
@@ -269,16 +271,54 @@ EOF
         echo "   ✅ 已创建 VERSION.txt"
     fi
 
-    # 10. 打包
+    # 10. 生成更新清单（用于全量更新精确同步，避免遗漏/多余）
+    echo -e "${YELLOW}🧾 生成 update-manifest.json...${NC}"
+    node - "$TEMP_DIR/项目文件" <<'EOF'
+const fs = require('fs');
+const path = require('path');
+const base = process.argv[2];
+const files = [];
+
+function walk(dir) {
+  const items = fs.readdirSync(dir, { withFileTypes: true });
+  for (const item of items) {
+    if (item.name === '.DS_Store') continue;
+    const full = path.join(dir, item.name);
+    if (item.isDirectory()) {
+      if (item.name === 'node_modules') continue;
+      walk(full);
+      continue;
+    }
+    if (!item.isFile()) continue;
+    const rel = path.relative(base, full).replace(/\\/g, '/');
+    if (!rel) continue;
+    files.push(rel);
+  }
+}
+
+walk(base);
+files.sort();
+if (!files.includes('update-manifest.json')) {
+  files.push('update-manifest.json');
+}
+const manifest = {
+  schemaVersion: 1,
+  generatedAt: new Date().toISOString(),
+  files
+};
+fs.writeFileSync(path.join(base, 'update-manifest.json'), JSON.stringify(manifest, null, 2), 'utf8');
+EOF
+
+    # 11. 打包
     echo -e "${GREEN}📦 创建压缩包...${NC}"
     cd /tmp
     tar -czf "${PACKAGE_NAME}.tar.gz" "${PACKAGE_NAME}/"
     cd - > /dev/null
     
-    # 11. 移动到当前目录
+    # 12. 移动到当前目录
     mv "/tmp/${PACKAGE_NAME}.tar.gz" "./${PACKAGE_NAME}.tar.gz"
     
-    # 12. 清理临时目录
+    # 13. 清理临时目录
     rm -rf "$TEMP_DIR"
     
     # 显示结果

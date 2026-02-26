@@ -456,17 +456,13 @@ function saveFileToLocalFolder(buffer, filename, mimeType) {
     const safeFilename = sanitizeFilename(filename, mimeType);
     const filePath = path.join(folderPath, safeFilename);
     
-    // 检查是否是视频或 GIF 文件
     const ext = path.extname(safeFilename).toLowerCase();
-    const isVideo = ext === '.mp4' || ext === '.mov' || (mimeType && mimeType.startsWith('video/'));
     const isGif = ext === '.gif' || (mimeType && mimeType === 'image/gif');
     
-    // 如果是视频或 GIF 文件且已存在，直接替换；否则添加时间戳避免覆盖
     let finalPath = filePath;
     if (fs.existsSync(finalPath)) {
-      if (isVideo || isGif) {
-        // 视频或 GIF 文件：先删除旧文件，再写入新文件（确保直接替换）
-        console.log(`   🔄 [Server] 检测到重名 ${isVideo ? '视频' : 'GIF'} 文件，将替换: ${safeFilename}`);
+      if (isGif) {
+        console.log(`   🔄 [Server] 检测到重名 GIF 文件，将替换: ${safeFilename}`);
         try {
           // 先尝试删除文件
           fs.unlinkSync(finalPath);
@@ -1241,21 +1237,52 @@ class UploadQueue {
         }
       }
 
-      // 如果是大文件（视频/GIF），先保存到本地并通知插件，提高响应速度
-      // 这样用户不需要等待云端同步完成就可以开始手动导入
-      if ((isVideo || isGif) && finalBuffer) {
+      // 大文件预上传压缩：>50MB 的 GIF/视频在上传到 Drive 前先压缩
+      const COMPRESS_THRESHOLD = 50 * 1024 * 1024; // 50MB
+      if ((isVideo || isGif) && finalBuffer && finalBuffer.length > COMPRESS_THRESHOLD) {
+        const origSizeMB = (finalBuffer.length / 1024 / 1024).toFixed(1);
+        const tempDir = path.join(os.tmpdir(), `screensync-compress-${Date.now()}`);
+        fs.mkdirSync(tempDir, { recursive: true });
+        const tempIn = path.join(tempDir, finalFilename);
+        const tempOut = path.join(tempDir, `c_${finalFilename}`);
+        fs.writeFileSync(tempIn, finalBuffer);
+        
+        try {
+          if (isGif) {
+            console.log(`   🎬 [上传压缩] GIF ${origSizeMB}MB > 50MB，gifsicle 压缩中...`);
+            await execAsync(`gifsicle -O3 --lossy=30 "${tempIn}" -o "${tempOut}"`, { timeout: 300000 });
+          } else {
+            console.log(`   🎥 [上传压缩] 视频 ${origSizeMB}MB > 50MB，FFmpeg 压缩中...`);
+            await execAsync(`ffmpeg -i "${tempIn}" -vf "scale='min(1920,iw)':'min(1080,ih)':force_original_aspect_ratio=decrease" -c:v libx264 -preset medium -crf 18 -c:a aac -b:a 128k -movflags +faststart -y "${tempOut}"`, { timeout: 300000 });
+          }
+          
+          if (fs.existsSync(tempOut)) {
+            const compressedBuf = fs.readFileSync(tempOut);
+            const newSizeMB = (compressedBuf.length / 1024 / 1024).toFixed(1);
+            const ratio = ((1 - compressedBuf.length / finalBuffer.length) * 100).toFixed(1);
+            console.log(`   ✅ [上传压缩] ${origSizeMB}MB → ${newSizeMB}MB (节省 ${ratio}%)`);
+            finalBuffer = compressedBuf;
+          }
+        } catch (compErr) {
+          console.warn(`   ⚠️  [上传压缩] 压缩失败，使用原始文件: ${compErr.message}`);
+        }
+        
+        // 清理临时文件
+        try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch (_) {}
+      }
+
+      // GIF 大文件先保存到本地以供手动导入（视频文件不保留本地副本）
+      if (isGif && finalBuffer) {
         const saved = saveFileToLocalFolder(finalBuffer, finalFilename, finalMimeType);
         if (saved) {
-          // 广播给所有 Figma 客户端
           for (const [id, group] of connections) {
             sendToFigma(group, {
               type: 'file-skipped',
               filename: finalFilename,
-              reason: isVideo ? 'video' : 'gif-too-large',
+              reason: 'gif-too-large',
               timestamp: Date.now()
             });
           }
-          console.log(`   📨 [加速] 已通知插件手动导入`);
         }
       }
       
@@ -1985,7 +2012,8 @@ wss.on('connection', (ws, req) => {
     if (data.type === 'start-realtime' || 
         data.type === 'stop-realtime' || 
         data.type === 'manual-sync' ||
-        data.type === 'manual-sync-count-files') {
+        data.type === 'manual-sync-count-files' ||
+        data.type === 'cancel-manual-sync') {
       if (targetGroup.mac && targetGroup.mac.readyState === WebSocket.OPEN) {
         try {
           sendToMac(targetGroup, data);
@@ -2324,41 +2352,43 @@ wss.on('connection', (ws, req) => {
         // 获取原始文件扩展名
         const fileExt = path.extname(filename).toLowerCase();
         
-        // 检查文件大小，如果是视频且超过100MB，进行压缩（提高阈值以保留更多原始质量）
         const fileSizeMB = bytes.length / 1024 / 1024;
         const isVideo = ['.mov', '.mp4'].includes(fileExt);
-        const needsCompression = isVideo && fileSizeMB > 100;
+        const isGif = fileExt === '.gif';
+        const COMPRESS_THRESHOLD_MB = 50;
+        const needsCompression = (isVideo || isGif) && fileSizeMB > COMPRESS_THRESHOLD_MB;
         
         let processedFilePath = tempFilePath;
         
         if (needsCompression) {
           const compressedPath = path.join(tempDir, `compressed_${filename}`);
           
-          // 使用 FFmpeg 压缩视频（高质量设置）
-          // - 保持分辨率到 1080p（如果原始更高）
-          // - CRF 23（高质量，范围18-28，越小越好）
-          // - 码率 4M（提升至 4Mbps 以保证质量）
-          // - 使用 medium 预设（平衡速度和质量）
-          const ffmpegCmd = `ffmpeg -i "${tempFilePath}" -vf "scale='min(1920,iw)':'min(1080,ih)':force_original_aspect_ratio=decrease" -c:v libx264 -preset medium -crf 23 -b:v 4M -c:a aac -b:a 128k -movflags +faststart "${compressedPath}" -y`;
-          
           try {
-            await execAsync(ffmpegCmd, { timeout: 180000 }); // 3分钟超时
+            if (isGif) {
+              // GIF: gifsicle 无损优化（保留所有帧和颜色，仅去除冗余数据）
+              const gifsicleCmd = `gifsicle -O3 --lossy=30 "${tempFilePath}" -o "${compressedPath}"`;
+              console.log(`   🎬 [压缩] GIF 文件 ${fileSizeMB.toFixed(1)}MB > ${COMPRESS_THRESHOLD_MB}MB，使用 gifsicle 压缩...`);
+              await execAsync(gifsicleCmd, { timeout: 300000 }); // 5分钟超时
+            } else {
+              // 视频: FFmpeg 高质量压缩（CRF 18 近无损，保留原始帧率）
+              const ffmpegCmd = `ffmpeg -i "${tempFilePath}" -vf "scale='min(1920,iw)':'min(1080,ih)':force_original_aspect_ratio=decrease" -c:v libx264 -preset medium -crf 18 -c:a aac -b:a 128k -movflags +faststart -y "${compressedPath}"`;
+              console.log(`   🎥 [压缩] 视频文件 ${fileSizeMB.toFixed(1)}MB > ${COMPRESS_THRESHOLD_MB}MB，使用 FFmpeg 压缩...`);
+              await execAsync(ffmpegCmd, { timeout: 300000 });
+            }
             
-            // 检查压缩后的文件大小
-            const compressedStats = fs.statSync(compressedPath);
-            const compressedSizeMB = compressedStats.size / 1024 / 1024;
-            const compressionRatio = ((1 - compressedSizeMB / fileSizeMB) * 100).toFixed(1);
-            
-            console.log(`   ✅ 压缩完成: ${fileSizeMB.toFixed(2)} MB → ${compressedSizeMB.toFixed(2)} MB (节省 ${compressionRatio}%)`);
-            
-            // 使用压缩后的文件
-            processedFilePath = compressedPath;
-            
-            // 删除原始临时文件
-            fs.unlinkSync(tempFilePath);
+            if (fs.existsSync(compressedPath)) {
+              const compressedStats = fs.statSync(compressedPath);
+              const compressedSizeMB = compressedStats.size / 1024 / 1024;
+              const compressionRatio = ((1 - compressedSizeMB / fileSizeMB) * 100).toFixed(1);
+              
+              console.log(`   ✅ 压缩完成: ${fileSizeMB.toFixed(2)}MB → ${compressedSizeMB.toFixed(2)}MB (节省 ${compressionRatio}%)`);
+              processedFilePath = compressedPath;
+              fs.unlinkSync(tempFilePath);
+            } else {
+              console.warn('   ⚠️  压缩输出文件不存在，使用原始文件');
+            }
           } catch (error) {
-            console.error('   ⚠️  视频压缩失败，使用原始文件:', error.message);
-            // 压缩失败，继续使用原始文件
+            console.error('   ⚠️  压缩失败，使用原始文件:', error.message);
             if (fs.existsSync(compressedPath)) {
               fs.unlinkSync(compressedPath);
             }
@@ -2446,7 +2476,7 @@ wss.on('connection', (ws, req) => {
     // 处理时间线预览帧提取请求
     if (data.type === 'extract-preview-frames') {
       const { layerId, layerName, originalFilename, videoId, gifCacheId, frameCount = 10 } = data;
-      console.log(`\n🎞️ [时间线预览] 提取帧请求: ${layerName}`);
+      console.log(`\n🎞️ [时间线预览] 提取帧请求: ${layerName} (gifCacheId: ${gifCacheId || '无'})`);
       if (!gifCacheId) {
         console.log(`   ⚠️ 无 gifCacheId — 该图层未绑定源文件`);
       }
@@ -2469,17 +2499,28 @@ wss.on('connection', (ws, req) => {
           }
         }
         
+        // 回退：无 gifCacheId 或缓存丢失时，尝试通过文件名查找
+        if (!videoPath && (originalFilename || layerName)) {
+          try {
+            const fallback = userConfig.getGifFromCache(originalFilename || layerName, null);
+            if (fallback && fallback.path && fs.existsSync(fallback.path)) {
+              videoPath = fallback.path;
+              console.log(`   🔍 通过文件名回退找到: ${fallback.path}`);
+            }
+          } catch (_) {}
+        }
+        
         if (!videoPath || !fs.existsSync(videoPath)) {
           const reason = !gifCacheId 
             ? 'no-bindingid' 
             : 'cache-missing';
-          console.log(`   ⚠️ 未找到视频文件 (原因: ${reason})`);
+          console.log(`   ⚠️ 未找到源文件 (原因: ${reason})`);
           wsSend(ws, {
             type: 'preview-frames-result',
             layerId: layerId,
             success: false,
             error: reason === 'no-bindingid' 
-              ? '该视频图层未绑定源文件（缺少 gifCacheId）' 
+              ? '该图层未绑定源文件（缺少 gifCacheId）' 
               : '缓存文件已丢失，请重新同步该录屏',
             errorCode: reason
           });
@@ -2500,65 +2541,123 @@ wss.on('connection', (ws, req) => {
           fs.mkdirSync(tempDir, { recursive: true });
         }
         
-        // 使用 ffprobe 获取视频时长
-        const durationCmd = `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${videoPath}"`;
-        const { stdout: durationStr } = await execAsync(durationCmd);
-        const duration = parseFloat(durationStr.trim());
+        const fileExt = path.extname(videoPath).toLowerCase();
+        const isGifFile = fileExt === '.gif';
+        
+        // 获取时长：先尝试 format=duration，失败则用 frame count + frame rate 推算
+        let duration = 0;
+        try {
+          const durationCmd = `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${videoPath}"`;
+          const { stdout: durationStr } = await execAsync(durationCmd);
+          duration = parseFloat(durationStr.trim());
+        } catch (_) {}
         
         if (isNaN(duration) || duration <= 0) {
-          throw new Error('无法获取视频时长');
+          // 回退：通过帧数 + 帧率推算时长
+          try {
+            const probeCmd = `ffprobe -v error -count_frames -select_streams v:0 -show_entries stream=nb_read_frames,r_frame_rate -of csv=p=0 "${videoPath}"`;
+            const { stdout: probeStr } = await execAsync(probeCmd, { timeout: 30000 });
+            const parts = probeStr.trim().split(',');
+            if (parts.length >= 2) {
+              const frac = parts[0].split('/');
+              const fps = frac.length === 2 ? parseInt(frac[0]) / parseInt(frac[1]) : parseFloat(frac[0]);
+              const nbFrames = parseInt(parts[1]);
+              if (fps > 0 && nbFrames > 0) duration = nbFrames / fps;
+            }
+          } catch (_) {}
         }
         
-        console.log(`   ⏱️ 视频时长: ${duration.toFixed(2)}s`);
+        if (isNaN(duration) || duration <= 0) {
+          throw new Error('无法获取文件时长');
+        }
         
-        // 提取帧 - 优化：一次性提取所有帧，避免多次 ffmpeg 启动开销
+        console.log(`   ⏱️ ${isGifFile ? 'GIF' : '视频'}时长: ${duration.toFixed(2)}s`);
+        
         const frames = [];
-        const actualFrameCount = Math.min(frameCount, 150); // 最多150帧
+        const actualFrameCount = Math.min(frameCount, 150);
         
-        // 计算目标帧率：帧数 / 时长
-        const targetFps = actualFrameCount / duration;
-        
-        // 使用单个 ffmpeg 命令一次性提取所有帧（更高效）
-        const extractAllCmd = `ffmpeg -y -i "${videoPath}" -vf "fps=${targetFps},scale=-1:600" "${tempDir}/frame_%03d.png"`;
-        
-        try {
-          await execAsync(extractAllCmd, { timeout: 60000 });
-        } catch (e) {
-          console.warn(`   ⚠️  批量提取失败，回退到逐帧提取: ${e.message}`);
-          // 回退到逐帧提取
-          for (let i = 0; i < actualFrameCount; i++) {
-            const timestamp = (duration * i) / (actualFrameCount - 1);
-            const framePath = path.join(tempDir, `frame_${i.toString().padStart(3, '0')}.png`);
-            const extractCmd = `ffmpeg -y -ss ${timestamp.toFixed(3)} -i "${videoPath}" -vframes 1 -vf "scale=-1:600" "${framePath}"`;
-            await execAsync(extractCmd);
-          }
-        }
-        
-        // 读取所有提取的帧
-        const frameFiles = fs.readdirSync(tempDir)
-          .filter(f => f.startsWith('frame_') && f.endsWith('.png'))
-          .sort();
-        
-        const totalFrames = frameFiles.length;
-        
-        for (let i = 0; i < totalFrames; i++) {
-          const framePath = path.join(tempDir, frameFiles[i]);
-          const percent = totalFrames > 1 ? (i / (totalFrames - 1)) * 100 : 0;
+        if (isGifFile) {
+          // GIF：先用 -vsync 0 提取所有原始帧（保留逐帧延迟），再均匀采样
+          const allFramesDir = path.join(tempDir, 'all');
+          fs.mkdirSync(allFramesDir, { recursive: true });
+          const extractGifCmd = `ffmpeg -y -i "${videoPath}" -vsync 0 -vf "scale=-1:600" "${allFramesDir}/f_%04d.png"`;
+          await execAsync(extractGifCmd, { timeout: 60000 });
           
-          if (fs.existsSync(framePath)) {
-            const frameData = fs.readFileSync(framePath);
-            frames.push({
-              percent: percent,
-              data: frameData.toString('base64')
-            });
-            // 删除临时文件
-            fs.unlinkSync(framePath);
+          const allFiles = fs.readdirSync(allFramesDir).filter(f => f.endsWith('.png')).sort();
+          const totalGifFrames = allFiles.length;
+          
+          if (totalGifFrames === 0) throw new Error('GIF 帧提取为空');
+          
+          // 均匀采样到 actualFrameCount 帧
+          const step = totalGifFrames <= actualFrameCount
+            ? 1
+            : totalGifFrames / actualFrameCount;
+          const sampleIndices = [];
+          for (let i = 0; i < Math.min(totalGifFrames, actualFrameCount); i++) {
+            sampleIndices.push(Math.min(Math.round(i * step), totalGifFrames - 1));
+          }
+          // 确保最后一帧
+          if (sampleIndices[sampleIndices.length - 1] !== totalGifFrames - 1) {
+            sampleIndices.push(totalGifFrames - 1);
+          }
+          
+          for (let si = 0; si < sampleIndices.length; si++) {
+            const idx = sampleIndices[si];
+            const framePath = path.join(allFramesDir, allFiles[idx]);
+            const percent = totalGifFrames > 1 ? (idx / (totalGifFrames - 1)) * 100 : 0;
+            if (fs.existsSync(framePath)) {
+              frames.push({
+                percent,
+                data: fs.readFileSync(framePath).toString('base64')
+              });
+            }
+          }
+          
+          // 清理 all frames 目录
+          for (const f of allFiles) {
+            try { fs.unlinkSync(path.join(allFramesDir, f)); } catch (_) {}
+          }
+          try { fs.rmdirSync(allFramesDir); } catch (_) {}
+        } else {
+          // 视频：按目标帧率提取
+          const targetFps = actualFrameCount / duration;
+          const extractAllCmd = `ffmpeg -y -i "${videoPath}" -vf "fps=${targetFps},scale=-1:600" "${tempDir}/frame_%03d.png"`;
+          
+          try {
+            await execAsync(extractAllCmd, { timeout: 60000 });
+          } catch (e) {
+            console.warn(`   ⚠️  批量提取失败，回退到逐帧提取: ${e.message}`);
+            for (let i = 0; i < actualFrameCount; i++) {
+              const timestamp = (duration * i) / (actualFrameCount - 1);
+              const framePath = path.join(tempDir, `frame_${i.toString().padStart(3, '0')}.png`);
+              const extractCmd = `ffmpeg -y -ss ${timestamp.toFixed(3)} -i "${videoPath}" -vframes 1 -vf "scale=-1:600" "${framePath}"`;
+              await execAsync(extractCmd);
+            }
+          }
+          
+          const frameFiles = fs.readdirSync(tempDir)
+            .filter(f => f.startsWith('frame_') && f.endsWith('.png'))
+            .sort();
+          
+          const totalFrames = frameFiles.length;
+          
+          for (let i = 0; i < totalFrames; i++) {
+            const framePath = path.join(tempDir, frameFiles[i]);
+            const percent = totalFrames > 1 ? (i / (totalFrames - 1)) * 100 : 0;
+            
+            if (fs.existsSync(framePath)) {
+              frames.push({
+                percent,
+                data: fs.readFileSync(framePath).toString('base64')
+              });
+              fs.unlinkSync(framePath);
+            }
           }
         }
         
-        // 清理临时目录
+        // 清理临时目录（可能含嵌套子目录）
         try {
-          fs.rmdirSync(tempDir);
+          removeDirRecursive(tempDir);
         } catch (e) {
           // ignore
         }
@@ -2760,6 +2859,13 @@ wss.on('connection', (ws, req) => {
             console.error(`   ⚠️  清理临时文件失败:`, cleanupError.message);
           }
           
+          return;
+        }
+        
+        // 被取消后的残余错误（进程被 kill 导致 Command failed），按取消处理
+        if (cancelFlags.get(connectionId) === true) {
+          console.log('\n🛑 GIF 导出已取消（残余进程错误已忽略）');
+          console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
           return;
         }
         
@@ -2999,8 +3105,9 @@ wss.on('connection', (ws, req) => {
       return;
     }
     
-    // 手动同步相关消息 → 转发到 Figma
-    if (['manual-sync-complete', 'manual-sync-file-count', 'manual-sync-progress',
+    // 同步相关消息 → 转发到 Figma
+    if (['manual-sync-complete', 'manual-sync-cancelled', 'manual-sync-file-count', 'manual-sync-progress',
+         'conversion-progress', 'oversized-files-cleaned',
          'gif-backup-setting-updated', 'keep-gif-in-icloud-setting-updated'].includes(data.type)) {
       sendToFigma(targetGroup, data);
       return;

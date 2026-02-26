@@ -8,6 +8,8 @@ sharp.simd(false); // 禁用 SIMD
 sharp.concurrency(1); // 限制并发
 
 const { exec } = require('child_process');
+const { promisify } = require('util');
+const execAsync = promisify(exec);
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -220,13 +222,8 @@ async function saveFileToLocalFolder(buffer, filename, mimeType, isExportedGif =
     if (isExportedGif) {
       // 导出的GIF
       subfolderName = 'GIF-导出';
-      filePrefix = 'ScreenRecordingGIF';  // 修改：统一命名格式
+      filePrefix = 'ScreenRecordingGIF';
       extensions = ['.gif'];
-    } else if (isVideo) {
-      // 视频
-      subfolderName = '视频';
-      filePrefix = 'ScreenRecordingVid';  // 修改：统一命名格式
-      extensions = ['.mp4', '.mov'];
     } else if (isGif) {
       // GIF
       subfolderName = 'GIF';
@@ -400,16 +397,43 @@ async function initializeUserFolder() {
 let ws = null;
 let pollTimer = null;
 let isRealTimeMode = false;
+
+function sendProgress(type, data) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    try { ws.send(JSON.stringify({ type, ...data })); } catch (_) {}
+  }
+}
+
 let wasRealTimeMode = false; // 记录断开前是否是实时模式，用于重连后恢复
 let isPolling = false;
 let lastPollTime = null;
 let realTimeStart = null;
 let isSyncing = false; // 防止重复触发手动同步
+let manualSyncAbortRequested = false;
+let manualSyncRunId = 0;
+let lastDeepCleanupAt = 0;
 
 const knownFileIds = new Set();
 const knownFileMD5s = new Map(); // md5Checksum -> { fileId, filename, createdTime } - 用于去重
 const pendingDeletes = new Map(); // fileId -> { filename, timestamp }
+const processingFileIds = new Set(); // 正在处理中的文件 ID — 全局互斥锁，防止同一文件被实时同步和手动同步同时处理
 const MAX_KNOWN_FILES = 10000; // 限制已知文件数量，防止内存无限增长
+const DEEP_CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000; // 每 6 小时做一次深度清理
+const STALE_TEMP_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 临时文件保留 24 小时
+const MANUAL_SYNC_CANCELLED_CODE = 'MANUAL_SYNC_CANCELLED';
+
+function createManualSyncCancelledError() {
+  const error = new Error('手动同步已取消');
+  error.code = MANUAL_SYNC_CANCELLED_CODE;
+  return error;
+}
+
+function isManualSyncCancelledError(error) {
+  if (!error) return false;
+  if (error.code === MANUAL_SYNC_CANCELLED_CODE) return true;
+  const msg = String(error.message || '');
+  return msg.includes('手动同步已取消') || msg.includes(MANUAL_SYNC_CANCELLED_CODE);
+}
 
 // 安全的 WebSocket 消息发送函数，防止发送失败导致崩溃
 function safeSend(message) {
@@ -427,12 +451,16 @@ function safeSend(message) {
   }
 }
 
-// 清理文件的所有记录（从knownFileIds和knownFileMD5s中移除）
+function requestManualSyncCancel() {
+  if (!isSyncing) return false;
+  manualSyncAbortRequested = true;
+  return true;
+}
+
+// 清理文件的所有记录（从knownFileIds、knownFileMD5s、processingFileIds中移除）
 function cleanupFileRecord(fileId, md5Checksum = null) {
-  // 从knownFileIds中移除
-  if (knownFileIds.has(fileId)) {
-    knownFileIds.delete(fileId);
-  }
+  knownFileIds.delete(fileId);
+  processingFileIds.delete(fileId);
   
   // 从knownFileMD5s中移除（如果提供了MD5）
   if (md5Checksum && knownFileMD5s.has(md5Checksum)) {
@@ -464,8 +492,9 @@ async function initializeKnownFiles() {
   const queryStart = new Date(realTimeStart.getTime() - 60000);
   lastPollTime = queryStart.toISOString();
   
-  // 清空已知文件列表
+  // 清空已知文件列表和处理锁
   knownFileIds.clear();
+  processingFileIds.clear();
   
   try {
     // 获取所有现有的图片文件
@@ -609,46 +638,77 @@ async function pollDrive() {
       console.log(`🔄 [Drive] 检测到 ${newFiles.length} 个新文件，并发处理...`);
       
       // 并发处理新文件（提高多图同步速度）
-      const promises = newFiles.map(async (file) => {
+      const IMAGE_TIMEOUT_MS = 60000; // 图片 60 秒
+      const VIDEO_TIMEOUT_MS = 180000; // 视频→GIF 转换需要更多时间：3 分钟
+      const oversizedFiles = []; // 记录因超时被清理的文件
+      
+      // 分类：图片优先即时同步，录屏异步进入转换队列
+      const imageFiles = [];
+      const videoFiles = [];
+      for (const file of newFiles) {
+        const fName = (file.name || '').toLowerCase();
+        const fMime = (file.mimeType || '').toLowerCase();
+        const isVideoFile = fName.endsWith('.mp4') || fName.endsWith('.mov') || fMime.startsWith('video/');
+        (isVideoFile ? videoFiles : imageFiles).push(file);
+      }
+      
+      if (imageFiles.length > 0) {
+        console.log(`   📸 ${imageFiles.length} 张图片即时同步...`);
+      }
+      if (videoFiles.length > 0) {
+        console.log(`   🎬 ${videoFiles.length} 段录屏进入转换队列...`);
+      }
+      
+      const processFile = async (file, timeoutMs) => {
+        const fileTimeout = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error(`SYNC_TIMEOUT:${file.name}`)), timeoutMs);
+        });
         try {
-          // 检测文件类型，如果是 GIF，给予更长的超时时间
-          const isGif = file.name.toLowerCase().endsWith('.gif') || (file.mimeType && file.mimeType.toLowerCase() === 'image/gif');
-          // GIF 文件给予 5 分钟超时，普通图片 60 秒
-          const timeoutMs = isGif ? 300000 : 60000;
-
-          // 为每个文件添加超时保护
-          const fileTimeout = new Promise((_, reject) => {
-            setTimeout(() => reject(new Error(`处理文件超时（${file.name}）`)), timeoutMs);
-          });
-          
-          await Promise.race([
-            handleDriveFile(file, true),
-            fileTimeout
-          ]);
+          await Promise.race([handleDriveFile(file, true), fileTimeout]);
         } catch (fileError) {
-          console.error(`   ❌ 处理文件失败: ${file.name}`, fileError.message);
-          // 失败时移除，以便重试
-          // 但如果是超时错误，暂不移除，防止因后台仍在运行导致重复处理
-          if (!fileError.message.includes('超时')) {
-            knownFileIds.delete(file.id);
+          const isTimeout = fileError.message.startsWith('SYNC_TIMEOUT:') || fileError.message.includes('超时');
+          if (isTimeout) {
+            oversizedFiles.push(file.name);
+            try {
+              await trashFile(file.id);
+              cleanupFileRecord(file.id, file.md5Checksum);
+              console.log(`   🗑️  已从云端清理: ${file.name}`);
+            } catch (_) {}
           } else {
-            console.warn(`   ⚠️  文件处理超时，保留在已知列表中防止重复处理: ${file.name}`);
+            console.error(`   ❌ 处理文件失败: ${file.name}`, fileError.message);
+            knownFileIds.delete(file.id);
           }
         }
-      });
+      };
       
-      // 为整个并发处理添加总体超时（最多10分钟）
+      // 图片即时并发同步（不阻塞录屏处理）
+      const imagePromises = imageFiles.map(f => processFile(f, IMAGE_TIMEOUT_MS));
+      // 录屏异步并发转换（各自独立超时，不阻塞图片）
+      const videoPromises = videoFiles.map(f => processFile(f, VIDEO_TIMEOUT_MS));
+      
+      // 等待全部完成（图片通常很快，录屏转换较慢但各自独立）
       const allTimeout = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('批量处理超时（超过10分钟）')), 600000);
+        setTimeout(() => reject(new Error('批量处理超时')), VIDEO_TIMEOUT_MS + 30000);
       });
       
       try {
         await Promise.race([
-          Promise.all(promises),
+          Promise.all([...imagePromises, ...videoPromises]),
           allTimeout
         ]);
       } catch (timeoutError) {
         console.error('⚠️  批量处理超时，部分文件可能未处理完成');
+      }
+      
+      // 通知 Figma 插件有文件因超时被清理
+      if (oversizedFiles.length > 0 && ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'oversized-files-cleaned',
+          reason: 'timeout',
+          count: oversizedFiles.length,
+          filenames: oversizedFiles
+        }));
+        console.log(`   📨 已通知插件：${oversizedFiles.length} 个超时文件已从云端清理`);
       }
     }
     
@@ -666,18 +726,50 @@ async function pollDrive() {
   }
 }
 
-async function handleDriveFile(file, deleteAfterSync = false) {
+async function handleDriveFile(file, deleteAfterSync = false, progressCb = null, shouldAbort = null) {
+  // 全局互斥：同一个文件 ID 不允许并发处理
+  if (processingFileIds.has(file.id)) {
+    console.log(`   ⏭️  [去重] 文件正在处理中，跳过: ${file.name} (${file.id})`);
+    return; // 静默跳过，不抛异常
+  }
+  processingFileIds.add(file.id);
+  
   try {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       throw new Error('服务器未连接');
     }
+    const throwIfAborted = () => {
+      if (typeof shouldAbort === 'function' && shouldAbort()) {
+        throw createManualSyncCancelledError();
+      }
+    };
+    throwIfAborted();
 
     const startTime = Date.now();
+    const emitProgress = (stage, percent, extra = {}) => {
+      throwIfAborted();
+      if (progressCb) progressCb(stage, percent, extra);
+      sendProgress('conversion-progress', {
+        filename: file.name,
+        fileId: file.id,
+        stage, percent,
+        elapsed: Date.now() - startTime,
+        ...extra
+      });
+    };
 
+    // 预判文件类型（基于元数据，用于进度显示）
+    const fileNameLower = (file.name || '').toLowerCase();
+    const fileMimeLower = (file.mimeType || '').toLowerCase();
+    const looksLikeVideo = fileNameLower.endsWith('.mp4') || fileNameLower.endsWith('.mov') || fileMimeLower.startsWith('video/');
+    
+    emitProgress('downloading', 5, looksLikeVideo ? { isVideo: true } : {});
     let backedUpLocally = false;
     let gifCacheId = null;
     let originalBuffer = await downloadFileBuffer(file.id);
+    throwIfAborted();
     const downloadedSizeKB = (originalBuffer.length / 1024).toFixed(2);
+    emitProgress('downloading', 20, { sizeKB: parseFloat(downloadedSizeKB), ...(looksLikeVideo ? { isVideo: true } : {}) });
     
     let processedBuffer = originalBuffer;
     const processStartTime = Date.now();
@@ -737,71 +829,115 @@ async function handleDriveFile(file, deleteAfterSync = false) {
       }
     }
     
+    let conversionOk = false; // 标记视频→GIF 转换是否成功
+    
     if (isVideo) {
-      // 视频格式（MP4 或 MOV）- Figma 插件 API 不支持视频文件，跳过处理
-      const videoFormat = fileName.endsWith('.mp4') ? 'MP4' : 'MOV';
+      const videoSizeMB = (originalBuffer.length / 1024 / 1024).toFixed(1);
+      const convStartTime = Date.now();
+      console.log(`   🎬 [Video→GIF] 开始转换 ${file.name} (${videoSizeMB}MB)...`);
       
-      // 验证 MOV 文件格式（检查文件头）
-      if (videoFormat === 'MOV') {
-        const fileHeader = originalBuffer.slice(0, 12).toString('ascii');
-        const isValidMOV = fileHeader.includes('ftyp') || 
-                          fileHeader.includes('moov') || 
-                          fileHeader.includes('mdat') ||
-                          originalBuffer.slice(4, 8).toString('ascii').includes('qt');
-        
-        if (!isValidMOV && originalBuffer.length > 0) {
-        }
-      }
+      // 基于文件大小估算转换时间（约 2 秒/MB）
+      const estimatedSec = Math.max(5, Math.ceil(parseFloat(videoSizeMB) * 2));
+      emitProgress('converting', 25, { estimatedSec, isVideo: true });
       
-      // 自动保存到缓存（用于导出带标注的 GIF 功能）
+      const tempDir = path.join(os.tmpdir(), `screensync-v2g-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`);
+      fs.mkdirSync(tempDir, { recursive: true });
+      
+      const videoExt = fileName.endsWith('.mov') ? '.mov' : '.mp4';
+      const tempVideoPath = path.join(tempDir, `input${videoExt}`);
+      const tempGifOut = path.join(tempDir, 'output.gif');
+      
       try {
-        const cacheResult = userConfig.saveGifToCache(originalBuffer, file.name, file.id);
-        if (cacheResult) {
-          gifCacheId = cacheResult.cacheId;
-        }
-      } catch (cacheError) {
-        console.error(`   ⚠️  [GIF Cache] 缓存失败:`, cacheError.message);
-      }
-      
-      // 将文件保存到本地文件夹，方便用户手动拖入
-      const saved = await saveFileToLocalFolder(originalBuffer, file.name, file.mimeType);
-      if (saved) {
-        // 保存文件名和 cacheId 的映射关系
-        if (gifCacheId) {
-          saveCacheMapping(file.name, gifCacheId);
+        throwIfAborted();
+        fs.writeFileSync(tempVideoPath, originalBuffer);
+        emitProgress('converting', 30, { estimatedSec, isVideo: true });
+        
+        // 并行：缓存原始视频到 GIF 缓存（用于后续导出），但不保留本地视频文件
+        const cachePromise = (async () => {
+          try {
+            const r = userConfig.saveGifToCache(originalBuffer, file.name, file.id);
+            if (r) gifCacheId = r.cacheId;
+          } catch (_) {}
+          originalBuffer = null;
+        })();
+        
+        // 真正的两遍调色板（与导出 GIF 算法一致，色彩最优）
+        //   Pass 1: palettegen stats_mode=full → palette.png（分析全部帧全部像素）
+        //   Pass 2: paletteuse dither=sierra2_4a + diff_mode=rectangle → output.gif
+        //   lanczos 缩放 + 硬件解码 + 多线程
+        const tempPalette = path.join(tempDir, 'palette.png');
+        const scaleFilter = `fps=15,scale='trunc(iw/4)*2':'trunc(ih/4)*2':flags=lanczos`;
+        
+        const pass1Cmd = `ffmpeg -hwaccel auto -threads 0 -i "${tempVideoPath}" -vf "${scaleFilter},palettegen=max_colors=256:stats_mode=full" -y "${tempPalette}"`;
+        await execAsync(pass1Cmd, { timeout: 90000, maxBuffer: 50 * 1024 * 1024 });
+        throwIfAborted();
+        
+        emitProgress('converting', 55, { estimatedSec, isVideo: true });
+        
+        const pass2Cmd = `ffmpeg -hwaccel auto -threads 0 -i "${tempVideoPath}" -i "${tempPalette}" -lavfi "${scaleFilter}[v];[v][1:v]paletteuse=dither=sierra2_4a:diff_mode=rectangle" -threads 0 -loop 0 -y "${tempGifOut}"`;
+        const convPromise = execAsync(pass2Cmd, { timeout: 180000, maxBuffer: 200 * 1024 * 1024 });
+        
+        // 等待转换和缓存并行完成
+        await Promise.all([convPromise, cachePromise]);
+        throwIfAborted();
+        
+        if (!fs.existsSync(tempGifOut) || fs.statSync(tempGifOut).size === 0) {
+          throw new Error('转换输出为空');
         }
         
-        // 下载成功后，删除 Drive 中的文件
+        emitProgress('converting', 80, { isVideo: true });
+        
+        const gifBuffer = fs.readFileSync(tempGifOut);
+        const gifSizeMB = (gifBuffer.length / 1024 / 1024).toFixed(1);
+        const convTime = ((Date.now() - convStartTime) / 1000).toFixed(1);
+        console.log(`   ✅ [Video→GIF] ${videoSizeMB}MB → ${gifSizeMB}MB GIF (${convTime}秒)`);
+        
+        processedBuffer = gifBuffer;
+        file.name = file.name.replace(/\.(mov|mp4)$/i, '.gif');
+        file.mimeType = 'image/gif';
+        isVideo = false;
+        isGif = true;
+        conversionOk = true;
+        
+        // 保存转换后的 GIF 到缓存 + 本地备份（轻量操作，串行即可）
         try {
-          await trashFile(file.id);
-          cleanupFileRecord(file.id, file.md5Checksum);
-        } catch (error) {
-          const errorMsg = error.message || String(error);
-          if (errorMsg.includes('not found') || errorMsg.includes('404')) {
-            cleanupFileRecord(file.id, file.md5Checksum);
-          } else {
-            console.error(`   ⚠️  删除 Drive 文件失败 (${file.name}):`, errorMsg);
-          }
+          const gifCacheResult = userConfig.saveGifToCache(processedBuffer, file.name, file.id);
+          if (gifCacheResult) gifCacheId = gifCacheResult.cacheId;
+        } catch (_) {}
+        
+        const backupMode = userConfig.getBackupMode();
+        if (backupMode === 'gif_only' || backupMode === 'all') {
+          const sr = await saveFileToLocalFolder(processedBuffer, file.name, 'image/gif');
+          backedUpLocally = (sr && sr.success && sr.isNew) || false;
         }
-      } else {
-        console.warn(`   ⚠️  文件保存失败，保留 Drive 文件以便重试: ${file.name}`);
+        
+        if (processedBuffer.length > 100 * 1024 * 1024) {
+          console.warn(`   ⚠️  [Video→GIF] GIF ${gifSizeMB}MB > 100MB，需手动导入`);
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'file-skipped', filename: file.name, reason: 'gif-too-large', gifCacheId, driveFileId: file.id }));
+          }
+          try { await trashFile(file.id); cleanupFileRecord(file.id, file.md5Checksum); } catch (_) {}
+          return;
+        }
+      } catch (convErr) {
+        if (isManualSyncCancelledError(convErr)) {
+          throw convErr;
+        }
+        console.error(`   ❌ [Video→GIF] 转换失败 (${((Date.now() - convStartTime) / 1000).toFixed(1)}秒): ${convErr.message}`);
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'file-skipped', filename: file.name, reason: 'video', gifCacheId, driveFileId: file.id }));
+        }
+        try { await trashFile(file.id); cleanupFileRecord(file.id, file.md5Checksum); } catch (_) {}
+        return;
+      } finally {
+        try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch (_) {}
       }
-      
-      // 通知 Figma 插件此文件需要手动拖入，并传递缓存信息以便自动关联
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({
-          type: 'file-skipped',
-          filename: file.name,
-          reason: 'video', // 统一使用 video，包含 mp4 和 mov
-          gifCacheId: gifCacheId, // ✅ 传递缓存ID，用于导出时自动查找
-          driveFileId: file.id     // ✅ 传递Drive文件ID
-        }));
-      }
-      
-      // 跳过此文件，不发送到 Figma
-      return;
+    }
+    
+    if (conversionOk) {
+      // 视频→GIF 转换完成，processedBuffer 已设好，跳过所有格式处理直接进入发送
     } else if (isGif) {
-      
+      // 原始 GIF 文件处理
       const originalSize = originalBuffer.length;
       const maxGifSize = 100 * 1024 * 1024; // 100MB（防止 Figma 死机）
       
@@ -887,6 +1023,7 @@ async function handleDriveFile(file, deleteAfterSync = false) {
       let tempOutputPath = path.join(os.tmpdir(), `jpeg-output-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.jpg`);
       
       try {
+        throwIfAborted();
         // 写入临时文件
         fs.writeFileSync(tempInputPath, originalBuffer);
         
@@ -915,6 +1052,7 @@ async function handleDriveFile(file, deleteAfterSync = false) {
         
         // 读取转换后的 JPEG 文件
         let convertedBuffer = fs.readFileSync(outputPath);
+        throwIfAborted();
         
         // 使用 sharp 对转换后的 JPEG 进行压缩和调整大小
         processedBuffer = await sharp(convertedBuffer)
@@ -937,6 +1075,9 @@ async function handleDriveFile(file, deleteAfterSync = false) {
         originalBuffer = null;
         convertedBuffer = null;
       } catch (sipsError) {
+        if (isManualSyncCancelledError(sipsError)) {
+          throw sipsError;
+        }
         console.error(`   ❌ sips 转换失败: ${sipsError.message}`);
         // 清理临时文件（如果存在）
         try {
@@ -989,23 +1130,29 @@ async function handleDriveFile(file, deleteAfterSync = false) {
       }
     }
 
-    // 使用 base64 编码，避免 Array.from 创建巨大数组占用内存
+    emitProgress('importing', 90, looksLikeVideo ? { isVideo: true } : {});
+    throwIfAborted();
+    
     const base64String = processedBuffer.toString('base64');
-    processedBuffer = null; // 立即释放内存
+    processedBuffer = null;
 
     const payload = {
       type: 'screenshot',
-      bytes: base64String, // 直接使用 base64 字符串，Figma 端需要解码
+      bytes: base64String,
       timestamp: Date.now(),
       filename: file.name,
       driveFileId: file.id,
-      backedUpLocally: backedUpLocally || false, // 确保 backedUpLocally 始终有值
-      gifCacheId: gifCacheId || null // GIF 缓存 ID（用于导出带标注的 GIF）
+      backedUpLocally: backedUpLocally || false,
+      isGif: !!isGif,
+      gifCacheId: gifCacheId || null
     };
 
+    throwIfAborted();
     ws.send(JSON.stringify(payload));
+    emitProgress('done', 100, looksLikeVideo ? { isVideo: true } : {});
 
     if (deleteAfterSync && CONFIG.autoDelete) {
+      throwIfAborted();
       pendingDeletes.set(file.id, {
         filename: file.name,
         timestamp: Date.now()
@@ -1020,9 +1167,13 @@ async function handleDriveFile(file, deleteAfterSync = false) {
       }, confirmTimeout);
     }
   } catch (error) {
+    if (isManualSyncCancelledError(error)) {
+      throw error;
+    }
     console.error(`   ❌ 处理 Drive 文件失败 (${file.name}):`, error.message);
-    // 重新抛出异常，让调用者知道处理失败
     throw error;
+  } finally {
+    processingFileIds.delete(file.id);
   }
 }
 
@@ -1093,6 +1244,12 @@ async function performManualSync() {
   }
   
   isSyncing = true; // 标记为正在同步
+  manualSyncAbortRequested = false;
+  const currentRunId = ++manualSyncRunId;
+  const shouldAbort = () => manualSyncAbortRequested || currentRunId !== manualSyncRunId;
+  const throwIfManualSyncAborted = () => {
+    if (shouldAbort()) throw createManualSyncCancelledError();
+  };
   
   // 如果用户文件夹未初始化，尝试重新初始化（可能是第一次使用，用户刚上传文件）
   if (!CONFIG.userFolderId) {
@@ -1140,89 +1297,39 @@ async function performManualSync() {
   });
   
   const syncTask = (async () => {
-    // 添加额外的超时保护
+    throwIfManualSyncAborted();
+    // 单次 API 调用获取文件列表（请求 size 字段代替 md5Checksum，减少 API 开销）
     const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error('获取文件列表超时（超过40秒）')), 40000);
+      setTimeout(() => reject(new Error('获取文件列表超时（超过30秒）')), 30000);
     });
     
     const listPromise = listFolderFiles({ 
       folderId: CONFIG.userFolderId, 
-      pageSize: 200, 
-      orderBy: 'createdTime asc' 
+      pageSize: 500, 
+      orderBy: 'createdTime desc',
+      fields: 'files(id,name,mimeType,createdTime,modifiedTime,size,parents,md5Checksum),nextPageToken'
     });
     
     const { files } = await Promise.race([listPromise, timeoutPromise]);
+    throwIfManualSyncAborted();
 
-    // 过滤图片和视频文件
-    const imageFiles = files.filter(file => {
+    // 手动同步：只做媒体过滤，不做 MD5 去重
+    // 原因：用户期望“云端有多少文件就同步多少文件”，即使内容相同也要全部计入
+    const refreshedFiles = [];
+    
+    for (const file of files) {
+      throwIfManualSyncAborted();
       const mimeType = file.mimeType || '';
       const name = file.name || '';
       
-      // 忽略 _exported 结尾的文件（这是服务器自己生成的导出 GIF）
-      if (name.toLowerCase().includes('_exported')) {
-        return false;
-      }
+      if (name.toLowerCase().includes('_exported')) continue;
       
-      return mimeType.startsWith('image/') || mimeType.startsWith('video/') ||
-             /\.(jpg|jpeg|png|gif|webp|heic|heif|mp4|mov)$/i.test(name);
-    });
-    const md5Map = new Map(); // 临时MD5映射，用于本次手动同步
-    let duplicateCount = 0;
-    let filesWithMD5 = 0;
-    let filesWithoutMD5 = 0;
-    
-    for (const file of imageFiles) {
-      if (file.md5Checksum) {
-        filesWithMD5++;
-        if (md5Map.has(file.md5Checksum)) {
-          // 发现重复文件
-          const existingFile = md5Map.get(file.md5Checksum);
-          const existingTime = new Date(existingFile.createdTime);
-          const currentTime = new Date(file.createdTime);
-          
-          // 保留较早上传的文件，删除较晚的
-          let fileToDelete, fileToKeep;
-          if (currentTime < existingTime) {
-            fileToDelete = existingFile;
-            fileToKeep = file;
-            md5Map.set(file.md5Checksum, file); // 更新映射
-          } else {
-            fileToDelete = file;
-            fileToKeep = existingFile;
-          }
-          
-          try {
-            await trashFile(fileToDelete.id);
-            duplicateCount++;
-          } catch (deleteError) {
-            console.error(`      ❌ 删除失败:`, deleteError.message);
-          }
-        } else {
-          md5Map.set(file.md5Checksum, file);
-        }
-      } else {
-        filesWithoutMD5++;
-      }
+      const isMedia = mimeType.startsWith('image/') || mimeType.startsWith('video/') ||
+                      /\.(jpg|jpeg|png|gif|webp|heic|heif|mp4|mov)$/i.test(name);
+      if (!isMedia) continue;
+      
+      refreshedFiles.push(file);
     }
-    
-    if (duplicateCount > 0) {
-      console.log(`   ✨ 已清理 ${duplicateCount} 个重复文件`);
-    }
-    
-    // 重新获取文件列表（去重后）
-    const refreshResult = await listFolderFiles({ 
-      folderId: CONFIG.userFolderId, 
-      pageSize: 500,
-      orderBy: 'createdTime desc'
-    });
-    
-    const refreshedFiles = (refreshResult.files || []).filter(file => {
-      const mimeType = file.mimeType || '';
-      const name = file.name || '';
-      if (name.toLowerCase().includes('_exported')) return false;
-      return mimeType.startsWith('image/') || mimeType.startsWith('video/') ||
-             /\.(jpg|jpeg|png|gif|webp|heic|heif|mp4|mov)$/i.test(name);
-    });
     
     if (refreshedFiles.length === 0) {
       console.log(`   ℹ️  没有文件需要同步`);
@@ -1238,163 +1345,231 @@ async function performManualSync() {
     }
 
     let success = 0;
-    let imageCount = 0; // ✅ 统计成功导入的纯图片数量
-    let gifCount = 0; // ✅ 统计 GIF 数量（包括成功导入的和跳过的）
-    let videoCount = 0; // ✅ 统计视频数量（全部跳过保存到本地）
-    // 收集所有处理过程中的错误
+    let imageCount = 0;
+    let gifCount = 0;
     const processingErrors = [];
+    let completedCount = 0;
+    const totalFiles = refreshedFiles.length;
+    
+    // 分类统计
+    const videoFileCount = refreshedFiles.filter(f => {
+      const n = (f.name || '').toLowerCase();
+      const m = (f.mimeType || '').toLowerCase();
+      return n.endsWith('.mp4') || n.endsWith('.mov') || m.startsWith('video/');
+    }).length;
+    const imageFileCount = totalFiles - videoFileCount;
+    
+    // 发送初始信息（含总文件数，UI 显示 "共 N 个文件"）
+    sendProgress('manual-sync-progress', {
+      total: totalFiles, completed: 0, percent: 0,
+      fileIndex: 0, filename: '', filePercent: 0, stage: 'counting'
+    });
     
     const backupMode = userConfig.getBackupMode();
     const shouldBackupGif = (backupMode === 'gif_only' || backupMode === 'all');
     
-    // 使用并发处理提升性能，但限制并发数避免过载
-    const CONCURRENT_LIMIT = 10; // ⚡ 提高并发：同时处理10个文件
     const results = [];
     
-    for (let i = 0; i < refreshedFiles.length; i += CONCURRENT_LIMIT) {
-      const batch = refreshedFiles.slice(i, i + CONCURRENT_LIMIT);
-      
-      const batchPromises = batch.map(async (file) => {
-      const wasKnown = knownFileIds.has(file.id);
-      if (!wasKnown) {
-        knownFileIds.add(file.id);
+    // 分类：图片/GIF 和 视频
+    const imageBatch = [];
+    const videoBatch = [];
+    for (const file of refreshedFiles) {
+      const fName = (file.name || '').toLowerCase();
+      const fMime = (file.mimeType || '').toLowerCase();
+      const isVideoItem = fName.endsWith('.mp4') || fName.endsWith('.mov') || fMime.startsWith('video/');
+      (isVideoItem ? videoBatch : imageBatch).push(file);
+    }
+    
+    // 统一的单文件处理函数（按固定序号发送进度，避免 X/Y 跳动）
+    const processOneFile = async (file, myIndex) => {
+      if (shouldAbort()) {
+        return { success: false, cancelled: true, file };
+      }
+      // 跳过正在被实时同步处理的文件
+      if (processingFileIds.has(file.id)) {
+        console.log(`   ⏭️  [手动同步-去重] 跳过正在处理中的文件: ${file.name}`);
+        return { success: false, skipped: true, duplicate: true, file };
       }
       
-        // 检测文件类型，如果是 GIF，给予更长的超时时间
-        const isGif = file.name.toLowerCase().endsWith('.gif') || (file.mimeType && file.mimeType.toLowerCase() === 'image/gif');
-        // GIF 文件给予 5 分钟超时，普通图片 60 秒
-        const timeoutMs = isGif ? 300000 : 60000;
-        
-        // 为每个文件添加超时保护
-        const fileTimeout = new Promise((_, reject) => {
-          setTimeout(() => reject(new Error(`处理文件超时（超过${timeoutMs/1000}秒）: ${file.name}`)), timeoutMs);
-        });
-        
-        const fileProcessing = (async () => {
-      try {
-        // 检查文件类型
-        const fileName = file.name.toLowerCase();
-        const mimeType = (file.mimeType || '').toLowerCase();
-        const isGif = fileName.endsWith('.gif') || mimeType === 'image/gif';
-        const isVideo = fileName.endsWith('.mp4') || fileName.endsWith('.mov') ||
-                        mimeType.startsWith('video/') ||
-                        mimeType === 'video/mp4' ||
-                        mimeType === 'video/quicktime';
-        
-        // ✅ 视频文件：处理后标记为 skipped（保存到本地但不导入 Figma）
-        if (isVideo) {
-          await handleDriveFile(file, true);
-          return { success: false, skipped: true, isVideo: true, file };
+      const wasKnown = knownFileIds.has(file.id);
+      if (!wasKnown) knownFileIds.add(file.id);
+      
+      const fName = file.name.toLowerCase();
+      const fMime = (file.mimeType || '').toLowerCase();
+      const isVideoItem = fName.endsWith('.mp4') || fName.endsWith('.mov') || fMime.startsWith('video/');
+      const timeoutMs = isVideoItem ? 180000 : 60000;
+      
+      const fileProgressCb = (stage, percent) => {
+        if (shouldAbort()) {
+          throw createManualSyncCancelledError();
         }
-        
-        // 如果是 GIF，先检查大小
-        if (isGif) {
-          try {
-            const originalBuffer = await downloadFileBuffer(file.id);
-            const originalSize = originalBuffer.length;
-            const maxGifSize = 100 * 1024 * 1024; // 100MB
-            
-            if (originalSize > maxGifSize) {
+        const filePct = Math.max(0, Math.min(100, Math.round(percent || 0)));
+        // 总进度按文件序号线性推进：第1/4在0-25%，第2/4在25-50%
+        const overallPct = totalFiles > 0
+          ? Math.min(99, Math.max(0, Math.round((((myIndex - 1) + (filePct / 100)) / totalFiles) * 100)))
+          : 0;
+        sendProgress('manual-sync-progress', {
+          total: totalFiles, completed: completedCount,
+          percent: overallPct,
+          fileIndex: myIndex, filename: file.name,
+          filePercent: filePct, stage
+        });
+      };
+      fileProgressCb('downloading', 0);
+      
+      const fileTimeout = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error(`SYNC_TIMEOUT:${file.name}`)), timeoutMs);
+      });
+      
+      const fileProcessing = (async () => {
+        try {
+          const fileName = file.name.toLowerCase();
+          const mimeType = (file.mimeType || '').toLowerCase();
+          const isGif = fileName.endsWith('.gif') || mimeType === 'image/gif';
+          const isVideo = fileName.endsWith('.mp4') || fileName.endsWith('.mov') ||
+                          mimeType.startsWith('video/') ||
+                          mimeType === 'video/mp4' ||
+                          mimeType === 'video/quicktime';
+          
+          if (isVideo) {
+            await handleDriveFile(file, true, fileProgressCb, shouldAbort);
+            return { success: true, isGif: true, file };
+          }
+          
+          if (isGif) {
+            const reportedSize = parseInt(file.size || '0', 10);
+            if (reportedSize > 100 * 1024 * 1024) {
               if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({
-                  type: 'file-skipped',
-                  filename: file.name,
-                  reason: 'gif-too-large'
-                }));
+                ws.send(JSON.stringify({ type: 'file-skipped', filename: file.name, reason: 'gif-too-large' }));
               }
-              // 大 GIF 也要调用 handleDriveFile 保存到本地
-              await handleDriveFile(file, true);
+              await handleDriveFile(file, true, fileProgressCb, shouldAbort);
               return { success: false, skipped: true, isGif: true, file };
             }
-          } catch (checkError) {
-            // 检查失败，继续处理
           }
-        }
-        
-        // 调用通用处理函数
-        await handleDriveFile(file, true);
-        // 普通图片或小 GIF 成功导入 Figma
-        return { success: true, isGif: isGif, file };
-      } catch (error) {
-        console.error(`   ❌ 处理文件失败: ${file.name}`, error.message);
-            processingErrors.push({
-              filename: file.name,
-              error: error.message,
-              stack: error.stack
-            });
-        if (!wasKnown) {
-          knownFileIds.delete(file.id);
-        }
-            return { success: false, error, file };
-          }
-        })();
-        
-        // 使用 Promise.race 实现超时
-        try {
-          return await Promise.race([fileProcessing, fileTimeout]);
-        } catch (timeoutError) {
-          console.error(`   ⏱️  ${timeoutError.message}`);
-          processingErrors.push({
-            filename: file.name,
-            error: timeoutError.message
-          });
-          if (!wasKnown) {
-            knownFileIds.delete(file.id);
-          }
-          return { success: false, timeout: true, file };
-        }
-      });
-      
-      const batchResults = await Promise.allSettled(batchPromises);
-      
-      // ✅ 统计本批次结果（分类统计图片、GIF、视频）
-      batchResults.forEach((result) => {
-        if (result.status === 'fulfilled' && result.value) {
-          const value = result.value;
-          const wasSuccess = value.success === true;
           
-          if (value.isVideo) {
-            // 视频文件（全部跳过保存到本地）
-            videoCount++;
-          } else if (value.isGif) {
-            // GIF 文件（无论成功导入还是跳过都计入 gifCount）
-            gifCount++;
-            if (wasSuccess) success++;
-          } else if (value.file) {
-            // 普通图片
-            if (wasSuccess) {
-              imageCount++;
-              success++;
-            }
+          await handleDriveFile(file, true, fileProgressCb, shouldAbort);
+          return { success: true, isGif: isGif, file };
+        } catch (error) {
+          if (isManualSyncCancelledError(error) || shouldAbort()) {
+            if (!wasKnown) knownFileIds.delete(file.id);
+            return { success: false, cancelled: true, file };
           }
+          console.error(`   ❌ 处理文件失败: ${file.name}`, error.message);
+          processingErrors.push({ filename: file.name, error: error.message, stack: error.stack });
+          if (!wasKnown) knownFileIds.delete(file.id);
+          return { success: false, error, file };
         }
-      });
+      })();
       
-      results.push(...batchResults);
-      
-      // 批次间短暂延迟，避免过载
-      if (i + CONCURRENT_LIMIT < refreshedFiles.length) {
-        await sleep(50); // ⚡ 减少批次间延迟：从200ms降到50ms
+      try {
+        return await Promise.race([fileProcessing, fileTimeout]);
+      } catch (timeoutError) {
+        if (isManualSyncCancelledError(timeoutError) || shouldAbort()) {
+          if (!wasKnown) knownFileIds.delete(file.id);
+          return { success: false, cancelled: true, file };
+        }
+        const isTimeout = timeoutError.message.startsWith('SYNC_TIMEOUT:') || timeoutError.message.includes('超时');
+        processingErrors.push({ filename: file.name, error: timeoutError.message });
+        if (isTimeout) {
+          try {
+            await trashFile(file.id);
+            cleanupFileRecord(file.id, file.md5Checksum);
+          } catch (_) {}
+        }
+        if (!wasKnown) knownFileIds.delete(file.id);
+        return { success: false, timeout: true, file, cleaned: isTimeout };
       }
+    };
+    
+    let skippedDuplicates = 0;
+    const orderedFiles = [...imageBatch, ...videoBatch];
+    let cancelled = false;
+    
+    // 顺序处理，确保副标题 X/Y 与当前文件进度稳定、准确
+    for (let i = 0; i < orderedFiles.length; i++) {
+      if (shouldAbort()) {
+        cancelled = true;
+        break;
+      }
+      const file = orderedFiles[i];
+      const fileOrder = i + 1;
+      const value = await processOneFile(file, fileOrder);
+      if (value && value.cancelled) {
+        cancelled = true;
+        break;
+      }
+      results.push({ status: 'fulfilled', value });
+      
+      if (value && value.duplicate) {
+        skippedDuplicates++;
+        completedCount++;
+        const dupPct = totalFiles > 0 ? Math.round((fileOrder / totalFiles) * 100) : 100;
+        sendProgress('manual-sync-progress', {
+          total: totalFiles, completed: completedCount, percent: dupPct,
+          fileIndex: fileOrder, filename: file.name, filePercent: 100, stage: 'file-done'
+        });
+        continue;
+      }
+      
+      const wasSuccess = value && value.success === true;
+      if (value && value.isGif) {
+        gifCount++;
+        if (wasSuccess) success++;
+      } else if (value && value.file) {
+        if (wasSuccess) { imageCount++; success++; }
+      }
+      
+      completedCount++;
+      const pct = totalFiles > 0 ? Math.round((fileOrder / totalFiles) * 100) : 100;
+      sendProgress('manual-sync-progress', {
+        total: totalFiles, completed: completedCount, percent: pct,
+        fileIndex: fileOrder, filename: '', filePercent: 100, stage: 'file-done'
+      });
     }
 
-    console.log(`\n✅ [Drive] 手动同步完成: ${success}/${refreshedFiles.length} 成功 (图片:${imageCount}, GIF:${gifCount}, 视频:${videoCount}${processingErrors.length > 0 ? `, 失败:${processingErrors.length}` : ''})`);
+    if (cancelled) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'manual-sync-cancelled',
+          count: success,
+          totalFiles,
+          imageCount,
+          gifCount,
+          completed: completedCount
+        }));
+      }
+      return;
+    }
+
+    // 收集因超时被清理的文件
+    const cleanedFiles = results
+      .filter(r => r.status === 'fulfilled' && r.value && r.value.cleaned)
+      .map(r => r.value.file.name);
+    
+    if (cleanedFiles.length > 0 && ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: 'oversized-files-cleaned',
+        reason: 'timeout',
+        count: cleanedFiles.length,
+        filenames: cleanedFiles
+      }));
+      console.log(`   📨 已通知插件：${cleanedFiles.length} 个超时文件已从云端清理`);
+    }
+
+    console.log(`\n✅ [Drive] 手动同步完成: ${success}/${refreshedFiles.length} 成功 (图片:${imageCount}, GIF:${gifCount}${processingErrors.length > 0 ? `, 失败:${processingErrors.length}` : ''}${cleanedFiles.length > 0 ? `, 清理:${cleanedFiles.length}` : ''})`);
 
     if (ws && ws.readyState === WebSocket.OPEN) {
-      // ✅ 计算实际被保存到本地的数量
-      // - 视频始终会被保存到本地（Figma 不支持导入）
-      // - GIF 只有在备份模式为 'gif_only' 或 'all' 时才会被保存
       const savedGifCount = shouldBackupGif ? gifCount : 0;
-      const savedVideoCount = videoCount; // 视频始终保存到本地
       
       const message = {
         type: 'manual-sync-complete',
-        count: success, // 成功导入 Figma 的总数（图片 + 小 GIF）
-        imageCount: imageCount, // ✅ 纯图片数量
-        gifCount: gifCount, // ✅ GIF 数量（包括成功导入的和跳过的）
-        videoCount: videoCount, // ✅ 视频数量（全部跳过保存到本地）
-        savedGifCount: savedGifCount, // ✅ 实际保存到本地的 GIF 数量
-        savedVideoCount: savedVideoCount, // ✅ 实际保存到本地的视频数量
+        count: success,
+        totalFiles: totalFiles,
+        imageCount: imageCount,
+        gifCount: gifCount,
+        videoCount: 0,
+        savedGifCount: savedGifCount,
+        savedVideoCount: 0,
         errors: processingErrors
       };
       ws.send(JSON.stringify(message));
@@ -1405,6 +1580,19 @@ async function performManualSync() {
   try {
     await Promise.race([syncTask, overallTimeout]);
   } catch (error) {
+    if (isManualSyncCancelledError(error)) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        safeSend({
+          type: 'manual-sync-cancelled',
+          count: 0,
+          totalFiles: 0,
+          imageCount: 0,
+          gifCount: 0,
+          completed: 0
+        });
+      }
+      return;
+    }
     console.error('❌ 手动同步失败:', error.message);
     console.error('   错误代码:', error.code || 'N/A');
     console.error('   错误堆栈:', error.stack);
@@ -1430,6 +1618,7 @@ async function performManualSync() {
       });
     }
   } finally {
+    manualSyncAbortRequested = false;
     isSyncing = false;
   }
 }
@@ -1598,6 +1787,14 @@ function connectWebSocket() {
         await performManualSync();
         return;
       }
+
+      if (message.type === 'cancel-manual-sync') {
+        const accepted = requestManualSyncCancel();
+        if (accepted) {
+          console.log('🛑 [Drive] 收到取消手动同步请求，正在停止...');
+        }
+        return;
+      }
     } catch (error) {
       console.error('⚠️  解析消息失败:', error.message);
     }
@@ -1618,6 +1815,83 @@ function connectWebSocket() {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function cleanupStaleWatcherTempFiles() {
+  let removed = 0;
+  const now = Date.now();
+  const tmpBase = os.tmpdir();
+  const filePrefixes = ['heif-input-', 'jpeg-output-'];
+  const dirPrefixes = ['screensync-v2g-'];
+  try {
+    const entries = fs.readdirSync(tmpBase);
+    for (const entry of entries) {
+      const fullPath = path.join(tmpBase, entry);
+      let stat = null;
+      try {
+        stat = fs.statSync(fullPath);
+      } catch (_) {
+        continue;
+      }
+      if ((now - stat.mtimeMs) <= STALE_TEMP_MAX_AGE_MS) {
+        continue;
+      }
+      if (stat.isDirectory() && dirPrefixes.some(prefix => entry.startsWith(prefix))) {
+        try {
+          fs.rmSync(fullPath, { recursive: true, force: true });
+          removed++;
+        } catch (_) {}
+        continue;
+      }
+      if (stat.isFile() && filePrefixes.some(prefix => entry.startsWith(prefix))) {
+        try {
+          fs.unlinkSync(fullPath);
+          removed++;
+        } catch (_) {}
+      }
+    }
+  } catch (_) {}
+  return removed;
+}
+
+function pruneStaleCacheMappingEntries() {
+  let removed = 0;
+  try {
+    const localFolder = getLocalDownloadFolder();
+    const mappingFile = path.join(localFolder, '.cache-mapping.json');
+    if (!fs.existsSync(mappingFile)) return removed;
+    const mapping = JSON.parse(fs.readFileSync(mappingFile, 'utf8'));
+    const cacheDirs = [
+      path.join(localFolder, '.gif-cache'),
+      path.join(localFolder, '.gif_cache')
+    ];
+    const existingIds = new Set();
+    for (const cacheDir of cacheDirs) {
+      if (!fs.existsSync(cacheDir)) continue;
+      let files = [];
+      try {
+        files = fs.readdirSync(cacheDir);
+      } catch (_) {
+        continue;
+      }
+      for (const file of files) {
+        const cacheId = path.parse(file).name;
+        if (cacheId) existingIds.add(cacheId);
+      }
+    }
+    let changed = false;
+    for (const [fileName, cacheId] of Object.entries(mapping)) {
+      if (!cacheId || !existingIds.has(cacheId)) {
+        delete mapping[fileName];
+        removed++;
+        changed = true;
+      }
+    }
+    if (changed) {
+      fs.writeFileSync(mappingFile, JSON.stringify(mapping, null, 2));
+    }
+  } catch (_) {}
+  return removed;
 }
 
 /**
@@ -1659,6 +1933,21 @@ function cleanupCache() {
   }
   if (cleanedDeletes > 0) {
     console.log(`🧹 [缓存清理] 已清理 ${cleanedDeletes} 个过期的待删除记录`);
+  }
+
+  // 每 6 小时执行一次深度清理，避免本地长期运行后产生历史垃圾
+  if ((now - lastDeepCleanupAt) >= DEEP_CLEANUP_INTERVAL_MS) {
+    lastDeepCleanupAt = now;
+    const removedTemps = cleanupStaleWatcherTempFiles();
+    const removedMappings = pruneStaleCacheMappingEntries();
+    let cleanedGifCacheCount = 0;
+    try {
+      const cleaned = userConfig.cleanOldGifCache(30);
+      cleanedGifCacheCount = cleaned && cleaned.cleaned ? cleaned.cleaned : 0;
+    } catch (_) {}
+    if (removedTemps > 0 || removedMappings > 0 || cleanedGifCacheCount > 0) {
+      console.log(`🧹 [深度清理] 临时文件:${removedTemps} 映射:${removedMappings} GIF缓存:${cleanedGifCacheCount}`);
+    }
   }
   
   // 输出内存使用情况

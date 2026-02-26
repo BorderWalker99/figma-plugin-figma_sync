@@ -57,6 +57,30 @@ function getDriveClient() {
   return driveInstance;
 }
 
+function resetDriveClient() {
+  driveInstance = null;
+  authClient = null;
+}
+
+function isTransientTlsOrNetworkError(error) {
+  if (!error) return false;
+  const msg = (error.message || String(error) || '').toLowerCase();
+  const code = (error.code || '').toString().toUpperCase();
+  return (
+    msg.includes('tls13_validate_record_header') ||
+    msg.includes('ssl routines') ||
+    msg.includes('wrong version number') ||
+    msg.includes('socket hang up') ||
+    msg.includes('tls') ||
+    msg.includes('econnreset') ||
+    msg.includes('etimedout') ||
+    msg.includes('epipe') ||
+    code === 'ECONNRESET' ||
+    code === 'ETIMEDOUT' ||
+    code === 'EPIPE'
+  );
+}
+
 async function uploadBuffer({ buffer, filename, mimeType = 'image/jpeg', folderId, supportsAllDrives = true }) {
   if (!buffer) {
     throw new Error('uploadBuffer 缺少 buffer');
@@ -391,37 +415,74 @@ async function listFolderFiles({ folderId, pageSize = 50, orderBy = 'createdTime
   throw lastError;
 }
 
-async function downloadFileBuffer(fileId) {
+async function downloadFileBuffer(fileId, timeoutMs = 60000, maxRetries = 3) {
   if (!fileId || fileId.trim() === '' || fileId === '.') {
     throw new Error(`downloadFileBuffer 缺少或无效的 fileId: "${fileId}"`);
   }
 
-  const drive = getDriveClient();
-  // 使用 alt: 'media' 下载原始文件内容，不进行任何转换
-  // 对于 GIF 文件，这确保下载的是原始未压缩版本
-  // 注意：Google Drive 可能会在上传时对某些文件进行优化，导致下载的文件与原始文件不同
-  // 如果发现 GIF 质量下降，可能是 Google Drive 在上传时进行了处理
-  
-  // 添加超时保护，防止下载大文件时卡住
-  const downloadPromise = drive.files.get(
-    { 
-      fileId, 
-      alt: 'media'
-      // 不添加任何转换参数，确保下载原始文件
-    }, 
-    { 
-      responseType: 'arraybuffer',
-      timeout: 60000 // 60秒超时
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    const drive = getDriveClient();
+    try {
+      // 流式下载：逐块读取，避免大文件一次性加载到内存，并支持更精确的超时
+      const response = await drive.files.get(
+        { fileId, alt: 'media' },
+        { responseType: 'stream', timeout: timeoutMs }
+      );
+
+      const buffer = await new Promise((resolve, reject) => {
+        const chunks = [];
+        let totalBytes = 0;
+        let settled = false;
+
+        const timer = setTimeout(() => {
+          if (!settled) {
+            settled = true;
+            response.data.destroy();
+            reject(new Error(`文件下载超时（超过${Math.round(timeoutMs / 1000)}秒）`));
+          }
+        }, timeoutMs);
+
+        response.data.on('data', (chunk) => {
+          chunks.push(chunk);
+          totalBytes += chunk.length;
+        });
+
+        response.data.on('end', () => {
+          if (!settled) {
+            settled = true;
+            clearTimeout(timer);
+            resolve(Buffer.concat(chunks, totalBytes));
+          }
+        });
+
+        response.data.on('error', (err) => {
+          if (!settled) {
+            settled = true;
+            clearTimeout(timer);
+            reject(err);
+          }
+        });
+      });
+
+      return buffer;
+    } catch (error) {
+      lastError = error;
+      const isTransientSslOrNetwork = isTransientTlsOrNetworkError(error);
+
+      if (!isTransientSslOrNetwork || attempt === maxRetries) {
+        throw error;
+      }
+
+      // 命中 TLS/网络抖动时，强制重建客户端以清理潜在坏连接
+      resetDriveClient();
+      const retryDelayMs = 600 * attempt;
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
     }
-  );
-  
-  const timeoutPromise = new Promise((_, reject) => {
-    setTimeout(() => reject(new Error('文件下载超时（超过60秒）')), 60000);
-  });
-  
-  const response = await Promise.race([downloadPromise, timeoutPromise]);
-  const buffer = Buffer.from(response.data);
-  return buffer;
+  }
+
+  throw lastError || new Error(`下载文件失败: ${fileId}`);
 }
 
 async function trashFile(fileId, supportsAllDrives = true) {
@@ -664,5 +725,6 @@ module.exports = {
   trashFile,
   createFolder,
   getFileInfo,
-  getResumableUploadUrl
+  getResumableUploadUrl,
+  resetDriveClient
 };

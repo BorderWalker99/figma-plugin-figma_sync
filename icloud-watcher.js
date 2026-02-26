@@ -30,7 +30,6 @@ const CONFIG = {
   // 子文件夹配置
   subfolders: {
     image: '图片',
-    video: '视频',
     gif: 'GIF',
     exportedGif: '导出的GIF'
   }
@@ -285,9 +284,9 @@ function getTargetSubfolderAndPrefix(filename, isExportedGif = false) {
   
   if (ext === '.mp4' || ext === '.mov') {
     return {
-      subfolder: CONFIG.subfolders.video,
-      filePrefix: 'ScreenRecordingVid',
-      extensions: ['.mp4', '.mov']
+      subfolder: CONFIG.subfolders.gif,
+      filePrefix: 'ScreenRecordingGIF',
+      extensions: ['.gif']
     };
   } else if (ext === '.gif') {
     return {
@@ -371,29 +370,21 @@ async function moveFileToSubfolder(filePath, isExportedGif = false) {
 function shouldCleanupFile(subfolder) {
   const backupMode = userConfig.getBackupMode ? userConfig.getBackupMode() : 'gif_only';
   
-  // 视频始终保留
-  if (subfolder === CONFIG.subfolders.video) {
-    return false; // 不清理
-  }
-  
   // 导出的 GIF 始终保留
   if (subfolder === CONFIG.subfolders.exportedGif) {
-    return false; // 不清理
+    return false;
   }
   
   // GIF 子文件夹
   if (subfolder === CONFIG.subfolders.gif) {
-    // 只有在 'none' 模式下才清理 GIF
     return backupMode === 'none';
   }
   
   // 图片子文件夹
   if (subfolder === CONFIG.subfolders.image) {
-    // 只有在 'all' 模式下才不清理图片
     return backupMode !== 'all';
   }
   
-  // 默认清理
   return true;
 }
 
@@ -651,7 +642,6 @@ function startWatching() {
     
     // 忽略已经在子文件夹中的文件（避免处理已分类的文件触发的 change 事件）
     const isInSubfolder = relativePath.startsWith(CONFIG.subfolders.image + path.sep) ||
-                          relativePath.startsWith(CONFIG.subfolders.video + path.sep) ||
                           relativePath.startsWith(CONFIG.subfolders.gif + path.sep);
     
     // 忽略临时文件
@@ -924,7 +914,7 @@ function countFilesForManualSync() {
     totalCount += rootFiles.length;
     
     // 统计子文件夹中的文件（排除导出的GIF）
-    const subfolders = [CONFIG.subfolders.image, CONFIG.subfolders.video, CONFIG.subfolders.gif];
+    const subfolders = [CONFIG.subfolders.image, CONFIG.subfolders.gif];
     for (const subfolder of subfolders) {
       const subfolderPath = path.join(CONFIG.icloudPath, subfolder);
       if (fs.existsSync(subfolderPath)) {
@@ -998,7 +988,7 @@ async function performManualSync() {
   }
   
   // 收集子文件夹中的文件
-  const subfolders = [CONFIG.subfolders.image, CONFIG.subfolders.video, CONFIG.subfolders.gif];
+  const subfolders = [CONFIG.subfolders.image, CONFIG.subfolders.gif];
   for (const subfolder of subfolders) {
     const subfolderPath = path.join(CONFIG.icloudPath, subfolder);
     if (fs.existsSync(subfolderPath)) {
