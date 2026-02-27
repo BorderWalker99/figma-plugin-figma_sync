@@ -627,10 +627,16 @@ function getLegacyNodeUrl() {
 }
 
 // Download file via curl, report progress
-function downloadFile(url, destPath, sendLog) {
+function downloadFile(url, destPath, sendLog, maxTimeSec = 300) {
   return new Promise((resolve, reject) => {
     sendLog(`   下载: ${url}\n`);
-    const child = spawn('curl', ['-L', '-o', destPath, '--progress-bar', '-f', '--connect-timeout', '30', url], {
+    const child = spawn('curl', [
+      '-L', '-o', destPath, '--progress-bar', '-f',
+      '--connect-timeout', '30',
+      '--max-time', String(maxTimeSec),
+      '--retry', '2', '--retry-delay', '3',
+      url
+    ], {
       stdio: ['pipe', 'pipe', 'pipe']
     });
     child.stderr.on('data', (data) => {
@@ -740,6 +746,76 @@ async function installLegacyFFmpeg(sendProgress, sendLog) {
 }
 
 // ---- Legacy ImageMagick ----
+
+// Helper: try to install ImageMagick from a DMG URL
+async function tryInstallFromDmg(dmgUrl, dmgPath, mountPoint, imDir, sendLog) {
+  try { fs.unlinkSync(dmgPath); } catch (_) {}
+  await downloadFile(dmgUrl, dmgPath, sendLog);
+
+  sendLog('   正在挂载 DMG...\n');
+  fs.mkdirSync(mountPoint, { recursive: true });
+  await execPromise(`hdiutil attach "${dmgPath}" -nobrowse -readonly -mountpoint "${mountPoint}"`, { timeout: 30000 });
+
+  try {
+    const dmgContents = fs.readdirSync(mountPoint);
+    const appName = dmgContents.find(f => f.endsWith('.app') && f.toLowerCase().includes('magick'));
+
+    if (appName) {
+      if (fs.existsSync(imDir)) fs.rmSync(imDir, { recursive: true, force: true });
+      fs.mkdirSync(imDir, { recursive: true });
+      const appDest = path.join(imDir, appName);
+      await execPromise(`cp -R "${path.join(mountPoint, appName)}" "${appDest}"`);
+
+      const magickBin = path.join(appDest, 'Contents', 'MacOS', 'magick');
+      if (fs.existsSync(magickBin)) {
+        for (const cmd of ['magick', 'convert']) {
+          const wrapperPath = path.join(LEGACY_BIN_DIR, cmd);
+          fs.writeFileSync(wrapperPath, `#!/bin/bash\nexec "${magickBin}" ${cmd === 'convert' ? 'convert' : ''} "$@"\n`, { mode: 0o755 });
+        }
+        return true;
+      }
+    }
+  } finally {
+    try { await execPromise(`hdiutil detach "${mountPoint}" -force`, { timeout: 15000 }); } catch (_) {}
+  }
+  return false;
+}
+
+// Helper: try to install ImageMagick from official macOS tarball
+async function tryInstallFromTarball(tarUrl, tarPath, imDir, sendLog) {
+  try { fs.unlinkSync(tarPath); } catch (_) {}
+  await downloadFile(tarUrl, tarPath, sendLog);
+
+  const extractDir = tarPath + '_extract';
+  fs.mkdirSync(extractDir, { recursive: true });
+  await execPromise(`tar xzf "${tarPath}" -C "${extractDir}"`, { timeout: 60000 });
+
+  // Find the magick binary inside extracted contents
+  const { stdout } = await execPromise(`find "${extractDir}" -name "magick" -type f 2>/dev/null | head -1`, { timeout: 10000 });
+  const foundBin = stdout.trim();
+  if (foundBin && fs.existsSync(foundBin)) {
+    if (fs.existsSync(imDir)) fs.rmSync(imDir, { recursive: true, force: true });
+    fs.mkdirSync(imDir, { recursive: true });
+
+    // Copy the entire extracted tree into imDir
+    await execPromise(`cp -R "${extractDir}/"* "${imDir}/"`, { timeout: 30000 });
+
+    // Re-locate magick inside the new location
+    const { stdout: newBin } = await execPromise(`find "${imDir}" -name "magick" -type f 2>/dev/null | head -1`, { timeout: 10000 });
+    const magickBin = newBin.trim();
+    if (magickBin && fs.existsSync(magickBin)) {
+      await execPromise(`chmod +x "${magickBin}"`);
+      for (const cmd of ['magick', 'convert']) {
+        const dest = path.join(LEGACY_BIN_DIR, cmd);
+        try { fs.unlinkSync(dest); } catch (_) {}
+        fs.writeFileSync(dest, `#!/bin/bash\nexec "${magickBin}" ${cmd === 'convert' ? 'convert' : ''} "$@"\n`, { mode: 0o755 });
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
 async function installLegacyImageMagick(sendProgress, sendLog) {
   sendProgress('imagemagick', 'installing', '正在安装...');
   sendLog('\n📦 正在安装 ImageMagick...\n');
@@ -749,81 +825,122 @@ async function installLegacyImageMagick(sendProgress, sendLog) {
   const tmpDir = path.join(os.tmpdir(), `screensync_im_${Date.now()}`);
   fs.mkdirSync(tmpDir, { recursive: true });
 
+  const dmgPath = path.join(tmpDir, 'ImageMagick.dmg');
+  const mountPoint = path.join(tmpDir, 'im_mount');
+  let installed = false;
+
   try {
-    // Strategy 1: Download standalone macOS build from mendelson.org (universal binary, notarized)
-    const dmgPath = path.join(tmpDir, 'ImageMagick.dmg');
-    const mountPoint = path.join(tmpDir, 'im_mount');
-    let installed = false;
-
-    sendLog('   尝试下载 ImageMagick macOS 独立版...\n');
-    try {
-      await downloadFile('https://mendelson.org/imagemagick.dmg', dmgPath, sendLog);
-
-      sendLog('   正在挂载 DMG...\n');
-      fs.mkdirSync(mountPoint, { recursive: true });
-      await execPromise(`hdiutil attach "${dmgPath}" -nobrowse -readonly -mountpoint "${mountPoint}"`, { timeout: 30000 });
-
-      // Find the .app inside the DMG
-      const dmgContents = fs.readdirSync(mountPoint);
-      const appName = dmgContents.find(f => f.endsWith('.app') && f.toLowerCase().includes('magick'));
-
-      if (appName) {
-        // Copy entire app bundle to deps directory
-        if (fs.existsSync(imDir)) fs.rmSync(imDir, { recursive: true, force: true });
-        fs.mkdirSync(imDir, { recursive: true });
-        const appDest = path.join(imDir, appName);
-        await execPromise(`cp -R "${path.join(mountPoint, appName)}" "${appDest}"`);
-
-        // Create wrapper scripts that invoke the binary inside the app bundle
-        const magickBin = path.join(appDest, 'Contents', 'MacOS', 'magick');
-        if (fs.existsSync(magickBin)) {
-          for (const cmd of ['magick', 'convert']) {
-            const wrapperPath = path.join(LEGACY_BIN_DIR, cmd);
-            fs.writeFileSync(wrapperPath, `#!/bin/bash\nexec "${magickBin}" ${cmd === 'convert' ? 'convert' : ''} "$@"\n`, { mode: 0o755 });
+    // Strategy 1: mendelson.org DMG (universal binary, notarized) — with retry
+    const dmgUrls = [
+      'https://mendelson.org/imagemagick.dmg',
+      'https://mendelson.org/PortableImageMagickInstaller.dmg'
+    ];
+    for (const dmgUrl of dmgUrls) {
+      if (installed) break;
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        sendLog(`   尝试下载 ImageMagick DMG (${attempt}/2): ${dmgUrl}\n`);
+        try {
+          installed = await tryInstallFromDmg(dmgUrl, dmgPath, mountPoint, imDir, sendLog);
+          if (installed) break;
+        } catch (e) {
+          sendLog(`   ⚠️ 下载失败: ${e.message}\n`);
+          try { await execPromise(`hdiutil detach "${mountPoint}" -force`, { timeout: 10000 }); } catch (_) {}
+          if (attempt < 2) {
+            sendLog('   等待 3 秒后重试...\n');
+            await new Promise(r => setTimeout(r, 3000));
           }
-          installed = true;
+        }
+      }
+    }
+
+    // Strategy 2: Official pre-built macOS tarball (Intel x86_64)
+    if (!installed && process.arch !== 'arm64') {
+      sendLog('   尝试下载 ImageMagick 官方 macOS 预编译包...\n');
+      const tarPath = path.join(tmpDir, 'ImageMagick-macos.tar.gz');
+      try {
+        installed = await tryInstallFromTarball(
+          'https://download.imagemagick.org/archive/binaries/ImageMagick-x86_64-apple-darwin20.1.0.tar.gz',
+          tarPath, imDir, sendLog
+        );
+      } catch (e) {
+        sendLog(`   ⚠️ 官方预编译包安装失败: ${e.message}\n`);
+      }
+    }
+
+    // Strategy 3: Auto-install Xcode CLT + compile from source
+    if (!installed) {
+      sendLog('   尝试从源码编译 ImageMagick...\n');
+      let hasXcodeClt = false;
+      try {
+        await execPromise('xcode-select -p', { timeout: 5000 });
+        hasXcodeClt = true;
+      } catch (_) {
+        sendLog('   未检测到 Xcode Command Line Tools，正在安装...\n');
+        sendProgress('imagemagick', 'installing', '安装 Xcode CLT...');
+        try {
+          // Trigger the macOS CLT install dialog; touch the sentinel file to request install
+          await execPromise('touch /tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress');
+          // Find the CLT package name from softwareupdate
+          const { stdout: suList } = await execPromise('softwareupdate -l 2>&1', { timeout: 60000 });
+          const cltMatch = suList.match(/\*\s+(Label:\s+)?(Command Line Tools[^\n]*)/);
+          if (cltMatch) {
+            const label = cltMatch[2].replace(/^Label:\s*/, '').trim();
+            sendLog(`   找到 CLT 安装包: ${label}，正在安装（可能需要几分钟）...\n`);
+            await execPromise(`softwareupdate -i "${label}" --verbose 2>&1`, { timeout: 600000 });
+          } else {
+            // Fallback: xcode-select --install triggers GUI dialog
+            sendLog('   正在弹出 Xcode CLT 安装对话框，请在弹窗中点击"安装"...\n');
+            await execPromise('xcode-select --install 2>/dev/null || true');
+            // Poll for completion (max 10 minutes)
+            for (let i = 0; i < 60; i++) {
+              await new Promise(r => setTimeout(r, 10000));
+              try {
+                await execPromise('xcode-select -p', { timeout: 5000 });
+                break;
+              } catch (_) {}
+            }
+          }
+          try { fs.unlinkSync('/tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress'); } catch (_) {}
+
+          // Verify
+          await execPromise('xcode-select -p', { timeout: 5000 });
+          hasXcodeClt = true;
+          sendLog('   ✅ Xcode Command Line Tools 安装完成\n');
+        } catch (cltErr) {
+          sendLog(`   ⚠️ Xcode CLT 自动安装失败: ${cltErr.message}\n`);
+          sendLog('   💡 请手动运行: xcode-select --install\n');
+          try { fs.unlinkSync('/tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress'); } catch (_) {}
         }
       }
 
-      // Unmount
-      try { await execPromise(`hdiutil detach "${mountPoint}" -force`, { timeout: 15000 }); } catch (e) {}
-    } catch (e) {
-      sendLog(`   ⚠️ 独立版下载失败: ${e.message}\n`);
-      try { await execPromise(`hdiutil detach "${mountPoint}" -force`, { timeout: 10000 }); } catch (e2) {}
-    }
+      if (hasXcodeClt) {
+        try {
+          sendProgress('imagemagick', 'installing', '编译中...');
+          const srcDir = path.join(tmpDir, 'src');
+          fs.mkdirSync(srcDir, { recursive: true });
+          if (fs.existsSync(imDir)) fs.rmSync(imDir, { recursive: true, force: true });
+          fs.mkdirSync(imDir, { recursive: true });
 
-    // Strategy 2: Compile from source if Xcode CLT is available
-    if (!installed) {
-      sendLog('   尝试从源码编译 ImageMagick...\n');
-      try {
-        await execPromise('xcode-select -p', { timeout: 5000 });
-        sendProgress('imagemagick', 'installing', '正在安装...');
+          sendLog('   下载 ImageMagick 源码...\n');
+          await execPromise(`curl -L "https://imagemagick.org/archive/ImageMagick.tar.gz" | tar xz -C "${srcDir}" --strip-components=1`, { timeout: 300000 });
+          const ncpu = os.cpus().length;
+          sendLog('   配置编译选项...\n');
+          await execPromise(`cd "${srcDir}" && ./configure --prefix="${imDir}" --disable-docs --without-modules --without-perl --disable-openmp --with-quantum-depth=16 CFLAGS="-O2" 2>&1`, { timeout: 120000 });
+          sendLog('   正在编译（可能需要几分钟）...\n');
+          await execPromise(`cd "${srcDir}" && make -j${ncpu} 2>&1`, { timeout: 600000 });
+          await execPromise(`cd "${srcDir}" && make install 2>&1`, { timeout: 60000 });
 
-        const srcDir = path.join(tmpDir, 'src');
-        fs.mkdirSync(srcDir, { recursive: true });
-        if (fs.existsSync(imDir)) fs.rmSync(imDir, { recursive: true, force: true });
-        fs.mkdirSync(imDir, { recursive: true });
-
-        await execPromise(`curl -L "https://imagemagick.org/archive/ImageMagick.tar.gz" | tar xz -C "${srcDir}" --strip-components=1`, { timeout: 300000 });
-        const ncpu = os.cpus().length;
-        await execPromise(`cd "${srcDir}" && ./configure --prefix="${imDir}" --disable-docs --without-modules --without-perl --disable-openmp --with-quantum-depth=16 CFLAGS="-O2" 2>&1`, { timeout: 120000 });
-        await execPromise(`cd "${srcDir}" && make -j${ncpu} 2>&1`, { timeout: 600000 });
-        await execPromise(`cd "${srcDir}" && make install 2>&1`, { timeout: 60000 });
-
-        const compiledMagick = path.join(imDir, 'bin', 'magick');
-        if (fs.existsSync(compiledMagick)) {
-          for (const cmd of ['magick', 'convert']) {
-            const dest = path.join(LEGACY_BIN_DIR, cmd);
-            try { fs.unlinkSync(dest); } catch (e) {}
-            fs.symlinkSync(compiledMagick, dest);
+          const compiledMagick = path.join(imDir, 'bin', 'magick');
+          if (fs.existsSync(compiledMagick)) {
+            for (const cmd of ['magick', 'convert']) {
+              const dest = path.join(LEGACY_BIN_DIR, cmd);
+              try { fs.unlinkSync(dest); } catch (_) {}
+              fs.symlinkSync(compiledMagick, dest);
+            }
+            installed = true;
           }
-          installed = true;
-        }
-      } catch (e) {
-        sendLog(`   ⚠️ 源码编译失败: ${e.message}\n`);
-        if (!installed) {
-          sendLog('   💡 请手动安装: 访问 https://imagemagick.org 下载 macOS 版本\n');
-          sendLog('      或安装 Xcode Command Line Tools 后重试: xcode-select --install\n');
+        } catch (e) {
+          sendLog(`   ⚠️ 源码编译失败: ${e.message}\n`);
         }
       }
     }
@@ -838,6 +955,9 @@ async function installLegacyImageMagick(sendProgress, sendLog) {
       }
       sendProgress('imagemagick', 'done', '安装完成');
     } else {
+      sendLog('   💡 请手动安装 ImageMagick:\n');
+      sendLog('      方法1: 安装 Homebrew 后运行 brew install imagemagick\n');
+      sendLog('      方法2: 访问 https://imagemagick.org 下载 macOS 版本\n');
       sendProgress('imagemagick', 'error', '安装失败（可手动安装）');
       throw new Error('ImageMagick 安装失败。请手动安装后重试。');
     }
