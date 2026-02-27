@@ -254,6 +254,26 @@
       background: linear-gradient(to left, rgba(0,0,0,0.5), transparent);
     }
 
+    /* Timeline tracks scrollbar — overlay style, hidden until scroll */
+    #timelineTracksScroll {
+      scrollbar-width: thin;
+      scrollbar-color: rgba(255,255,255,0.2) transparent;
+    }
+    #timelineTracksScroll::-webkit-scrollbar {
+      width: 6px;
+      background: transparent;
+    }
+    #timelineTracksScroll::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    #timelineTracksScroll::-webkit-scrollbar-thumb {
+      background-color: rgba(255,255,255,0.15);
+      border-radius: 3px;
+    }
+    #timelineTracksScroll::-webkit-scrollbar-thumb:hover {
+      background-color: rgba(255,255,255,0.3);
+    }
+
     /* Export Choice Button Style - Liquid Glass */
     .export-choice-btn {
       position: relative;
@@ -4133,7 +4153,7 @@
       </div>
 
       <!-- Tracks Area with Scrubber - scrollable -->
-      <div id="timelineTracksScroll" style="flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; position: relative; background: var(--bg-app);">
+      <div id="timelineTracksScroll" style="flex: 1 1 auto; min-height: 0; overflow-y: overlay; overflow-x: hidden; position: relative; background: var(--bg-app);">
         <!-- Scrubber Line (Global) - white style with pill handle, always on top -->
         <!-- pointer-events: none 让事件穿透到下层的拖拽条-->
         <div id="timelineScrubber" style="position: absolute; top: 0; width: 12px; margin-left: -5px; z-index: 9999; left: 0; pointer-events: none; display: none; min-height: 100%;">
@@ -9234,6 +9254,7 @@
         cachedScrubberLayout = null;
         recalcPreviewLayout();
         recalcTimelineFilmstrips();
+        updateTimelineTracksScrollability();
     });
 
     function closeTimelineEditor() {
@@ -9310,8 +9331,25 @@
             requestAnimationFrame(() => {
                 recalcPreviewLayout();
                 recalcTimelineFilmstrips();
+                updateTimelineTracksScrollability();
             });
         }
+    }
+
+    // 仅在图层内容高度超出容器时才允许滚动，避免单图层场景出现可滚动空白区域
+    function updateTimelineTracksScrollability() {
+        const tracksScroll = document.getElementById('timelineTracksScroll');
+        const timelineTracks = document.getElementById('timelineTracks');
+        if (!tracksScroll || !timelineTracks) return;
+
+        const needsScroll = timelineTracks.scrollHeight > (tracksScroll.clientHeight + 1);
+        if (!needsScroll) {
+            tracksScroll.style.overflowY = 'hidden';
+            return;
+        }
+
+        const supportsOverlay = typeof CSS !== 'undefined' && CSS.supports && CSS.supports('overflow-y', 'overlay');
+        tracksScroll.style.overflowY = supportsOverlay ? 'overlay' : 'auto';
     }
 
     // 重新计算每个图层条中胶片帧容器的宽度和偏移。
@@ -9593,7 +9631,10 @@
         const initialProgress = preserveTime ? currentScrubTime : coverage.start;
         updatePreview(initialProgress);
         setupScrubber();
-        requestAnimationFrame(() => recalcTimelineFilmstrips());
+        requestAnimationFrame(() => {
+            recalcTimelineFilmstrips();
+            updateTimelineTracksScrollability();
+        });
         
         // Request frame extraction for video layers
         layerFrames = {}; // Clear previous frames

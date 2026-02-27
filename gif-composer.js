@@ -635,14 +635,11 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
         }
       }
       
-      const idealDelay = 100 / sourceFps;
-      const gifDelay = Math.max(1, Math.round(idealDelay));
-      let gifFps = 100 / gifDelay;
       const adaptive = getAdaptiveProfile({
         preSizeMB: fileStats.size / (1024 * 1024),
         hasVideoLayers: true
       });
-      gifFps = Math.min(gifFps, adaptive.videoFpsCap);
+      let gifFps = Math.min(sourceFps, adaptive.videoFpsCap);
       
       // 🚀 两阶段调色板生成（替代单命令 split 方案）
       // 优势：① 内存占用大幅降低（无需缓冲所有帧）② 大文件更稳定
@@ -861,19 +858,20 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
         const [pipeOrigW, pipeOrigH] = pipeIdentifyResult.stdout.trim().split(' ').map(Number);
         
         // 获取帧延迟和帧数
-        let pipeGifDelay;
         let pipeTotalFrames;
+        let pipeOutputFps;
         try {
           const delayResult = await execAsync(`identify -format "%T\\n" "${gifInfo.path}"`, { timeout: 15000 });
           const delays = delayResult.stdout.trim().split('\n').map(d => parseInt(d.trim())).filter(d => !isNaN(d));
           pipeTotalFrames = delays.length || 1;
-          pipeGifDelay = delays.length > 0 ? Math.round(delays.reduce((a, b) => a + b, 0) / delays.length) : 5;
-          if (pipeGifDelay < 2) pipeGifDelay = 5;
+          const totalDurationCs = delays.reduce((a, b) => a + b, 0);
+          pipeOutputFps = (pipeTotalFrames > 0 && totalDurationCs > 0)
+            ? (pipeTotalFrames * 100) / totalDurationCs
+            : 20;
         } catch {
-          pipeGifDelay = 5;
+          pipeOutputFps = 20;
           pipeTotalFrames = 0;
         }
-        const pipeOutputFps = 100 / pipeGifDelay;
         
         reportProgress(15, '正在构建 FFmpeg 合成管道...');
         
@@ -1678,15 +1676,18 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
         const totalDurationTicks = delays.reduce((sum, d) => sum + d, 0);
         const totalDuration = totalDurationTicks / 100;
         
-        // 计算平均延迟作为参考
-        const avgDelay = delays.length > 0 ? Math.round(totalDurationTicks / delays.length) : 5;
-        // 如果有些帧延迟为0，通常播放器会按默认值处理（如10ms），这里我们统一修正为最小 2 ticks (20ms) 以防过快
-        const safeDelay = avgDelay < 2 ? 10 : avgDelay;
+        // 精确 fps（不做整数舍入，避免累积误差）
+        const exactFps = (frameCount > 0 && totalDurationTicks > 0)
+          ? (frameCount * 100) / totalDurationTicks
+          : 20;
+        // 内部帧索引用的整数延迟（仅用于帧采样计算，不影响输出 fps）
+        const intDelay = Math.max(2, Math.round(totalDurationTicks / frameCount) || 5);
         
         gifInfoArray.push({
           frameCount,
-          delay: safeDelay, // 平均/主要延迟
-          delays: delays,   // 保存所有帧的延迟详情
+          delay: intDelay,
+          exactFps,
+          delays: delays,
           totalDuration
         });
         
@@ -1696,10 +1697,9 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
       // 找到最长的 GIF 时长（这将是输出GIF的总时长）
       const maxDuration = Math.max(...gifInfoArray.map(g => g.totalDuration));
       
-      // 使用最小延迟作为输出延迟（确保能捕捉最快GIF的所有帧）
-      // 这样可以保证所有GIF都按原速播放
-      const allDelays = gifInfoArray.map(g => g.delay);
-      const outputDelay = Math.min(...allDelays);
+      // 使用最高精确 fps 对应的延迟（确保能捕捉最快 GIF 的所有帧）
+      const maxExactFps = Math.max(...gifInfoArray.map(g => g.exactFps));
+      const outputDelay = Math.max(2, Math.round(100 / maxExactFps));
       
       // 计算需要生成的总帧数（基于最长时长和输出延迟）
       const totalSourceFrames = Math.ceil((maxDuration * 100) / outputDelay);
@@ -2087,7 +2087,7 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
         startStep('Step 4 FFmpeg管道合成');
         reportProgress(20, '正在构建 FFmpeg 合成管道...');
         
-        const outputFps = 100 / outputDelay;
+        const outputFps = maxExactFps;
         
         // ── 1. 分离图层组 ──────────────────────────────────────────────
         // 将所有图层分为三组: base (GIF 下方), mid (GIF 层 + 穿插的静态层), top (GIF 上方)
@@ -2492,8 +2492,7 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
       // 🚀 优先使用 ffmpeg（更快），回退到 ImageMagick
       const tempGifPath = path.join(tempDir, 'temp_output.gif');
       
-      // 计算 ffmpeg 需要的帧率 (outputDelay 是 1/100 秒)
-      const outputFps = 100 / outputDelay;
+      const outputFps = maxExactFps;
       
       let usedFfmpeg = false;
       try {
