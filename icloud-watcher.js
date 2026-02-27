@@ -12,8 +12,29 @@ sharp.concurrency(1); // 限制并发
 
 const { exec } = require('child_process');
 const { promisify } = require('util');
-const execAsync = promisify(exec);
+const _execAsync = promisify(exec);
 const os = require('os');
+
+// 追踪所有活跃子进程，插件关闭时统一 kill
+const activeChildProcesses = new Set();
+
+function execAsync(cmd, opts) {
+  return new Promise((resolve, reject) => {
+    const child = exec(cmd, opts, (error, stdout, stderr) => {
+      activeChildProcesses.delete(child);
+      if (error) reject(error);
+      else resolve({ stdout, stderr });
+    });
+    activeChildProcesses.add(child);
+  });
+}
+
+function killAllChildProcesses() {
+  for (const child of activeChildProcesses) {
+    try { child.kill('SIGKILL'); } catch (_) {}
+  }
+  activeChildProcesses.clear();
+}
 
 // 引入用户配置
 const userConfig = require('./userConfig');
@@ -55,7 +76,7 @@ const processedFilesCache = new Map();
 const CACHE_EXPIRY_MS = 30000; // 30秒后过期
 
 // 定期清理过期的缓存
-setInterval(() => {
+const cacheCleanupInterval = setInterval(() => {
   const now = Date.now();
   let cleanedCount = 0;
   for (const [fingerprint, timestamp] of processedFilesCache.entries()) {
@@ -666,10 +687,10 @@ function connectWebSocket() {
           startWatching();
         }
       } else if (message.type === 'stop-realtime') {
-        console.log('\n⏸️  停止实时同步模式（文件分类整理仍在后台运行）\n');
+        console.log('\n⏸️  停止实时同步模式\n');
         isRealTimeMode = false;
-        // 注意：不再停止 watcher，保持文件整理功能
-        // stopWatching(); 
+        killAllChildProcesses();
+        manualSyncAbortRequested = true;
       } else if (message.type === 'manual-sync-count-files') {
         console.log('\n📊 统计文件数量...\n');
         countFilesForManualSync();
@@ -706,6 +727,8 @@ function connectWebSocket() {
   ws.on('close', () => {
     console.log('⚠️  服务器连接断开');
     isRealTimeMode = false;
+    killAllChildProcesses();
+    manualSyncAbortRequested = true;
     stopWatching();
     pendingDeletes.clear();
     scheduleReconnect();

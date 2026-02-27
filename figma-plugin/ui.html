@@ -8007,7 +8007,16 @@
         if (!msg) return;
 
         if (msg.type === 'plugin-closing') {
-          stopRealtimeSync();
+          // 插件即将关闭：发送停止信号，然后彻底断开 WebSocket
+          wsSend('stop-realtime');
+          wsSend('plugin-closed');
+          try {
+            if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+            if (backgroundReconnectTimer) { clearInterval(backgroundReconnectTimer); backgroundReconnectTimer = null; }
+            if (initialConnectFallbackTimer) { clearTimeout(initialConnectFallbackTimer); initialConnectFallbackTimer = null; }
+            if (ws) { ws.onclose = null; ws.close(); ws = null; }
+          } catch (_) {}
+          return;
         } else if (msg.type === 'request-skipped-file-cache' || msg.type === 'request-skipped-file-cache-for-node') {
         // ✅ code.js 请求获取跳过文件的缓存信息（用于自动关联手动拖入的Video/GIF）
         const isForNode = msg.type === 'request-skipped-file-cache-for-node';

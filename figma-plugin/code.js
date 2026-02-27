@@ -14,6 +14,10 @@ figma.showUI(__html__, {
   themeColors: true 
 });
 
+figma.on('close', () => {
+  figma.ui.postMessage({ type: 'plugin-closing' });
+});
+
 let currentFrame = null;
 let screenshotCount = 0;
 let screenshotIndex = 0; // 截屏图片计数器

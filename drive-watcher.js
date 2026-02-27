@@ -9,10 +9,31 @@ sharp.concurrency(1); // 限制并发
 
 const { exec } = require('child_process');
 const { promisify } = require('util');
-const execAsync = promisify(exec);
+const _execAsync = promisify(exec);
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+
+// 追踪所有活跃子进程，插件关闭时统一 kill
+const activeChildProcesses = new Set();
+
+function execAsync(cmd, opts) {
+  return new Promise((resolve, reject) => {
+    const child = exec(cmd, opts, (error, stdout, stderr) => {
+      activeChildProcesses.delete(child);
+      if (error) reject(error);
+      else resolve({ stdout, stderr });
+    });
+    activeChildProcesses.add(child);
+  });
+}
+
+function killAllChildProcesses() {
+  for (const child of activeChildProcesses) {
+    try { child.kill('SIGKILL'); } catch (_) {}
+  }
+  activeChildProcesses.clear();
+}
 
 const {
   listFolderFiles,
@@ -1838,7 +1859,8 @@ function connectWebSocket() {
       if (message.type === 'stop-realtime') {
         console.log('\n⏸️  [Drive] 停止实时同步模式');
         isRealTimeMode = false;
-        wasRealTimeMode = false; // 用户主动停止，清除记录
+        wasRealTimeMode = false;
+        killAllChildProcesses();
         stopPolling();
         return;
       }
@@ -1869,6 +1891,7 @@ function connectWebSocket() {
     console.log('⚠️  [Drive] 服务器连接断开，5秒后重连');
     wasRealTimeMode = isRealTimeMode;
     isRealTimeMode = false;
+    killAllChildProcesses();
     stopPolling();
     setTimeout(connectWebSocket, 5000);
   });
