@@ -214,7 +214,7 @@
       flex: 0 0 auto;
       width: 40px; /* Fixed width per frame */
       min-width: 0;
-      background-size: auto 100%; /* Height fills, width maintains aspect ratio */
+      background-size: contain; /* Fit full thumbnail, avoid cropping */
       background-position: center;
       background-repeat: no-repeat;
       background-color: var(--track-frame-bg);
@@ -2391,7 +2391,7 @@
     .tab-btn::after {
         content: '';
         position: absolute;
-        bottom: -9px; /* Adjust based on header padding */
+        bottom: -11px; /* Align selected bar with modal header divider */
         left: 50%;
         right: 50%;
         height: 2px;
@@ -9233,6 +9233,7 @@
     window.addEventListener('resize', () => {
         cachedScrubberLayout = null;
         recalcPreviewLayout();
+        recalcTimelineFilmstrips();
     });
 
     function closeTimelineEditor() {
@@ -9306,7 +9307,28 @@
         if (tracksEl) tracksEl.style.display = isLoading ? 'none' : 'block';
         if (footerEl) footerEl.style.display = isLoading ? 'none' : 'block';
         if (!isLoading) {
-            requestAnimationFrame(() => recalcPreviewLayout());
+            requestAnimationFrame(() => {
+                recalcPreviewLayout();
+                recalcTimelineFilmstrips();
+            });
+        }
+    }
+
+    // 重新计算每个图层条中胶片帧容器的宽度和偏移。
+    // 时间线在 loading 态下会被隐藏，此时 offsetWidth 可能为 0，需在显示后再次计算。
+    function recalcTimelineFilmstrips() {
+        if (!layersForTimeline || layersForTimeline.length === 0) return;
+        for (const layer of layersForTimeline) {
+            const filmstrip = document.getElementById(`filmstrip-${layer.id}`);
+            const bar = document.getElementById(`track-bar-${layer.id}`);
+            if (!filmstrip || !bar) continue;
+            const trackArea = bar.parentElement;
+            if (!trackArea) continue;
+            const trackAreaWidth = trackArea.offsetWidth;
+            if (!trackAreaWidth || trackAreaWidth <= 0) continue;
+            const data = timelineData[layer.id] || { start: 0, end: 100 };
+            filmstrip.style.width = trackAreaWidth + 'px';
+            filmstrip.style.left = (-(data.start / 100) * trackAreaWidth) + 'px';
         }
     }
 
@@ -9452,7 +9474,7 @@
                     top: ${scaledY}px;
                     width: ${scaledLayerWidth}px;
                     height: ${scaledLayerHeight}px;
-                    object-fit: fill;
+                    object-fit: contain;
                     opacity: 1;
                     visibility: visible;
                     z-index: ${zIndex};
@@ -9571,6 +9593,7 @@
         const initialProgress = preserveTime ? currentScrubTime : coverage.start;
         updatePreview(initialProgress);
         setupScrubber();
+        requestAnimationFrame(() => recalcTimelineFilmstrips());
         
         // Request frame extraction for video layers
         layerFrames = {}; // Clear previous frames
