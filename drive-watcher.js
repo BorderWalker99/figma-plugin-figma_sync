@@ -639,7 +639,7 @@ async function pollDrive() {
       
       // 并发处理新文件（提高多图同步速度）
       const IMAGE_TIMEOUT_MS = 60000; // 图片 60 秒
-      const VIDEO_TIMEOUT_MS = 180000; // 视频→GIF 转换需要更多时间：3 分钟
+      const VIDEO_TIMEOUT_MS = 480000; // 视频→GIF 转换(含降级策略)需要更多时间：8 分钟
       const oversizedFiles = []; // 记录因超时被清理的文件
       
       // 分类：图片优先即时同步，录屏异步进入转换队列
@@ -668,12 +668,18 @@ async function pollDrive() {
         } catch (fileError) {
           const isTimeout = fileError.message.startsWith('SYNC_TIMEOUT:') || fileError.message.includes('超时');
           if (isTimeout) {
-            oversizedFiles.push(file.name);
-            try {
-              await trashFile(file.id);
-              cleanupFileRecord(file.id, file.md5Checksum);
-              console.log(`   🗑️  已从云端清理: ${file.name}`);
-            } catch (_) {}
+            const fNameLower = (file.name || '').toLowerCase();
+            const isVideoFile = fNameLower.endsWith('.mp4') || fNameLower.endsWith('.mov');
+            if (isVideoFile) {
+              console.warn(`   ⚠️  [Video→GIF] 视频转换超时，已保留源文件: ${file.name}`);
+            } else {
+              oversizedFiles.push(file.name);
+              try {
+                await trashFile(file.id);
+                cleanupFileRecord(file.id, file.md5Checksum);
+                console.log(`   🗑️  已从云端清理: ${file.name}`);
+              } catch (_) {}
+            }
           } else {
             console.error(`   ❌ 处理文件失败: ${file.name}`, fileError.message);
             knownFileIds.delete(file.id);
@@ -688,7 +694,7 @@ async function pollDrive() {
       
       // 等待全部完成（图片通常很快，录屏转换较慢但各自独立）
       const allTimeout = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('批量处理超时')), VIDEO_TIMEOUT_MS + 30000);
+        setTimeout(() => reject(new Error('批量处理超时')), VIDEO_TIMEOUT_MS + 60000);
       });
       
       try {
@@ -766,7 +772,8 @@ async function handleDriveFile(file, deleteAfterSync = false, progressCb = null,
     emitProgress('downloading', 5, looksLikeVideo ? { isVideo: true } : {});
     let backedUpLocally = false;
     let gifCacheId = null;
-    let originalBuffer = await downloadFileBuffer(file.id);
+    const downloadTimeout = looksLikeVideo ? 300000 : 60000; // 视频 5 分钟，图片 60 秒
+    let originalBuffer = await downloadFileBuffer(file.id, downloadTimeout);
     throwIfAborted();
     const downloadedSizeKB = (originalBuffer.length / 1024).toFixed(2);
     emitProgress('downloading', 20, { sizeKB: parseFloat(downloadedSizeKB), ...(looksLikeVideo ? { isVideo: true } : {}) });
@@ -861,24 +868,75 @@ async function handleDriveFile(file, deleteAfterSync = false, progressCb = null,
           originalBuffer = null;
         })();
         
-        // 真正的两遍调色板（与导出 GIF 算法一致，色彩最优）
-        //   Pass 1: palettegen stats_mode=full → palette.png（分析全部帧全部像素）
-        //   Pass 2: paletteuse dither=sierra2_4a + diff_mode=rectangle → output.gif
-        //   lanczos 缩放 + 硬件解码 + 多线程
         const tempPalette = path.join(tempDir, 'palette.png');
-        const scaleFilter = `fps=15,scale='trunc(iw/4)*2':'trunc(ih/4)*2':flags=lanczos`;
-        
-        const pass1Cmd = `ffmpeg -hwaccel auto -threads 0 -i "${tempVideoPath}" -vf "${scaleFilter},palettegen=max_colors=256:stats_mode=full" -y "${tempPalette}"`;
-        await execAsync(pass1Cmd, { timeout: 90000, maxBuffer: 50 * 1024 * 1024 });
-        throwIfAborted();
-        
-        emitProgress('converting', 55, { estimatedSec, isVideo: true });
-        
-        const pass2Cmd = `ffmpeg -hwaccel auto -threads 0 -i "${tempVideoPath}" -i "${tempPalette}" -lavfi "${scaleFilter}[v];[v][1:v]paletteuse=dither=sierra2_4a:diff_mode=rectangle" -threads 0 -loop 0 -y "${tempGifOut}"`;
-        const convPromise = execAsync(pass2Cmd, { timeout: 180000, maxBuffer: 200 * 1024 * 1024 });
-        
+        const tempCompressedVideo = path.join(tempDir, 'compressed.mp4');
+        const isTimeoutLike = (err) => {
+          if (!err) return false;
+          const msg = String(err.message || '');
+          return Boolean(err.killed || err.signal === 'SIGTERM' || msg.includes('timed out') || msg.includes('ETIMEDOUT'));
+        };
+        const runTwoPass = async (sourceVideoPath, scaleFilter, pass1Timeout, pass2Timeout) => {
+          const pass1Cmd = `ffmpeg -hwaccel auto -threads 0 -i "${sourceVideoPath}" -vf "${scaleFilter},palettegen=max_colors=256:stats_mode=full" -y "${tempPalette}"`;
+          await execAsync(pass1Cmd, { timeout: pass1Timeout, maxBuffer: 50 * 1024 * 1024 });
+          throwIfAborted();
+          emitProgress('converting', 55, { estimatedSec, isVideo: true });
+
+          const pass2Cmd = `ffmpeg -hwaccel auto -threads 0 -i "${sourceVideoPath}" -i "${tempPalette}" -lavfi "${scaleFilter}[v];[v][1:v]paletteuse=dither=sierra2_4a:diff_mode=rectangle" -threads 0 -loop 0 -y "${tempGifOut}"`;
+          await execAsync(pass2Cmd, { timeout: pass2Timeout, maxBuffer: 200 * 1024 * 1024 });
+        };
+
+        const MAX_GIF_SIZE_BEFORE_DEGRADE = 80 * 1024 * 1024; // 80MB
+
+        let converted = false;
+        try {
+          const primaryScaleFilter = `fps=15,scale='trunc(iw/4)*2':'trunc(ih/4)*2':flags=lanczos`;
+          await runTwoPass(tempVideoPath, primaryScaleFilter, 30000, 180000);
+          converted = true;
+
+          if (fs.existsSync(tempGifOut)) {
+            const primarySize = fs.statSync(tempGifOut).size;
+            if (primarySize > MAX_GIF_SIZE_BEFORE_DEGRADE) {
+              console.warn(`   ⚠️  [Video→GIF] 主策略输出过大 (${(primarySize / 1024 / 1024).toFixed(1)}MB)，触发降级策略以缩减体积`);
+              converted = false;
+              try { fs.unlinkSync(tempGifOut); } catch (_) {}
+              try { fs.unlinkSync(tempPalette); } catch (_) {}
+              emitProgress('converting', 12, { estimatedSec, isVideo: true, degraded: true, reason: 'output-too-large' });
+            }
+          }
+        } catch (primaryErr) {
+          const reason = isTimeoutLike(primaryErr) ? 'progress-stalled-at-5' : 'primary-conversion-failed';
+          console.warn(`   ⚠️  [Video→GIF] 主转换失败，触发降级策略 (${reason}): ${primaryErr.message}`);
+          emitProgress('converting', 12, { estimatedSec, isVideo: true, degraded: true, reason });
+        }
+
+        if (!converted) {
+          try {
+            emitProgress('converting', 20, { estimatedSec, isVideo: true, degraded: true, stageDetail: 'compressing-video' });
+            const compressCmd = `ffmpeg -hwaccel auto -threads 0 -i "${tempVideoPath}" -vf "fps=10,scale='min(960,iw)':-2:flags=lanczos" -c:v libx264 -preset veryfast -crf 30 -pix_fmt yuv420p -an -movflags +faststart -y "${tempCompressedVideo}"`;
+            await execAsync(compressCmd, { timeout: 120000, maxBuffer: 120 * 1024 * 1024 });
+            throwIfAborted();
+            if (!fs.existsSync(tempCompressedVideo) || fs.statSync(tempCompressedVideo).size === 0) {
+              throw new Error('视频压缩输出为空');
+            }
+            emitProgress('converting', 35, { estimatedSec, isVideo: true, degraded: true, stageDetail: 'converting-compressed-video' });
+            const degradedScaleFilter = `fps=10,scale='trunc(iw/2)*2':'trunc(ih/2)*2':flags=bicubic`;
+            await runTwoPass(tempCompressedVideo, degradedScaleFilter, 90000, 180000);
+            converted = true;
+          } catch (fallbackErr) {
+            console.warn(`   ⚠️  [Video→GIF] 回退策略1失败: ${fallbackErr.message}`);
+          }
+        }
+
+        if (!converted) {
+          emitProgress('converting', 45, { estimatedSec, isVideo: true, degraded: true, stageDetail: 'lossy-gif-fallback' });
+          const lossySource = fs.existsSync(tempCompressedVideo) ? tempCompressedVideo : tempVideoPath;
+          const lossyCmd = `ffmpeg -hwaccel auto -threads 0 -i "${lossySource}" -lavfi "fps=8,scale='trunc(iw/2)*2':'trunc(ih/2)*2':flags=bicubic,split[s0][s1];[s0]palettegen=max_colors=96:stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5" -loop 0 -y "${tempGifOut}"`;
+          await execAsync(lossyCmd, { timeout: 180000, maxBuffer: 200 * 1024 * 1024 });
+          throwIfAborted();
+        }
+
         // 等待转换和缓存并行完成
-        await Promise.all([convPromise, cachePromise]);
+        await cachePromise;
         throwIfAborted();
         
         if (!fs.existsSync(tempGifOut) || fs.statSync(tempGifOut).size === 0) {
@@ -927,7 +985,8 @@ async function handleDriveFile(file, deleteAfterSync = false, progressCb = null,
         if (ws && ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ type: 'file-skipped', filename: file.name, reason: 'video', gifCacheId, driveFileId: file.id }));
         }
-        try { await trashFile(file.id); cleanupFileRecord(file.id, file.md5Checksum); } catch (_) {}
+        // 降级策略仍失败时，保留云端源文件，避免“自动清理”导致用户无法手动处理
+        console.warn(`   ⚠️  [Video→GIF] 已保留源视频（未自动清理）: ${file.name}`);
         return;
       } finally {
         try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch (_) {}
@@ -1293,7 +1352,7 @@ async function performManualSync() {
   
   // 为整个手动同步添加总体超时保护（5分钟）
   const overallTimeout = new Promise((_, reject) => {
-    setTimeout(() => reject(new Error('手动同步总体超时（超过5分钟），请检查网络连接或减少待同步文件数量')), 300000);
+    setTimeout(() => reject(new Error('手动同步总体超时（超过10分钟），请检查网络连接或减少待同步文件数量')), 600000);
   });
   
   const syncTask = (async () => {
@@ -1397,7 +1456,7 @@ async function performManualSync() {
       const fName = file.name.toLowerCase();
       const fMime = (file.mimeType || '').toLowerCase();
       const isVideoItem = fName.endsWith('.mp4') || fName.endsWith('.mov') || fMime.startsWith('video/');
-      const timeoutMs = isVideoItem ? 180000 : 60000;
+      const timeoutMs = isVideoItem ? 480000 : 60000;
       
       const fileProgressCb = (stage, percent) => {
         if (shouldAbort()) {
@@ -1471,13 +1530,19 @@ async function performManualSync() {
         const isTimeout = timeoutError.message.startsWith('SYNC_TIMEOUT:') || timeoutError.message.includes('超时');
         processingErrors.push({ filename: file.name, error: timeoutError.message });
         if (isTimeout) {
-          try {
-            await trashFile(file.id);
-            cleanupFileRecord(file.id, file.md5Checksum);
-          } catch (_) {}
+          const fNameLower2 = (file.name || '').toLowerCase();
+          const isVideoFile2 = fNameLower2.endsWith('.mp4') || fNameLower2.endsWith('.mov');
+          if (!isVideoFile2) {
+            try {
+              await trashFile(file.id);
+              cleanupFileRecord(file.id, file.md5Checksum);
+            } catch (_) {}
+          } else {
+            console.warn(`   ⚠️  [Video→GIF] 手动同步视频转换超时，已保留源文件: ${file.name}`);
+          }
         }
         if (!wasKnown) knownFileIds.delete(file.id);
-        return { success: false, timeout: true, file, cleaned: isTimeout };
+        return { success: false, timeout: true, file, cleaned: isTimeout && !(file.name || '').toLowerCase().match(/\.(mp4|mov)$/) };
       }
     };
     

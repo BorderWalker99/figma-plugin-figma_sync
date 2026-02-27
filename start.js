@@ -149,7 +149,8 @@ const services = [];
 let watcher = null;
 let server = null;
 let serverRestartCount = 0;
-const MAX_RESTART_ATTEMPTS = 3;
+const MAX_RESTART_BACKOFF_MS = 60000;
+let startupContinued = false;
 
 // 检查环境（只在启动时检查一次）
 function checkEnvironment() {
@@ -246,29 +247,14 @@ function startServer() {
         // 忽略日志写入错误
       }
       
-      // 尝试自动重启
-      if (serverRestartCount < MAX_RESTART_ATTEMPTS) {
-        serverRestartCount++;
-        console.log(`\n🔄 尝试自动重启服务器 (${serverRestartCount}/${MAX_RESTART_ATTEMPTS})...`);
-        setTimeout(() => {
-          startServer();
-        }, 3000); // 等待3秒后重启
-      } else {
-        console.error('\n❌ 服务器重启次数超过限制');
-        console.error('   这可能是由于：');
-        console.error('   1. 依赖未正确安装');
-        console.error('   2. 端口 8888 被占用');
-        console.error('   3. 配置文件损坏');
-        console.error('\n   请检查 server-error.log 文件查看详细错误信息');
-        console.error('   或使用 Manual_Start_Server.command 手动启动\n');
-        
-        // 停止所有服务并退出
-        console.log('🛑 正在停止所有服务...');
-        services.forEach(s => {
-          try { s.kill(); } catch (e) {}
-        });
-        process.exit(1);
-      }
+      // 持续自动重启：指数退避，避免在登录项场景下“永久掉线”
+      serverRestartCount++;
+      const retryDelay = Math.min(MAX_RESTART_BACKOFF_MS, 3000 * Math.pow(2, Math.min(serverRestartCount - 1, 5)));
+      console.log(`\n🔄 尝试自动重启服务器（第 ${serverRestartCount} 次，${Math.round(retryDelay / 1000)} 秒后）...`);
+      setTimeout(() => {
+        cleanupPort(); // 防止端口被僵尸进程占用导致反复失败
+        startServer();
+      }, retryDelay);
     } else if (signal) {
       console.log(`\n⚠️  服务器被信号终止 (signal: ${signal})`);
       // 被信号终止通常是用户主动操作，不自动重启
@@ -294,6 +280,7 @@ function checkEnvironmentWithRetry() {
   envCheckAttempts++;
   
   if (checkEnvironment()) {
+    envCheckAttempts = 0;
     return true;
   }
   
@@ -303,12 +290,20 @@ function checkEnvironmentWithRetry() {
     
     setTimeout(() => {
       if (!checkEnvironmentWithRetry()) {
-        console.error('\n❌ 环境检查多次失败，无法启动服务');
-        console.error('   请查看日志文件或联系作者获取帮助\n');
-        process.exit(1);
+        console.error('\n❌ 环境检查多次失败，保持后台重试...');
+        console.error('   请检查依赖安装状态，服务将在 30 秒后再次尝试\n');
+        setTimeout(() => {
+          if (checkEnvironmentWithRetry() && !startupContinued) {
+            startupContinued = true;
+            continueStartup();
+          }
+        }, 30000);
       } else {
         // 环境检查通过，继续启动
-        continueStartup();
+        if (!startupContinued) {
+          startupContinued = true;
+          continueStartup();
+        }
       }
     }, 10000);
     
@@ -316,8 +311,13 @@ function checkEnvironmentWithRetry() {
   }
   
   console.error('\n❌ 环境检查失败，已达到最大重试次数');
-  console.error('   请查看日志文件或联系作者获取帮助\n');
-  process.exit(1);
+  console.error('   将在后台继续重试，不退出进程\n');
+  setTimeout(() => {
+    if (checkEnvironmentWithRetry() && !startupContinued) {
+      startupContinued = true;
+      continueStartup();
+    }
+  }, 30000);
   return false;
 }
 
@@ -325,6 +325,8 @@ if (!checkEnvironmentWithRetry()) {
   // 正在重试，退出当前流程
   return;
 }
+
+startupContinued = true;
 
 // 环境检查通过，继续启动
 function continueStartup() {

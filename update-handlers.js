@@ -1032,5 +1032,5 @@ async function handleFullUpdate(targetGroup, connectionId) {
 }
 
 
-return { checkAndNotifyUpdates, getCurrentServerVersion, getCurrentPluginVersion, compareVersions, downloadFileWithRedirect, handlePluginUpdate, handleServerUpdate, handleFullUpdate };
+return { checkAndNotifyUpdates, getCurrentServerVersion, compareVersions, downloadFileWithRedirect, handlePluginUpdate, handleServerUpdate, handleFullUpdate };
 };

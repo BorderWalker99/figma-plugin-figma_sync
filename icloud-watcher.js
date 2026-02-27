@@ -159,17 +159,86 @@ async function convertVideoToGif(videoPath, displayFilename, progressCb) {
 
   const tempPalette = path.join(tempDir, 'palette.png');
   const tempGifOut = path.join(tempDir, 'output.gif');
+  const tempCompressedVideo = path.join(tempDir, 'compressed.mp4');
 
   try {
-    const scaleFilter = `fps=15,scale='trunc(iw/4)*2':'trunc(ih/4)*2':flags=lanczos`;
+    const runTwoPass = async (sourceVideoPath, scaleFilter, pass1Timeout, pass2Timeout) => {
+      const pass1Cmd = `ffmpeg -hwaccel auto -threads 0 -i "${sourceVideoPath}" -vf "${scaleFilter},palettegen=max_colors=256:stats_mode=full" -y "${tempPalette}"`;
+      await execAsync(pass1Cmd, { timeout: pass1Timeout, maxBuffer: 50 * 1024 * 1024 });
 
-    const pass1Cmd = `ffmpeg -hwaccel auto -threads 0 -i "${videoPath}" -vf "${scaleFilter},palettegen=max_colors=256:stats_mode=full" -y "${tempPalette}"`;
-    await execAsync(pass1Cmd, { timeout: 90000, maxBuffer: 50 * 1024 * 1024 });
+      if (progressCb) progressCb('converting', 55, { estimatedSec, isVideo: true });
 
-    if (progressCb) progressCb('converting', 55, { estimatedSec, isVideo: true });
+      const pass2Cmd = `ffmpeg -hwaccel auto -threads 0 -i "${sourceVideoPath}" -i "${tempPalette}" -lavfi "${scaleFilter}[v];[v][1:v]paletteuse=dither=sierra2_4a:diff_mode=rectangle" -threads 0 -loop 0 -y "${tempGifOut}"`;
+      await execAsync(pass2Cmd, { timeout: pass2Timeout, maxBuffer: 200 * 1024 * 1024 });
+    };
 
-    const pass2Cmd = `ffmpeg -hwaccel auto -threads 0 -i "${videoPath}" -i "${tempPalette}" -lavfi "${scaleFilter}[v];[v][1:v]paletteuse=dither=sierra2_4a:diff_mode=rectangle" -threads 0 -loop 0 -y "${tempGifOut}"`;
-    await execAsync(pass2Cmd, { timeout: 180000, maxBuffer: 200 * 1024 * 1024 });
+    const isTimeoutLike = (err) => {
+      if (!err) return false;
+      const msg = String(err.message || '');
+      return Boolean(err.killed || err.signal === 'SIGTERM' || msg.includes('timed out') || msg.includes('ETIMEDOUT'));
+    };
+
+    let converted = false;
+    let primaryError = null;
+
+    const MAX_GIF_SIZE_BEFORE_DEGRADE = 80 * 1024 * 1024; // 80MB — 超过此值触发降级
+
+    // 主策略：高质量两遍调色板（保持原策略）
+    try {
+      const primaryScaleFilter = `fps=15,scale='trunc(iw/4)*2':'trunc(ih/4)*2':flags=lanczos`;
+      await runTwoPass(videoPath, primaryScaleFilter, 30000, 180000);
+      converted = true;
+
+      // 主策略成功但输出过大 → 丢弃结果，进入降级策略以缩减体积
+      if (fs.existsSync(tempGifOut)) {
+        const primarySize = fs.statSync(tempGifOut).size;
+        if (primarySize > MAX_GIF_SIZE_BEFORE_DEGRADE) {
+          console.warn(`   ⚠️  [Video→GIF] 主策略输出过大 (${(primarySize / 1024 / 1024).toFixed(1)}MB)，触发降级策略以缩减体积`);
+          converted = false;
+          try { fs.unlinkSync(tempGifOut); } catch (_) {}
+          try { fs.unlinkSync(tempPalette); } catch (_) {}
+          if (progressCb) progressCb('converting', 12, { estimatedSec, isVideo: true, degraded: true, reason: 'output-too-large' });
+        }
+      }
+    } catch (err) {
+      primaryError = err;
+      const reason = isTimeoutLike(err) ? 'progress-stalled-at-5' : 'primary-conversion-failed';
+      console.warn(`   ⚠️  [Video→GIF] 主转换失败，触发降级策略 (${reason}): ${err.message}`);
+      if (progressCb) progressCb('converting', 12, { estimatedSec, isVideo: true, degraded: true, reason });
+    }
+
+    // 回退策略 1：先压缩视频，再两遍转换
+    if (!converted) {
+      try {
+        if (progressCb) progressCb('converting', 20, { estimatedSec, isVideo: true, degraded: true, stageDetail: 'compressing-video' });
+        const compressCmd = `ffmpeg -hwaccel auto -threads 0 -i "${videoPath}" -vf "fps=10,scale='min(960,iw)':-2:flags=lanczos" -c:v libx264 -preset veryfast -crf 30 -pix_fmt yuv420p -an -movflags +faststart -y "${tempCompressedVideo}"`;
+        await execAsync(compressCmd, { timeout: 120000, maxBuffer: 120 * 1024 * 1024 });
+
+        if (!fs.existsSync(tempCompressedVideo) || fs.statSync(tempCompressedVideo).size === 0) {
+          throw new Error('视频压缩输出为空');
+        }
+
+        if (progressCb) progressCb('converting', 35, { estimatedSec, isVideo: true, degraded: true, stageDetail: 'converting-compressed-video' });
+        const degradedScaleFilter = `fps=10,scale='trunc(iw/2)*2':'trunc(ih/2)*2':flags=bicubic`;
+        await runTwoPass(tempCompressedVideo, degradedScaleFilter, 90000, 180000);
+        converted = true;
+      } catch (fallbackErr) {
+        console.warn(`   ⚠️  [Video→GIF] 回退策略1失败: ${fallbackErr.message}`);
+      }
+    }
+
+    // 回退策略 2：直接有损转换 GIF（尽量保底产出）
+    if (!converted) {
+      if (progressCb) progressCb('converting', 45, { estimatedSec, isVideo: true, degraded: true, stageDetail: 'lossy-gif-fallback' });
+      const lossySource = fs.existsSync(tempCompressedVideo) ? tempCompressedVideo : videoPath;
+      const lossyCmd = `ffmpeg -hwaccel auto -threads 0 -i "${lossySource}" -lavfi "fps=8,scale='trunc(iw/2)*2':'trunc(ih/2)*2':flags=bicubic,split[s0][s1];[s0]palettegen=max_colors=96:stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5" -loop 0 -y "${tempGifOut}"`;
+      await execAsync(lossyCmd, { timeout: 180000, maxBuffer: 200 * 1024 * 1024 });
+      converted = true;
+    }
+
+    if (!converted && primaryError) {
+      throw primaryError;
+    }
 
     if (!fs.existsSync(tempGifOut) || fs.statSync(tempGifOut).size === 0) {
       throw new Error('转换输出为空');
@@ -193,7 +262,7 @@ async function convertVideoToGif(videoPath, displayFilename, progressCb) {
  * @returns {{ gifBuffer, gifPath, gifFilename, gifCacheId }} 或 null（失败时）
  */
 async function processVideoFile(videoPath, displayFilename, subfolder, progressCb) {
-  const downloaded = await waitForICloudDownload(videoPath, 60000);
+  const downloaded = await waitForICloudDownload(videoPath, 300000); // 视频文件给 5 分钟下载时间
   if (!downloaded) {
     console.log(`   ⚠️  视频可能未完全下载，尝试继续转换...`);
   }

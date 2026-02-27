@@ -2013,21 +2013,45 @@ wss.on('connection', (ws, req) => {
         data.type === 'manual-sync' ||
         data.type === 'manual-sync-count-files' ||
         data.type === 'cancel-manual-sync') {
-      if (targetGroup.mac && targetGroup.mac.readyState === WebSocket.OPEN) {
-        try {
-          sendToMac(targetGroup, data);
-          console.log(`   ✅ 已转发到 Mac 端: ${data.type}`);
-        } catch (error) {
-          console.log('   ❌ 发送到Mac端失败:', error.message);
+      const tryForwardToMac = () => {
+        const latestGroup = connections.get(connectionId);
+        if (latestGroup && latestGroup.mac && latestGroup.mac.readyState === WebSocket.OPEN) {
+          try {
+            sendToMac(latestGroup, data);
+            console.log(`   ✅ 已转发到 Mac 端: ${data.type}`);
+            return true;
+          } catch (error) {
+            console.log('   ❌ 发送到Mac端失败:', error.message);
+          }
         }
-      } else {
-        // 通知Figma Mac端未连接
-        if (clientType === 'figma') {
-          sendToFigma(targetGroup, {
-            type: 'error',
-            message: 'Mac端未连接'
-          });
-        }
+        return false;
+      };
+
+      if (tryForwardToMac()) {
+        return;
+      }
+
+      // 登录项重启后，watcher 与 figma 可能存在短暂竞态：给 Mac 端 5 秒连接宽限期
+      if (clientType === 'figma') {
+        const waitStart = Date.now();
+        const waitTimeoutMs = 5000;
+        const pollMs = 250;
+        const waitTimer = setInterval(() => {
+          if (tryForwardToMac()) {
+            clearInterval(waitTimer);
+            return;
+          }
+          if (Date.now() - waitStart >= waitTimeoutMs) {
+            clearInterval(waitTimer);
+            const latestGroup = connections.get(connectionId);
+            if (latestGroup && latestGroup.figma && latestGroup.figma.readyState === WebSocket.OPEN) {
+              sendToFigma(latestGroup, {
+                type: 'error',
+                message: 'Mac端未连接'
+              });
+            }
+          }
+        }, pollMs);
       }
       return;
     }

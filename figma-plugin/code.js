@@ -522,6 +522,11 @@ figma.ui.onmessage = async (msg) => {
     return;
   }
 
+  if (msg.type === 'restart-plugin') {
+    figma.showUI(__html__, { width: 360, height: 400, themeColors: true });
+    return;
+  }
+
   // 处理取消GIF导出
   if (msg.type === 'cancel-gif-export') {
     cancelGifExport = true;
@@ -590,7 +595,10 @@ figma.ui.onmessage = async (msg) => {
       // 🛡️ 安全获取节点填充（避免访问无效 VIDEO 节点导致 "An invalid video was removed" 错误）
       function safeGetFills(node) {
         try {
-          if (!node || node.type !== 'RECTANGLE') return null;
+          if (!node) return null;
+          const t = node.type;
+          if (t === 'VIDEO' || t === 'PAGE' || t === 'DOCUMENT') return null;
+          if (!('fills' in node)) return null;
           const fills = node.fills;
           if (!fills || fills.length === 0) return null;
           return fills;
@@ -624,29 +632,39 @@ figma.ui.onmessage = async (msg) => {
                 // 检查 GIF 魔法数 (GIF89a 或 GIF87a) -> 'GIF' (0x47, 0x49, 0x46)
                 if (bytes.length >= 3 && bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) {
                   isGifDetected = true;
-                  
-                  // 检查是否有关联数据（用于判断是手动拖入还是手机同步/已自动缓存）
-                  const driveFileId = node.getPluginData('driveFileId');
-                  const ossFileId = node.getPluginData('ossFileId');
-                  const gifCacheId = node.getPluginData('gifCacheId');
-                  
-                  if (driveFileId || ossFileId || gifCacheId) {
-                    isManualDrag = false;
-                  } else {
-                    isManualDrag = true;
-                  }
-                  
-                  // 如果没有 filename，使用节点名称
-                  if (!filename) {
-                    filename = node.name;
-                    if (!filename.toLowerCase().endsWith('.gif')) {
-                      filename = filename + '.gif';
-                    }
-                  }
                 }
               }
             } catch (e) {
               // Ignore error
+            }
+          }
+        }
+        
+        // 如果 bytes 检测未命中，但 originalFilename 或节点名以 .gif 结尾，
+        // 仍然视为 GIF（Figma 可能把静态 GIF 转成 PNG 存储）
+        if (!isGifDetected && filename && filename.toLowerCase().endsWith('.gif')) {
+          isGifDetected = true;
+        }
+        if (!isGifDetected && !filename && node.name && node.name.toLowerCase().endsWith('.gif')) {
+          isGifDetected = true;
+          filename = node.name;
+        }
+        
+        if (isGifDetected) {
+          const driveFileId = node.getPluginData('driveFileId');
+          const ossFileId = node.getPluginData('ossFileId');
+          const gifCacheId = node.getPluginData('gifCacheId');
+          
+          if (driveFileId || ossFileId || gifCacheId) {
+            isManualDrag = false;
+          } else {
+            isManualDrag = true;
+          }
+          
+          if (!filename) {
+            filename = node.name;
+            if (!filename.toLowerCase().endsWith('.gif')) {
+              filename = filename + '.gif';
             }
           }
         }
@@ -2709,7 +2727,23 @@ figma.on('documentchange', (event) => {
                                     nameLower.endsWith('.mkv') ||
                                     nameLower.includes('screenrecording');
               
-              const looksLikeGif = nameLower.endsWith('.gif');
+              let looksLikeGif = nameLower.endsWith('.gif');
+              
+              // Figma 会自动去掉拖入文件的扩展名（e.g. "录屏.gif" → "录屏"）
+              // 当扩展名检测失败时，回退到与 pendingDroppedFiles 做模糊匹配
+              let matchedDropFilename = null;
+              if (!looksLikeVideo && !looksLikeGif && pendingDroppedFiles.length > 0) {
+                const nodeNameClean = nodeName.replace(/\.[^/.]+$/i, '').replace(/[^a-z0-9\u4e00-\u9fff]/gi, '').toLowerCase();
+                for (const f of pendingDroppedFiles) {
+                  const dropNameClean = f.filename.replace(/\.[^/.]+$/i, '').replace(/[^a-z0-9\u4e00-\u9fff]/gi, '').toLowerCase();
+                  if (dropNameClean && nodeNameClean && (dropNameClean === nodeNameClean || dropNameClean.includes(nodeNameClean) || nodeNameClean.includes(dropNameClean))) {
+                    const dropExt = f.filename.toLowerCase().split('.').pop();
+                    if (dropExt === 'gif') looksLikeGif = true;
+                    matchedDropFilename = f.filename;
+                    break;
+                  }
+                }
+              }
               
               if (!looksLikeVideo && !looksLikeGif) return;
               
@@ -2726,7 +2760,7 @@ figma.on('documentchange', (event) => {
               
               // 🔄 自动缓存关联：每轮都尝试（因为 cacheId 可能在第一轮后才到达）
               if (looksLikeGif || looksLikeVideo) {
-                processDroppedMediaNode(delayedNode, nodeName);
+                processDroppedMediaNode(delayedNode, matchedDropFilename || nodeName);
               }
             } catch (e) {
               // 忽略错误
@@ -2770,7 +2804,7 @@ function processDroppedMediaNode(node, nodeName) {
     if (pendingDroppedFiles.length === 0) return;
     
     // 🔑 智能匹配：根据文件名相似度找到最佳匹配
-    const nodeNameClean = nodeName.replace(/\.[^/.]+$/i, '').replace(/[^a-z0-9]/gi, '').toLowerCase();
+    const nodeNameClean = nodeName.replace(/\.[^/.]+$/i, '').replace(/[^a-z0-9\u4e00-\u9fff]/gi, '').toLowerCase();
     
     let bestMatch = null;
     let bestMatchIndex = -1;
@@ -2778,7 +2812,7 @@ function processDroppedMediaNode(node, nodeName) {
     
     for (let i = 0; i < pendingDroppedFiles.length; i++) {
       const f = pendingDroppedFiles[i];
-      const fileNameClean = f.filename.replace(/\.[^/.]+$/i, '').replace(/[^a-z0-9]/gi, '').toLowerCase();
+      const fileNameClean = f.filename.replace(/\.[^/.]+$/i, '').replace(/[^a-z0-9\u4e00-\u9fff]/gi, '').toLowerCase();
       
       let score = 0;
       if (fileNameClean === nodeNameClean) {

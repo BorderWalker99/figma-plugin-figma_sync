@@ -12,9 +12,9 @@
       Design System: Liquid Glass (Unified with Figma Plugin)
     ========================*/
     :root {
-      --bg-app: #F5F5F7;
+      --bg-app: #F3F4F6;
       --bg-card: #FFFFFF;
-      --bg-inset: #F0F0F2;
+      --bg-inset: #ECEEF1;
 
       /* Liquid Glass */
       --glass-bg: rgba(255, 255, 255, 0.95);
@@ -48,9 +48,9 @@
       --danger: #FF3B30;
 
       /* Text Color Hierarchy */
-      --text-primary: #a3a3a7;
-      --text-secondary: #bababf;
-      --text-tertiary: #d0d0d5;
+      --text-primary: #1F2328;
+      --text-secondary: #525866;
+      --text-tertiary: #7B8190;
 
       --divider: rgba(0, 0, 0, 0.06);
       --border: rgba(0, 0, 0, 0.1);
@@ -76,9 +76,9 @@
 
     @media (prefers-color-scheme: dark) {
       :root {
-        --bg-app: #1C1C1E;
-        --bg-card: #2C2C2E;
-        --bg-inset: rgba(28, 28, 30, 0.8);
+        --bg-app: #141517;
+        --bg-card: #1D1F23;
+        --bg-inset: #111216;
 
         --glass-bg: rgba(40, 40, 42, 0.7);
         --glass-bg-hover: rgba(50, 50, 52, 0.75);
@@ -103,9 +103,9 @@
         --accent: #0A84FF;
         --accent-soft: rgba(10, 132, 255, 0.15);
 
-        --text-primary: #98989D;
-        --text-secondary: #636366;
-        --text-tertiary: #545456;
+        --text-primary: #F2F3F5;
+        --text-secondary: #C4C7CF;
+        --text-tertiary: #8A909E;
 
         --divider: rgba(255, 255, 255, 0.08);
         --border: rgba(255, 255, 255, 0.1);
@@ -152,6 +152,10 @@
       box-sizing: border-box;
       -webkit-font-smoothing: antialiased;
       -moz-osx-font-smoothing: grayscale;
+    }
+
+    html {
+      background: var(--bg-app);
     }
 
     body {

@@ -4918,6 +4918,21 @@
     const MAX_RECONNECT_ATTEMPTS = 3; // 🚀 减少重试次数，快速失败
     let isExplicitlyDisconnected = false; // 用户是否手动断开（暂未用到，但预留）
     let isFirstConnection = true; // 🚀 标记是否是首次连接
+    let backgroundReconnectTimer = null;
+    let initialConnectFallbackTimer = null; // 首次打开 5 秒兜底：仍未连上则显示帮助态
+
+    function scheduleBackgroundReconnect() {
+      if (backgroundReconnectTimer) return;
+      backgroundReconnectTimer = setInterval(() => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          clearInterval(backgroundReconnectTimer);
+          backgroundReconnectTimer = null;
+          return;
+        }
+        // 达到上限后进入“低频保活重连”，避免插件永远停在空白/断开状态
+        connect();
+      }, 15000);
+    }
     
     function attemptReconnect() {
       reconnectAttempts++;
@@ -4990,48 +5005,50 @@
     
     // 显示服务器启动帮助
     function showServerStartHelp() {
+      const restartBtnText = currentLang === 'zh' ? '重启插件' : 'Restart Plugin';
       const helpHtml = `
-        <div style="padding: 20px; text-align: center;">
-          <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
-          <div style="font-size: 16px; font-weight: 600; margin-bottom: 12px; color: var(--text-primary);">
-            ${t('help_server_not_running')}
-          </div>
-          <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 20px; line-height: 1.6;">
-            ${t('help_cannot_connect')}<br/>
-            ${t('help_try_solutions')}
-          </div>
-          <button onclick="retryStartServer()" style="
-            padding: 10px 24px;
-            background: var(--accent);
-            color: white;
-            border: none;
-            border-radius: var(--radius-s);
-            font-size: 14px;
-            font-weight: 500;
-            cursor: pointer;
-            margin-bottom: 12px;
-            width: 200px;
-          ">
-            ${t('help_retry_start')}
-          </button>
-          <div style="font-size: 12px; color: var(--text-tertiary); margin-top: 16px; padding: 12px; background: var(--bg-secondary); border-radius: var(--radius-s); text-align: left;">
-            <div style="font-weight: 600; margin-bottom: 8px;">${t('help_still_cannot')}</div>
-            <div>${t('help_check_prefs')}</div>
-            <div>${t('help_ensure_service')}</div>
-            <div>${t('help_restart')}</div>
+        <div style="height: 100%; display: flex; align-items: center; justify-content: center;">
+          <div style="display: flex; flex-direction: column; align-items: center; text-align: center; padding: 0; max-width: 300px;">
+            <svg width="38" height="41" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom: 20px;">
+              <line x1="12" y1="3.2" x2="12" y2="15.4"></line>
+              <line x1="12" y1="22.8" x2="12.01" y2="22.8"></line>
+            </svg>
+
+            <div style="font-size: 16px; font-weight: 600; color: var(--text-primary); margin-bottom: 12px;">
+              ${currentLang === 'zh' ? '服务器未连接' : 'Server Disconnected'}
+            </div>
+
+            <div style="font-size: 12px; color: var(--text-secondary); line-height: 1.65; margin-bottom: 16px;">
+              ${currentLang === 'zh'
+                ? '请尝试如下解决方案：<br/>前往\u201C系统设置 - 通用 - 登录项与扩展\u201D，<br/>找到\u201Cnode\u201D，关闭后重新打开，最后重启插件。'
+                : 'Try this:<br/>Go to System Settings &gt; General &gt; Login Items,<br/>find "node" in background items,<br/>toggle it off then on,<br/>then restart the plugin.'}
+            </div>
+
+            <button id="serverHelpRestartBtn" class="btn btn-primary" style="width: 200px;">
+              ${restartBtnText}
+            </button>
+
+            <div style="margin-top: 32px; font-size: 12px; color: var(--text-tertiary); line-height: 1.5;">
+              ${currentLang === 'zh' ? '如仍未解决，请联系开发者' : 'If unresolved, contact developer'}
+              <br/>borderwalker99@gmail.com
+            </div>
           </div>
         </div>
       `;
       
-      // 替换主界面内容
       const container = document.querySelector('.app') || document.body;
       container.innerHTML = helpHtml;
+      container.style.overflow = 'hidden';
+      container.style.height = '100vh';
+      document.body.style.overflow = 'hidden';
+      document.documentElement.style.overflow = 'hidden';
       
-      // 定义重试函数
       window.retryStartServer = function() {
-        // 恢复原始界面
-        location.reload();
+        parent.postMessage({ pluginMessage: { type: 'restart-plugin' } }, '*');
       };
+
+      const restartBtn = document.getElementById('serverHelpRestartBtn');
+      if (restartBtn) restartBtn.onclick = window.retryStartServer;
     }
 
     function connect() {
@@ -5099,6 +5116,14 @@
       ws.onopen = function () {
         log('✅ 已连接');
         reconnectAttempts = 0; // 重置重试计数
+        if (initialConnectFallbackTimer) {
+          clearTimeout(initialConnectFallbackTimer);
+          initialConnectFallbackTimer = null;
+        }
+        if (backgroundReconnectTimer) {
+          clearInterval(backgroundReconnectTimer);
+          backgroundReconnectTimer = null;
+        }
         
         // 所有模式统一显示"已连接"
         updateStatus('connected', t('status_connected'));
@@ -5755,6 +5780,7 @@
           // ❌ 重试次数耗尽，显示手动重连按钮
           log('❌ 自动重连失败，请手动点击重连');
           updateStatus('disconnected', t('status_reconnect'));
+          scheduleBackgroundReconnect();
         }
       };
     }
@@ -8381,6 +8407,14 @@
 
     // ✅ 初始状态：显示"正在连接"，确保服务器未启动时界面正常加载
     updateStatus('waiting', t('status_connecting'));
+
+    // 首次打开 5 秒内仍连接不上则直接进入“服务器未连接”提示态
+    initialConnectFallbackTimer = setTimeout(() => {
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        updateStatus('disconnected', t('status_reconnect'));
+        showServerStartHelp();
+      }
+    }, 5000);
 
     // 使用 setTimeout 确保 connect() 异步执行，不阻塞界面渲染
     setTimeout(() => {
