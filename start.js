@@ -1,4 +1,4 @@
-// start.js - 一键启动脚本（支持动态切换模式）
+// start.js - 一键启动脚本
 const { spawn, execSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');

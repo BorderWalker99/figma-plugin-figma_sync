@@ -2142,6 +2142,12 @@ wss.on('connection', (ws, req) => {
             }
           }
           
+          // 如果映射未找到但请求中附带了 gifCacheId，直接用它做磁盘校验
+          if (!found && !gifCacheId && file.gifCacheId) {
+            gifCacheId = file.gifCacheId;
+            found = true;
+          }
+
           if (found && gifCacheId) {
             let cacheFileExists = false;
             try {

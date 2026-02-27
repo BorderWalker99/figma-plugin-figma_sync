@@ -7553,8 +7553,8 @@
     function handleEarlyUnsyncedCheck(unsyncedGifs, isMultiSelect) {
       earlyCheckIsMultiSelect = isMultiSelect;
       // 先尝试向 Server 查询缓存
-      if (wsSend('check-cache-existence', { 
-        files: unsyncedGifs.map(g => ({ filename: g.filename, layerId: g.layerId })),
+      if (wsSend('check-cache-existence', {
+        files: unsyncedGifs.map(g => ({ filename: g.filename, layerId: g.layerId, gifCacheId: g.gifCacheId || null })),
         earlyCheck: true
       })) {
         pendingEarlyUnsyncedGifs = unsyncedGifs;
@@ -8131,7 +8131,7 @@
         }, '*');
       } else if (msg.type === 'check-server-cache-for-unsynced') {
         // ✅ 转发检查请求给 Server
-        if (wsSend('check-cache-existence', { files: msg.unsyncedGifs.map(g => ({ filename: g.filename, layerId: g.layerId })) })) {
+        if (wsSend('check-cache-existence', { files: msg.unsyncedGifs.map(g => ({ filename: g.filename, layerId: g.layerId, gifCacheId: g.gifCacheId || null })) })) {
           pendingExportCacheCheck = true; // ✅ 标记这是导出流程的缓存检查
         } else {
           console.warn('⚠️ WebSocket 未连接，无法检查缓存，直接请求上传');
