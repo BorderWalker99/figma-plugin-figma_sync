@@ -6,6 +6,8 @@ const fs = require('fs');
 const path = require('path');
 const { exec, spawn } = require('child_process');
 const os = require('os');
+const util = require('util');
+const execPromise = util.promisify(exec);
 
 /**
  * Factory: inject server-level dependencies.
@@ -173,6 +175,97 @@ function compareVersions(v1, v2) {
   return 0;
 }
 
+function addLocalDepsToPath() {
+  const localBin = path.join(os.homedir(), '.screensync', 'bin');
+  const localNodeBin = path.join(os.homedir(), '.screensync', 'deps', 'node', 'bin');
+  const localImBin = path.join(os.homedir(), '.screensync', 'deps', 'imagemagick', 'bin');
+  for (const p of [localBin, localNodeBin, localImBin]) {
+    if (fs.existsSync(p) && !process.env.PATH.includes(p)) {
+      process.env.PATH = `${p}:${process.env.PATH}`;
+    }
+  }
+}
+
+async function commandExists(cmd) {
+  try {
+    await execPromise(`command -v ${cmd}`, { timeout: 5000 });
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function escapeAppleScriptString(input) {
+  return String(input).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+async function runWithAdminIfNeeded(command, timeout = 600000) {
+  try {
+    return await execPromise(command, { timeout, env: process.env, cwd: __dirname });
+  } catch (error) {
+    const msg = `${error && error.message ? error.message : ''}\n${error && error.stderr ? error.stderr : ''}`;
+    const needAdmin = /permission denied|operation not permitted|not writable|EACCES/i.test(msg);
+    if (!needAdmin || process.platform !== 'darwin') {
+      throw error;
+    }
+    const escaped = escapeAppleScriptString(command);
+    return await execPromise(`osascript -e "do shell script \\"${escaped}\\" with administrator privileges"`, { timeout });
+  }
+}
+
+async function ensureUpdateDependencies(targetGroup) {
+  addLocalDepsToPath();
+  const sendProgress = (status, message) => {
+    if (targetGroup && targetGroup.figma && targetGroup.figma.readyState === WebSocket.OPEN) {
+      sendToFigma(targetGroup, { type: 'update-progress', status, message });
+    }
+  };
+
+  // 1) Node.js project dependencies (for newly introduced npm deps)
+  sendProgress('checking', '正在检查运行依赖...');
+  const nodeModulesPath = path.join(__dirname, 'node_modules');
+  const requiredNodeDeps = ['dotenv', 'ws', 'express', 'sharp', 'chokidar'];
+  const missingNodeDeps = requiredNodeDeps.filter(dep => !fs.existsSync(path.join(nodeModulesPath, dep)));
+
+  if (missingNodeDeps.length > 0) {
+    sendProgress('installing', `正在安装 Node 依赖（${missingNodeDeps.length} 项）...`);
+    await runWithAdminIfNeeded('npm install --production --omit=dev --legacy-peer-deps --registry=https://registry.npmmirror.com', 10 * 60 * 1000);
+    const stillMissing = requiredNodeDeps.filter(dep => !fs.existsSync(path.join(nodeModulesPath, dep)));
+    if (stillMissing.length > 0) {
+      throw new Error(`依赖安装不完整，缺少: ${stillMissing.join(', ')}`);
+    }
+  }
+
+  // 2) Runtime binaries required by update/new features
+  addLocalDepsToPath();
+  const hasConvert = await commandExists('convert');
+  const hasMagick = await commandExists('magick');
+  const missingBinaries = [];
+  if (!(hasConvert || hasMagick)) missingBinaries.push('imagemagick');
+  if (!(await commandExists('ffmpeg'))) missingBinaries.push('ffmpeg');
+  if (!(await commandExists('gifsicle'))) missingBinaries.push('gifsicle');
+
+  if (missingBinaries.length > 0) {
+    const hasBrew = await commandExists('brew');
+    if (!hasBrew) {
+      throw new Error(`检测到缺少运行依赖：${missingBinaries.join(', ')}。请先通过安装器补齐环境后再更新。`);
+    }
+    sendProgress('installing', `正在安装运行依赖（${missingBinaries.join(', ')}）...`);
+    await runWithAdminIfNeeded(`brew install ${missingBinaries.join(' ')}`, 20 * 60 * 1000);
+    addLocalDepsToPath();
+
+    const verifyConvert = await commandExists('convert');
+    const verifyMagick = await commandExists('magick');
+    const stillMissing = [];
+    if (!(verifyConvert || verifyMagick)) stillMissing.push('imagemagick');
+    if (!(await commandExists('ffmpeg'))) stillMissing.push('ffmpeg');
+    if (!(await commandExists('gifsicle'))) stillMissing.push('gifsicle');
+    if (stillMissing.length > 0) {
+      throw new Error(`运行依赖安装失败：${stillMissing.join(', ')}`);
+    }
+  }
+}
+
 // Keep-alive agent for faster subsequent requests (connection reuse)
 const downloadAgent = new https.Agent({ keepAlive: true, maxSockets: 4, timeout: 60000 });
 
@@ -334,10 +427,6 @@ async function handlePluginUpdate(targetGroup, connectionId) {
     });
     
     // 解压并覆盖插件文件（使用 Node.js 内置方法或 child_process）
-    const { exec } = require('child_process');
-    const util = require('util');
-    const execPromise = util.promisify(exec);
-    
     // 确保插件目录存在
     if (!fs.existsSync(pluginDir)) {
       fs.mkdirSync(pluginDir, { recursive: true });
@@ -478,10 +567,6 @@ async function handleServerUpdate(targetGroup, connectionId) {
       fs.rmSync(updateDir, { recursive: true, force: true });
     }
     fs.mkdirSync(updateDir, { recursive: true });
-    
-    const { exec } = require('child_process');
-    const util = require('util');
-    const execPromise = util.promisify(exec);
     
     // 解压 tar.gz
     await execPromise(`tar -xzf "${tempFile}" -C "${updateDir}"`);
@@ -707,10 +792,6 @@ async function handleFullUpdate(targetGroup, connectionId) {
     }
     fs.mkdirSync(updateDir, { recursive: true });
     
-    const { exec } = require('child_process');
-    const util = require('util');
-    const execPromise = util.promisify(exec);
-    
     // 解压 tar.gz
     await execPromise(`tar -xzf "${tempFile}" -C "${updateDir}"`);
     console.log(`   ✅ 解压完成`);
@@ -919,6 +1000,9 @@ async function handleFullUpdate(targetGroup, connectionId) {
       status: 'installing',
       message: `正在更新文件... (${updatedCount} 个文件需要更新)`
     });
+
+    // 在完成更新前自动补齐新增运行依赖（不打开终端）
+    await ensureUpdateDependencies(targetGroup);
     
     // 清理临时文件
     if (fs.existsSync(tempFile)) {
