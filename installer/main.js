@@ -640,6 +640,37 @@ const LEGACY_DEPS_DIR = path.join(os.homedir(), '.screensync', 'deps');
 const LEGACY_BIN_DIR = path.join(os.homedir(), '.screensync', 'bin');
 const LEGACY_NODE_VERSION = '22.13.1';
 
+function ensureLegacyBinInShellProfiles(sendLog) {
+  const profilePaths = [
+    path.join(os.homedir(), '.zprofile'),
+    path.join(os.homedir(), '.zshrc'),
+    path.join(os.homedir(), '.bash_profile')
+  ];
+  const marker = '# ScreenSync legacy deps PATH';
+  const exportLine = 'export PATH="$HOME/.screensync/bin:$HOME/.screensync/deps/node/bin:$PATH"';
+
+  for (const profilePath of profilePaths) {
+    try {
+      let content = '';
+      if (fs.existsSync(profilePath)) {
+        content = fs.readFileSync(profilePath, 'utf8');
+      }
+      if (content.includes(marker) || content.includes(exportLine)) {
+        continue;
+      }
+      const appendText = `${content && !content.endsWith('\n') ? '\n' : ''}${marker}\n${exportLine}\n`;
+      fs.appendFileSync(profilePath, appendText, 'utf8');
+      if (typeof sendLog === 'function') {
+        sendLog(`   ✅ 已更新 Shell PATH: ${profilePath}\n`);
+      }
+    } catch (e) {
+      if (typeof sendLog === 'function') {
+        sendLog(`   ⚠️ 更新 Shell PATH 失败 (${profilePath}): ${e.message}\n`);
+      }
+    }
+  }
+}
+
 function getLegacyNodeUrl() {
   const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
   return `https://nodejs.org/dist/v${LEGACY_NODE_VERSION}/node-v${LEGACY_NODE_VERSION}-darwin-${arch}.tar.gz`;
@@ -1113,6 +1144,7 @@ async function installLegacyDeps(event, dependencyStatus, options = {}) {
     if (fs.existsSync(legacyNodeBin) && !process.env.PATH.includes(legacyNodeBin)) {
       process.env.PATH = `${legacyNodeBin}:${process.env.PATH}`;
     }
+    ensureLegacyBinInShellProfiles(sendLog);
 
     return { success: true, message: '所有依赖安装完成' };
   } catch (error) {
@@ -1839,8 +1871,11 @@ ipcMain.handle('setup-autostart', async (event, installPath) => {
       plistContent = plistContent
         .replace(/__NODE_PATH__/g, nodePath)
         .replace(/__INSTALL_PATH__/g, installPath)
-        // 也更新 PATH 环境变量，确保包含所有可能的位置
-        .replace(/\/opt\/homebrew\/bin:\/usr\/local\/bin:\/usr\/bin:\/bin:\/usr\/sbin:\/sbin/g, comprehensivePath);
+        // 更新 PATH 环境变量，避免模板文本微调后替换失效
+        .replace(
+          /(<key>PATH<\/key>\s*<string>)([^<]*)(<\/string>)/,
+          `$1${comprehensivePath}$3`
+        );
       
       console.log('📝 LaunchAgent PATH:', comprehensivePath);
       

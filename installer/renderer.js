@@ -317,8 +317,6 @@ function showToast(message, type = 'info') {
   const toast = document.getElementById('toast');
   const iconEl = toast.querySelector('.toast-icon');
   const messageEl = toast.querySelector('.toast-message');
-  const errorOverlay = document.getElementById('errorDetailOverlay');
-  const errorModal = errorOverlay ? errorOverlay.querySelector('.modal') : null;
   
   // 设置图标（统一的圆形背景 + 白色图标设计）
   if (type === 'success') {
@@ -333,15 +331,6 @@ function showToast(message, type = 'info') {
   }
   
   messageEl.textContent = message;
-
-  // 失败详情弹窗打开时，将 toast 定位到弹窗上方
-  if (errorOverlay && errorOverlay.classList.contains('show') && errorModal) {
-    const modalRect = errorModal.getBoundingClientRect();
-    const top = Math.max(16, Math.round(modalRect.top - 48));
-    toast.style.top = `${top}px`;
-  } else {
-    toast.style.top = '';
-  }
   
   // 显示
   setTimeout(() => toast.classList.add('show'), 10);

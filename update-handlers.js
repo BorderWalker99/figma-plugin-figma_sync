@@ -54,7 +54,7 @@ function fetchLatestRelease(repoPath) {
   });
 }
 
-// 检查并通知更新（插件和服务器）
+// 检查并通知更新（统一更新，不区分插件/服务器）
 async function checkAndNotifyUpdates(targetGroup, connectionId) {
   if (!targetGroup || !targetGroup.figma || targetGroup.figma.readyState !== WebSocket.OPEN) {
     return;
@@ -64,14 +64,9 @@ async function checkAndNotifyUpdates(targetGroup, connectionId) {
     const repo = 'BorderWalker99/figma-plugin-figma_sync';
     const releaseInfo = await fetchLatestRelease(repo);
     
-    // 获取当前版本
+    // 单一版本源：统一使用 VERSION.txt 作为当前已安装版本
     const currentServerVersion = getCurrentServerVersion();
     const latestVersion = releaseInfo.tag_name.replace(/^v/, '');
-    
-    // 查找更新文件
-    const pluginAsset = releaseInfo.assets.find(asset => 
-      asset.name.includes('figma-plugin') && asset.name.endsWith('.zip')
-    );
     
     // 检测当前系统架构，查找对应的服务器更新包
     const arch = process.arch; // 'arm64' for Apple Silicon, 'x64' for Intel
@@ -88,23 +83,7 @@ async function checkAndNotifyUpdates(targetGroup, connectionId) {
       );
     }
     
-    // 检查插件更新
-    if (pluginAsset) {
-      const currentPluginVersion = getCurrentPluginVersion();
-      const pluginNeedsUpdate = !currentPluginVersion || compareVersions(latestVersion, currentPluginVersion) > 0;
-      
-      if (pluginNeedsUpdate) {
-        sendToFigma(targetGroup, {
-          type: 'plugin-update-info',
-          latestVersion: latestVersion,
-          updateUrl: releaseInfo.html_url,
-          releaseNotes: releaseInfo.body || '',
-          hasUpdate: true
-        });
-      }
-    }
-    
-    // 检查服务器更新
+    // 统一更新判断：仅比较 latestVersion 与 VERSION.txt
     if (serverAsset) {
       const serverNeedsUpdate = !currentServerVersion || compareVersions(latestVersion, currentServerVersion) > 0;
       
@@ -137,25 +116,6 @@ function getCurrentServerVersion() {
     }
   } catch (error) {
     // 忽略错误
-  }
-  return null;
-}
-
-// 获取当前插件版本
-function getCurrentPluginVersion() {
-  try {
-    // 从 code.js 中读取 PLUGIN_VERSION 常量
-    const codeFile = path.join(__dirname, 'figma-plugin', 'code.js');
-    if (fs.existsSync(codeFile)) {
-      const codeContent = fs.readFileSync(codeFile, 'utf8');
-      // 匹配 PLUGIN_VERSION = 'x.x.x' 或 PLUGIN_VERSION = "x.x.x"
-      const versionMatch = codeContent.match(/PLUGIN_VERSION\s*=\s*['"]([^'"]+)['"]/);
-      if (versionMatch && versionMatch[1]) {
-        return versionMatch[1];
-      }
-    }
-  } catch (error) {
-    console.warn('⚠️ 无法读取插件版本:', error.message);
   }
   return null;
 }
