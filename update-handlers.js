@@ -19,15 +19,18 @@ module.exports = function createUpdateHandlers({ sendToFigma, WebSocket }) {
 // Shared helper: fetch the latest GitHub release for a given repo path (e.g. 'owner/repo')
 function fetchLatestRelease(repoPath) {
   return new Promise((resolve, reject) => {
+    const apiAgent = new https.Agent({ keepAlive: true, timeout: 15000 });
     const options = {
+      agent: apiAgent,
       headers: {
         'User-Agent': 'ScreenSync-Updater/1.0',
-        'Accept': 'application/vnd.github.v3+json'
+        'Accept': 'application/vnd.github.v3+json',
+        'Connection': 'keep-alive'
       },
-      timeout: 10000
+      timeout: 15000
     };
-    
-    https.get(`https://api.github.com/repos/${repoPath}/releases/latest`, options, (res) => {
+
+    const req = https.get(`https://api.github.com/repos/${repoPath}/releases/latest`, options, (res) => {
       let data = '';
       res.on('data', (chunk) => { data += chunk; });
       res.on('end', () => {
@@ -37,13 +40,15 @@ function fetchLatestRelease(repoPath) {
           } catch (e) {
             reject(new Error('解析 GitHub API 响应失败'));
           }
+        } else if (res.statusCode === 403 && res.headers['x-ratelimit-remaining'] === '0') {
+          reject(new Error('GitHub API 请求频率限制，请稍后重试'));
         } else {
           reject(new Error(`GitHub API 返回错误: ${res.statusCode}`));
         }
       });
-    }).on('error', reject).on('timeout', () => {
-      reject(new Error('请求超时'));
     });
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('GitHub API 请求超时')); });
   });
 }
 
@@ -168,83 +173,104 @@ function compareVersions(v1, v2) {
   return 0;
 }
 
-// 支持重定向和进度报告的下载函数
-function downloadFileWithRedirect(url, destPath, onProgress = null) {
+// Keep-alive agent for faster subsequent requests (connection reuse)
+const downloadAgent = new https.Agent({ keepAlive: true, maxSockets: 4, timeout: 60000 });
+
+// 支持重定向、进度报告、自动重试的下载函数
+function downloadFileWithRedirect(url, destPath, onProgress = null, _retries = 3) {
   return new Promise((resolve, reject) => {
-    const file = fs.createWriteStream(destPath);
-    
-    // 添加必要的请求头，GitHub 需要 User-Agent 和 Accept
+    const file = fs.createWriteStream(destPath, { highWaterMark: 1024 * 1024 });
+
+    const isGitHubApi = url.includes('api.github.com');
     const options = {
+      agent: downloadAgent,
       headers: {
         'User-Agent': 'ScreenSync-Updater/1.0',
-        'Accept': 'application/vnd.github.v3+json'
+        'Accept': isGitHubApi ? 'application/vnd.github.v3+json' : 'application/octet-stream',
+        'Connection': 'keep-alive'
       }
     };
-    
+
     const request = https.get(url, options, (response) => {
-      // 处理重定向 (HTTP 3xx)
       if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
         const redirectUrl = response.headers.location;
+        response.resume();
         file.close();
-        
-        // 递归调用，传递进度回调
-        downloadFileWithRedirect(redirectUrl, destPath, onProgress)
+        downloadFileWithRedirect(redirectUrl, destPath, onProgress, _retries)
           .then(resolve)
           .catch(reject);
         return;
       }
-      
+
       if (response.statusCode !== 200) {
+        response.resume();
         file.close();
         if (fs.existsSync(destPath)) fs.unlinkSync(destPath);
         console.error(`   ❌ 下载失败: HTTP ${response.statusCode} - ${url}`);
         reject(new Error(`下载失败: HTTP ${response.statusCode}`));
         return;
       }
-      
-      // 📊 获取文件总大小
+
       const totalSize = parseInt(response.headers['content-length'] || '0', 10);
       let downloadedSize = 0;
       let lastProgressTime = Date.now();
-      
-      // 监听数据流，报告进度
+      let lastProgressPct = -1;
+
       response.on('data', (chunk) => {
         downloadedSize += chunk.length;
-        
-        // 每 500ms 报告一次进度，避免过于频繁
         const now = Date.now();
-        if (onProgress && (now - lastProgressTime > 500 || downloadedSize === totalSize)) {
+        if (onProgress && (now - lastProgressTime > 300 || downloadedSize === totalSize)) {
           const progress = totalSize > 0 ? Math.floor((downloadedSize / totalSize) * 100) : 0;
-          onProgress(downloadedSize, totalSize, progress);
+          if (progress !== lastProgressPct) {
+            onProgress(downloadedSize, totalSize, progress);
+            lastProgressPct = progress;
+          }
           lastProgressTime = now;
         }
       });
-      
+
       response.pipe(file);
-      
+
       file.on('finish', () => {
         file.close();
-        // 最后一次进度报告（100%）
         if (onProgress && totalSize > 0) {
           onProgress(totalSize, totalSize, 100);
         }
         resolve();
       });
     });
-    
+
     request.on('error', (err) => {
       file.close();
-      if (fs.existsSync(destPath)) fs.unlinkSync(destPath);
-      console.error(`   ❌ 下载请求错误: ${err.message}`);
-      reject(err);
+      if (fs.existsSync(destPath)) try { fs.unlinkSync(destPath); } catch (_) {}
+      if (_retries > 1) {
+        console.warn(`   ⚠️ 下载失败，${_retries - 1} 次重试剩余: ${err.message}`);
+        setTimeout(() => {
+          downloadFileWithRedirect(url, destPath, onProgress, _retries - 1)
+            .then(resolve)
+            .catch(reject);
+        }, 1000);
+      } else {
+        console.error(`   ❌ 下载请求错误（已用尽重试）: ${err.message}`);
+        reject(err);
+      }
     });
-    
-    request.setTimeout(30000, () => {
+
+    request.setTimeout(60000, () => {
       request.destroy();
       file.close();
-      if (fs.existsSync(destPath)) fs.unlinkSync(destPath);
-      console.error(`   ❌ 下载超时: ${url}`);
-      reject(new Error('下载超时'));
+      if (fs.existsSync(destPath)) try { fs.unlinkSync(destPath); } catch (_) {}
+      if (_retries > 1) {
+        console.warn(`   ⚠️ 下载超时，${_retries - 1} 次重试剩余`);
+        setTimeout(() => {
+          downloadFileWithRedirect(url, destPath, onProgress, _retries - 1)
+            .then(resolve)
+            .catch(reject);
+        }, 1000);
+      } else {
+        console.error(`   ❌ 下载超时（已用尽重试）: ${url}`);
+        reject(new Error('下载超时'));
+      }
     });
   });
 }
@@ -651,14 +677,8 @@ async function handleFullUpdate(targetGroup, connectionId) {
     const tempFile = path.join(__dirname, '.full-update-temp.tar.gz');
     const updateDir = path.join(__dirname, '.full-update');
     
-    // 下载文件（带进度报告和超时保护）
-    const downloadTimeout = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error('下载超时（超过5分钟）')), 300000);
-    });
-    
     // 进度回调函数
     const onDownloadProgress = (downloaded, total, percent) => {
-      // 通知 Figma 插件下载进度
       if (targetGroup.figma && targetGroup.figma.readyState === WebSocket.OPEN) {
         sendToFigma(targetGroup, {
           type: 'update-progress',
@@ -668,11 +688,8 @@ async function handleFullUpdate(targetGroup, connectionId) {
         });
       }
     };
-    
-    await Promise.race([
-      downloadFileWithRedirect(downloadUrl, tempFile, onDownloadProgress),
-      downloadTimeout
-    ]);
+
+    await downloadFileWithRedirect(downloadUrl, tempFile, onDownloadProgress);
     
     const downloadedSize = fs.statSync(tempFile).size;
     console.log(`   ✅ 下载完成: ${(downloadedSize / 1024 / 1024).toFixed(2)} MB`);
@@ -835,59 +852,51 @@ async function handleFullUpdate(targetGroup, connectionId) {
     
     // 🚀 增量更新：只更新有变化的文件
     const crypto = require('crypto');
-    
-    // 计算文件 hash
+
     const getFileHash = (filePath) => {
       try {
-        const content = fs.readFileSync(filePath);
-        return crypto.createHash('sha256').update(content).digest('hex');
-      } catch (error) {
+        return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+      } catch (_) {
         return null;
       }
     };
-    
-    // 备份并更新文件（含 figma-plugin 子目录）
+
     let updatedCount = 0;
     let skippedCount = 0;
     let newFilesCount = 0;
-    
+
     for (const file of allFiles) {
       const srcPath = path.join(extractedDir, file);
       const destPath = path.join(__dirname, file);
       const backupPath = path.join(backupDir, file);
-      
-      if (!fs.existsSync(srcPath)) {
-        console.log(`   ⚠️  源文件不存在，跳过: ${file}`);
-        continue;
-      }
-      // 只处理普通文件，避免把目录/特殊文件复制进来
-      try {
-        if (!fs.statSync(srcPath).isFile()) {
-          continue;
-        }
-      } catch (_) {
-        continue;
-      }
+
+      let srcStat;
+      try { srcStat = fs.statSync(srcPath); } catch (_) { continue; }
+      if (!srcStat.isFile()) continue;
+
       fs.mkdirSync(path.dirname(destPath), { recursive: true });
       fs.mkdirSync(path.dirname(backupPath), { recursive: true });
-      
-      // 检查目标文件是否存在
-      const destExists = fs.existsSync(destPath);
-      
-      if (!destExists) {
-        // 新文件，直接复制
+
+      let destStat;
+      try { destStat = fs.statSync(destPath); } catch (_) { destStat = null; }
+
+      if (!destStat) {
         fs.copyFileSync(srcPath, destPath);
         newFilesCount++;
         updatedCount++;
         continue;
       }
-      
-      // 对比文件内容
-      const srcHash = getFileHash(srcPath);
-      const destHash = getFileHash(destPath);
-      
-      if (srcHash === destHash) {
-        // 文件内容相同，跳过
+
+      // Fast path: different size → must be different
+      if (srcStat.size !== destStat.size) {
+        fs.copyFileSync(destPath, backupPath);
+        fs.copyFileSync(srcPath, destPath);
+        updatedCount++;
+        continue;
+      }
+
+      // Same size → hash compare
+      if (getFileHash(srcPath) === getFileHash(destPath)) {
         skippedCount++;
         continue;
       }

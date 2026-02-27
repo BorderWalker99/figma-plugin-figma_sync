@@ -1,6 +1,6 @@
 // code.js - 智能布局版本
 
-const PLUGIN_VERSION = '1.0.5'; // 插件版本号
+const PLUGIN_VERSION = '1.0.6'; // 插件版本号
 
 
 // 🛡️ 全局错误处理，防止切换文件时崩溃
@@ -787,15 +787,15 @@ figma.ui.onmessage = async (msg) => {
           const gifCacheId = gifLayer.layer.getPluginData('gifCacheId');
           const originalFilename = gifLayer.layer.getPluginData('originalFilename');
           
-          // 缺少云端 ID 时，必须在导出前做缓存校验（即使存在 gifCacheId）
-          if (!driveFileId && !ossFileId) {
+          // 导出阶段：有 gifCacheId 说明早期检查已验证过缓存，无需重复拦截
+          if (!driveFileId && !ossFileId && !gifCacheId) {
             unsyncedGifs.push({
               layerId: gifLayer.layer.id,
               layerName: gifLayer.layer.name,
               filename: originalFilename || gifLayer.layer.name,
               frameId: task.frame.id,
               frameName: task.frame.name,
-              gifCacheId: gifCacheId || null
+              gifCacheId: null
             });
           }
         }
