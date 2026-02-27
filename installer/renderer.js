@@ -414,24 +414,7 @@ Homebrew 不支持此系统版本，自动安装将会失败。
       // 存储系统信息供后续使用
       window.macosInfo = macosInfo;
     } else if (macosInfo.supported === 'limited') {
-      // macOS 11-13：有限支持
-      const limitedWarning = `⚠️ 检测到 macOS ${macosInfo.version} (${macosInfo.name})
-
-Homebrew 对此版本仅提供有限支持。
-
-⏱️ 预期情况：
-- 依赖安装可能需要从源码编译
-- 首次安装可能需要 10-30 分钟
-- 需要安装 Xcode Command Line Tools
-
-✅ 可以继续使用 Homebrew 安装（推荐）
-📋 或查看手动安装方案（见文档）
-
-推荐升级到 macOS 14+ 以获得最佳体验。`;
-      
-      showToast(limitedWarning, 'warning');
-      
-      // 存储系统信息供后续使用
+      // macOS 11-13：有限支持，不弹 toast
       window.macosInfo = macosInfo;
     }
     // macOS 14+ 不显示警告

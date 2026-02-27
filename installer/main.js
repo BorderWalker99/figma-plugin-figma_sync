@@ -419,21 +419,40 @@ ipcMain.handle('check-node', async () => {
 
 ipcMain.handle('check-imagemagick', async () => {
   return new Promise((resolve) => {
-    const convertPath = findExecutable('convert');
-    
-    if (convertPath) {
-      exec('convert -version', (error, output) => {
-        if (!error && output.includes('ImageMagick')) {
-          // 提取版本号
-          const versionMatch = output.match(/Version: ImageMagick ([\d.]+)/);
+    // ImageMagick 7 uses 'magick' as the primary binary; 'convert' is legacy/deprecated.
+    const magickPath = findExecutable('magick');
+    if (magickPath) {
+      exec(`"${magickPath}" -version`, (error, stdout, stderr) => {
+        const combined = (stdout || '') + (stderr || '');
+        if (!error && combined.includes('ImageMagick')) {
+          const versionMatch = combined.match(/Version: ImageMagick ([\d.]+)/);
           const version = versionMatch ? versionMatch[1] : 'unknown';
           resolve({ installed: true, version: version });
         } else {
-          resolve({ installed: false });
+          // magick found but -version failed, try convert as fallback
+          tryConvertFallback(resolve);
         }
       });
     } else {
-      resolve({ installed: false });
+      tryConvertFallback(resolve);
+    }
+
+    function tryConvertFallback(res) {
+      const convertPath = findExecutable('convert');
+      if (convertPath) {
+        exec(`"${convertPath}" -version`, (error, stdout, stderr) => {
+          const combined = (stdout || '') + (stderr || '');
+          if (!error && combined.includes('ImageMagick')) {
+            const versionMatch = combined.match(/Version: ImageMagick ([\d.]+)/);
+            const version = versionMatch ? versionMatch[1] : 'unknown';
+            res({ installed: true, version: version });
+          } else {
+            res({ installed: false });
+          }
+        });
+      } else {
+        res({ installed: false });
+      }
     }
   });
 });
@@ -947,14 +966,28 @@ async function installLegacyImageMagick(sendProgress, sendLog) {
 
     if (installed) {
       try {
-        const { stdout } = await execPromise(`"${path.join(LEGACY_BIN_DIR, 'magick')}" --version`);
+        const { stdout } = await execPromise(`"${path.join(LEGACY_BIN_DIR, 'magick')}" -version`);
         const ver = stdout.split('\n')[0];
         sendLog(`   ✅ ${ver}\n`);
+        sendProgress('imagemagick', 'done', '安装完成');
       } catch (e) {
-        sendLog('   ✅ ImageMagick 已安装\n');
+        sendLog(`   ⚠️ ImageMagick 二进制文件已安装但无法执行: ${e.message}\n`);
+        sendLog('   可能需要移除 macOS 隔离属性，正在尝试...\n');
+        try {
+          await execPromise(`xattr -rd com.apple.quarantine "${path.join(LEGACY_DEPS_DIR, 'imagemagick')}" 2>/dev/null || true`);
+          await execPromise(`xattr -rd com.apple.quarantine "${LEGACY_BIN_DIR}/magick" 2>/dev/null || true`);
+          await execPromise(`xattr -rd com.apple.quarantine "${LEGACY_BIN_DIR}/convert" 2>/dev/null || true`);
+          const { stdout: retryOut } = await execPromise(`"${path.join(LEGACY_BIN_DIR, 'magick')}" -version`);
+          sendLog(`   ✅ ${retryOut.split('\n')[0]}\n`);
+          sendProgress('imagemagick', 'done', '安装完成');
+        } catch (e2) {
+          sendLog(`   ❌ ImageMagick 安装后仍无法运行: ${e2.message}\n`);
+          installed = false;
+        }
       }
-      sendProgress('imagemagick', 'done', '安装完成');
-    } else {
+    }
+    
+    if (!installed) {
       sendLog('   💡 请手动安装 ImageMagick:\n');
       sendLog('      方法1: 安装 Homebrew 后运行 brew install imagemagick\n');
       sendLog('      方法2: 访问 https://imagemagick.org 下载 macOS 版本\n');

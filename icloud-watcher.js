@@ -11,6 +11,8 @@ sharp.simd(false); // 禁用 SIMD
 sharp.concurrency(1); // 限制并发
 
 const { exec } = require('child_process');
+const { promisify } = require('util');
+const execAsync = promisify(exec);
 const os = require('os');
 
 // 引入用户配置
@@ -40,6 +42,10 @@ let reconnectTimer = null;
 let syncCount = 0;
 let isRealTimeMode = false;
 let watcher = null;
+let isSyncing = false;
+let manualSyncAbortRequested = false;
+let manualSyncRunId = 0;
+const MANUAL_SYNC_CANCELLED_CODE = 'MANUAL_SYNC_CANCELLED';
 
 // 待删除文件队列：{filename: { filePath, subfolder }}
 const pendingDeletes = new Map();
@@ -89,6 +95,139 @@ function markFileAsProcessed(filePath) {
   if (fingerprint) {
     processedFilesCache.set(fingerprint, Date.now());
   }
+}
+
+function createManualSyncCancelledError() {
+  const error = new Error('手动同步已取消');
+  error.code = MANUAL_SYNC_CANCELLED_CODE;
+  return error;
+}
+
+function isManualSyncCancelledError(error) {
+  if (!error) return false;
+  if (error.code === MANUAL_SYNC_CANCELLED_CODE) return true;
+  const msg = String(error.message || '');
+  return msg.includes('手动同步已取消') || msg.includes(MANUAL_SYNC_CANCELLED_CODE);
+}
+
+function requestManualSyncCancel() {
+  if (!isSyncing) return false;
+  manualSyncAbortRequested = true;
+  return true;
+}
+
+function safeSend(message) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+  try { ws.send(JSON.stringify(message)); return true; } catch (_) { return false; }
+}
+
+function sendProgress(type, data) {
+  safeSend({ type, ...data });
+}
+
+function saveCacheMapping(fileName, cacheId) {
+  try {
+    const localFolder = userConfig.getLocalDownloadFolder();
+    const mappingFile = path.join(localFolder, '.cache-mapping.json');
+    let mapping = {};
+    if (fs.existsSync(mappingFile)) {
+      try { mapping = JSON.parse(fs.readFileSync(mappingFile, 'utf8')); } catch (_) {}
+    }
+    mapping[fileName] = cacheId;
+    const keys = Object.keys(mapping);
+    if (keys.length > 500) {
+      for (let i = 0; i < keys.length - 500; i++) delete mapping[keys[i]];
+    }
+    fs.writeFileSync(mappingFile, JSON.stringify(mapping, null, 2));
+  } catch (_) {}
+}
+
+/**
+ * 将视频转换为 GIF（两遍调色板算法，与 Google Drive 模式完全一致）
+ */
+async function convertVideoToGif(videoPath, displayFilename, progressCb) {
+  const stats = fs.statSync(videoPath);
+  const videoSizeMB = (stats.size / 1024 / 1024).toFixed(1);
+  const convStartTime = Date.now();
+  console.log(`   🎬 [Video→GIF] 开始转换 ${displayFilename} (${videoSizeMB}MB)...`);
+
+  const estimatedSec = Math.max(5, Math.ceil(parseFloat(videoSizeMB) * 2));
+  if (progressCb) progressCb('converting', 25, { estimatedSec, isVideo: true });
+
+  const tempDir = path.join(os.tmpdir(), `screensync-v2g-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`);
+  fs.mkdirSync(tempDir, { recursive: true });
+
+  const tempPalette = path.join(tempDir, 'palette.png');
+  const tempGifOut = path.join(tempDir, 'output.gif');
+
+  try {
+    const scaleFilter = `fps=15,scale='trunc(iw/4)*2':'trunc(ih/4)*2':flags=lanczos`;
+
+    const pass1Cmd = `ffmpeg -hwaccel auto -threads 0 -i "${videoPath}" -vf "${scaleFilter},palettegen=max_colors=256:stats_mode=full" -y "${tempPalette}"`;
+    await execAsync(pass1Cmd, { timeout: 90000, maxBuffer: 50 * 1024 * 1024 });
+
+    if (progressCb) progressCb('converting', 55, { estimatedSec, isVideo: true });
+
+    const pass2Cmd = `ffmpeg -hwaccel auto -threads 0 -i "${videoPath}" -i "${tempPalette}" -lavfi "${scaleFilter}[v];[v][1:v]paletteuse=dither=sierra2_4a:diff_mode=rectangle" -threads 0 -loop 0 -y "${tempGifOut}"`;
+    await execAsync(pass2Cmd, { timeout: 180000, maxBuffer: 200 * 1024 * 1024 });
+
+    if (!fs.existsSync(tempGifOut) || fs.statSync(tempGifOut).size === 0) {
+      throw new Error('转换输出为空');
+    }
+
+    if (progressCb) progressCb('converting', 80, { isVideo: true });
+
+    const gifBuffer = fs.readFileSync(tempGifOut);
+    const gifSizeMB = (gifBuffer.length / 1024 / 1024).toFixed(1);
+    const convTime = ((Date.now() - convStartTime) / 1000).toFixed(1);
+    console.log(`   ✅ [Video→GIF] ${videoSizeMB}MB → ${gifSizeMB}MB GIF (${convTime}秒)`);
+
+    return gifBuffer;
+  } finally {
+    try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch (_) {}
+  }
+}
+
+/**
+ * 处理视频文件：转换为 GIF，保存到 iCloud GIF 子文件夹，替换原视频，同步到 Figma
+ * @returns {{ gifBuffer, gifPath, gifFilename, gifCacheId }} 或 null（失败时）
+ */
+async function processVideoFile(videoPath, displayFilename, subfolder, progressCb) {
+  const downloaded = await waitForICloudDownload(videoPath, 60000);
+  if (!downloaded) {
+    console.log(`   ⚠️  视频可能未完全下载，尝试继续转换...`);
+  }
+
+  const gifBuffer = await convertVideoToGif(videoPath, displayFilename, progressCb);
+
+  const gifFilename = displayFilename.replace(/\.(mp4|mov)$/i, '.gif');
+  const gifPath = path.join(path.dirname(videoPath), gifFilename);
+  fs.writeFileSync(gifPath, gifBuffer);
+
+  // 删除原始视频
+  try {
+    if (fs.existsSync(videoPath) && videoPath !== gifPath) {
+      fs.unlinkSync(videoPath);
+      console.log(`   🗑️  已删除原始视频: ${displayFilename}`);
+    }
+  } catch (delErr) {
+    console.warn(`   ⚠️  删除原始视频失败: ${delErr.message}`);
+  }
+
+  // 保存到 GIF 缓存
+  let gifCacheId = null;
+  try {
+    const cacheResult = userConfig.saveGifToCache(gifBuffer, gifFilename, null);
+    if (cacheResult && cacheResult.cacheId) {
+      gifCacheId = cacheResult.cacheId;
+      saveCacheMapping(gifFilename, gifCacheId);
+      console.log(`   💾 [GIF Cache] 已缓存 (ID: ${gifCacheId})`);
+    }
+  } catch (cacheErr) {
+    console.error(`   ⚠️  [GIF Cache] 缓存失败:`, cacheErr.message);
+  }
+
+  return { gifBuffer, gifPath, gifFilename, gifCacheId };
 }
 
 // ============= 子文件夹管理 =============
@@ -468,6 +607,11 @@ function connectWebSocket() {
       } else if (message.type === 'manual-sync') {
         console.log('\n📦 执行手动同步...\n');
         performManualSync();
+      } else if (message.type === 'cancel-manual-sync') {
+        const accepted = requestManualSyncCancel();
+        if (accepted) {
+          console.log('🛑 [iCloud] 收到取消手动同步请求，正在停止...');
+        }
       } else if (message.type === 'switch-sync-mode') {
         console.log('\n🔄 收到模式切换消息');
         console.log('   目标模式:', message.mode);
@@ -724,28 +868,58 @@ function startWatching() {
       return;
     }
     
-    // 处理视频文件
+    // 处理视频文件 → 自动转换为 GIF
     if (isVideo) {
-      console.log(`\n🎥 [实时模式] 视频文件: ${displayFilename}`);
-      console.log(`   ⚠️  视频文件需要手动拖入 Figma`);
-      
-      // 缓存视频文件
+      console.log(`\n🎬 [实时模式] 视频文件: ${displayFilename}，开始转换 GIF...`);
+
       try {
-        const fileBuffer = fs.readFileSync(finalPath);
-        const cacheResult = userConfig.saveGifToCache(fileBuffer, displayFilename, null);
-        if (cacheResult && cacheResult.cacheId) {
-          console.log(`   💾 [GIF Cache] 视频已自动缓存 (ID: ${cacheResult.cacheId})`);
+        const emitProgress = (stage, percent, extra = {}) => {
+          sendProgress('conversion-progress', {
+            filename: displayFilename, stage, percent, isVideo: true, ...extra
+          });
+        };
+
+        emitProgress('converting', 10, { isVideo: true });
+
+        const result = await processVideoFile(finalPath, displayFilename, subfolder, emitProgress);
+
+        if (result.gifBuffer.length > 100 * 1024 * 1024) {
+          console.warn(`   ⚠️  转换后 GIF 过大，需手动导入`);
+          safeSend({ type: 'file-skipped', filename: result.gifFilename, reason: 'gif-too-large', gifCacheId: result.gifCacheId });
+          markFileAsProcessed(result.gifPath);
+          return;
         }
-      } catch (cacheError) {
-        console.error(`   ⚠️  [GIF Cache] 缓存失败:`, cacheError.message);
-      }
-      
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({
-          type: 'file-skipped',
-          filename: displayFilename,
-          reason: 'video'
-        }));
+
+        emitProgress('importing', 90, { isVideo: true });
+
+        const base64String = result.gifBuffer.toString('base64');
+        safeSend({
+          type: 'screenshot',
+          bytes: base64String,
+          timestamp: Date.now(),
+          filename: result.gifFilename,
+          isGif: true,
+          gifCacheId: result.gifCacheId || null,
+          keptInIcloud: !shouldCleanupFile(subfolder || CONFIG.subfolders.gif)
+        });
+
+        syncCount++;
+        markFileAsProcessed(result.gifPath);
+        emitProgress('done', 100, { isVideo: true });
+
+        pendingDeletes.set(result.gifFilename, { filePath: result.gifPath, subfolder: subfolder || CONFIG.subfolders.gif });
+        console.log(`   ✅ 视频转 GIF 完成并已同步到 Figma`);
+      } catch (convErr) {
+        console.error(`   ❌ [Video→GIF] 转换失败: ${convErr.message}`);
+        // 转换失败时，缓存原始视频以便手动操作
+        try {
+          const fileBuffer = fs.readFileSync(finalPath);
+          const cacheResult = userConfig.saveGifToCache(fileBuffer, displayFilename, null);
+          if (cacheResult && cacheResult.cacheId) {
+            console.log(`   💾 [GIF Cache] 视频已缓存 (ID: ${cacheResult.cacheId})`);
+          }
+        } catch (_) {}
+        safeSend({ type: 'file-skipped', filename: displayFilename, reason: 'video' });
       }
       return;
     }
@@ -949,186 +1123,217 @@ function countFilesForManualSync() {
 }
 
 async function performManualSync() {
-  if (!fs.existsSync(CONFIG.icloudPath)) {
-    console.log('❌ 同步文件夹不存在\n');
-    
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({
-        type: 'manual-sync-complete',
-        count: 0,
-        total: 0,
-        gifCount: 0,
-        videoCount: 0,
-        message: '同步文件夹不存在'
-      }));
-    }
+  if (isSyncing) {
+    console.warn('⚠️  [iCloud] 手动同步正在进行中，跳过本次请求');
+    safeSend({ type: 'manual-sync-complete', count: 0, gifCount: 0, videoCount: 0, message: '同步正在进行中' });
     return;
   }
-  
-  // 确保子文件夹存在
-  ensureSubfolders();
-  
-  // 收集所有待同步文件（根目录 + 子文件夹）
-  const allFiles = [];
-  
-  // 收集根目录文件并分类
-  const rootFiles = fs.readdirSync(CONFIG.icloudPath).filter(file => {
-    const filePath = path.join(CONFIG.icloudPath, file);
-    const stats = fs.statSync(filePath);
-    if (stats.isDirectory()) return false;
-    const ext = path.extname(file).toLowerCase();
-    return CONFIG.supportedFormats.includes(ext);
-  });
-  
-  // 先将根目录文件分类到子文件夹（包含 HEIF 转换和自动命名）
-  for (const file of rootFiles) {
-    const filePath = path.join(CONFIG.icloudPath, file);
-    const { newPath, subfolder } = await moveFileToSubfolder(filePath);
-    allFiles.push({ filePath: newPath, subfolder });
-  }
-  
-  // 收集子文件夹中的文件
-  const subfolders = [CONFIG.subfolders.image, CONFIG.subfolders.gif];
-  for (const subfolder of subfolders) {
-    const subfolderPath = path.join(CONFIG.icloudPath, subfolder);
-    if (fs.existsSync(subfolderPath)) {
-      const subFiles = fs.readdirSync(subfolderPath).filter(file => {
-        const filePath = path.join(subfolderPath, file);
-        const stats = fs.statSync(filePath);
-        if (stats.isDirectory()) return false;
-        const ext = path.extname(file).toLowerCase();
-        return CONFIG.supportedFormats.includes(ext);
+
+  isSyncing = true;
+  manualSyncAbortRequested = false;
+  const currentRunId = ++manualSyncRunId;
+  const shouldAbort = () => manualSyncAbortRequested || currentRunId !== manualSyncRunId;
+
+  try {
+    if (!fs.existsSync(CONFIG.icloudPath)) {
+      console.log('❌ 同步文件夹不存在\n');
+      safeSend({ type: 'manual-sync-complete', count: 0, total: 0, gifCount: 0, videoCount: 0, message: '同步文件夹不存在' });
+      return;
+    }
+
+    ensureSubfolders();
+
+    // 收集所有待同步文件
+    const allFiles = [];
+
+    const rootFiles = fs.readdirSync(CONFIG.icloudPath).filter(file => {
+      const fp = path.join(CONFIG.icloudPath, file);
+      try {
+        const st = fs.statSync(fp);
+        if (st.isDirectory()) return false;
+        return CONFIG.supportedFormats.includes(path.extname(file).toLowerCase());
+      } catch (_) { return false; }
+    });
+
+    for (const file of rootFiles) {
+      if (shouldAbort()) break;
+      const filePath = path.join(CONFIG.icloudPath, file);
+      const { newPath, subfolder } = await moveFileToSubfolder(filePath);
+      allFiles.push({ filePath: newPath, subfolder });
+    }
+
+    const subfolders = [CONFIG.subfolders.image, CONFIG.subfolders.gif];
+    for (const sf of subfolders) {
+      const sfPath = path.join(CONFIG.icloudPath, sf);
+      if (!fs.existsSync(sfPath)) continue;
+      const subFiles = fs.readdirSync(sfPath).filter(file => {
+        const fp = path.join(sfPath, file);
+        try {
+          const st = fs.statSync(fp);
+          if (st.isDirectory()) return false;
+          return CONFIG.supportedFormats.includes(path.extname(file).toLowerCase());
+        } catch (_) { return false; }
       });
-      
       for (const file of subFiles) {
-        const filePath = path.join(subfolderPath, file);
-        // 检查是否已经在 allFiles 中（避免重复）
+        const filePath = path.join(sfPath, file);
         if (!allFiles.some(f => f.filePath === filePath)) {
-          allFiles.push({ filePath, subfolder });
+          allFiles.push({ filePath, subfolder: sf });
         }
       }
     }
-  }
-  
-  if (allFiles.length === 0) {
-    console.log('📭 文件夹为空，没有截图需要同步\n');
-    
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({
-        type: 'manual-sync-complete',
-        count: 0,
-        gifCount: 0,
-        videoCount: 0
-      }));
+
+    if (allFiles.length === 0) {
+      console.log('📭 文件夹为空，没有截图需要同步\n');
+      safeSend({ type: 'manual-sync-complete', count: 0, gifCount: 0, videoCount: 0 });
+      return;
     }
-    return;
-  }
-  
-  console.log(`📦 [手动模式] 找到 ${allFiles.length} 个文件，开始同步...\n`);
-  
-  let successCount = 0;
-  let gifCount = 0;
-  let videoCount = 0;
-  const processingErrors = [];
-  
-  for (const { filePath, subfolder } of allFiles) {
-    const file = path.basename(filePath);
-    
-    try {
-      const ext = path.extname(filePath).toLowerCase();
-      const isGif = ext === '.gif';
-      const isVideo = ext === '.mp4' || ext === '.mov';
-      
-      // 处理视频文件
-      if (isVideo) {
-        console.log(`   🎥 检测到视频文件: ${file}`);
-        console.log(`   ⚠️  视频文件需要手动拖入`);
-        
-        // 缓存视频
-        try {
-          const fileBuffer = fs.readFileSync(filePath);
-          const cacheResult = userConfig.saveGifToCache(fileBuffer, file, null);
-          if (cacheResult && cacheResult.cacheId) {
-            console.log(`   💾 [GIF Cache] 视频已自动缓存 (ID: ${cacheResult.cacheId})`);
-          }
-        } catch (cacheError) {
-          console.error(`   ⚠️  [GIF Cache] 缓存失败:`, cacheError.message);
-        }
-        
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({
-            type: 'file-skipped',
-            filename: file,
-            reason: 'video'
-          }));
-        }
-        videoCount++;
-        continue;
-      }
-      
-      // 处理大GIF
-      if (isGif) {
-        try {
-          const stats = fs.statSync(filePath);
-          const maxGifSize = 100 * 1024 * 1024;
-          
-          if (stats.size > maxGifSize) {
-            console.log(`   ⚠️  GIF 文件过大，需要手动拖入: ${file}`);
-            
+
+    const totalFiles = allFiles.length;
+    console.log(`📦 [手动模式] 找到 ${totalFiles} 个文件，开始同步...\n`);
+
+    sendProgress('manual-sync-progress', {
+      total: totalFiles, completed: 0, percent: 0,
+      fileIndex: 0, filename: '', filePercent: 0, stage: 'counting'
+    });
+
+    let successCount = 0;
+    let gifCount = 0;
+    let videoCount = 0;
+    let completedCount = 0;
+    const processingErrors = [];
+    let cancelled = false;
+
+    for (let i = 0; i < allFiles.length; i++) {
+      if (shouldAbort()) { cancelled = true; break; }
+
+      const { filePath, subfolder } = allFiles[i];
+      const file = path.basename(filePath);
+      const fileOrder = i + 1;
+
+      const fileProgressCb = (stage, percent, extra = {}) => {
+        if (shouldAbort()) throw createManualSyncCancelledError();
+        const filePct = Math.max(0, Math.min(100, Math.round(percent || 0)));
+        const overallPct = totalFiles > 0
+          ? Math.min(99, Math.round((((fileOrder - 1) + (filePct / 100)) / totalFiles) * 100))
+          : 0;
+        sendProgress('manual-sync-progress', {
+          total: totalFiles, completed: completedCount, percent: overallPct,
+          fileIndex: fileOrder, filename: file, filePercent: filePct, stage
+        });
+      };
+
+      try {
+        const ext = path.extname(filePath).toLowerCase();
+        const isGif = ext === '.gif';
+        const isVideo = ext === '.mp4' || ext === '.mov';
+
+        fileProgressCb('downloading', 5);
+
+        if (isVideo) {
+          console.log(`   🎬 [手动同步] 视频文件: ${file}，开始转换 GIF...`);
+
+          try {
+            const result = await processVideoFile(filePath, file, subfolder, fileProgressCb);
+
+            if (result.gifBuffer.length > 100 * 1024 * 1024) {
+              safeSend({ type: 'file-skipped', filename: result.gifFilename, reason: 'gif-too-large', gifCacheId: result.gifCacheId });
+              videoCount++;
+            } else {
+              fileProgressCb('importing', 90);
+              const base64String = result.gifBuffer.toString('base64');
+              safeSend({
+                type: 'screenshot',
+                bytes: base64String,
+                timestamp: Date.now(),
+                filename: result.gifFilename,
+                isGif: true,
+                gifCacheId: result.gifCacheId || null,
+                keptInIcloud: !shouldCleanupFile(subfolder || CONFIG.subfolders.gif)
+              });
+              successCount++;
+              gifCount++;
+              markFileAsProcessed(result.gifPath);
+            }
+          } catch (convErr) {
+            if (isManualSyncCancelledError(convErr)) { cancelled = true; break; }
+            console.error(`   ❌ [Video→GIF] 转换失败: ${convErr.message}`);
+            // 转换失败时缓存原始视频
             try {
-              const fileBuffer = fs.readFileSync(filePath);
-              const cacheResult = userConfig.saveGifToCache(fileBuffer, file, null);
-              if (cacheResult && cacheResult.cacheId) {
-                console.log(`   💾 [GIF Cache] 大GIF已自动缓存 (ID: ${cacheResult.cacheId})`);
-              }
-            } catch (cacheError) {
-              console.error(`   ⚠️  [GIF Cache] 缓存失败:`, cacheError.message);
-            }
-            
-            if (ws && ws.readyState === WebSocket.OPEN) {
-              ws.send(JSON.stringify({
-                type: 'file-skipped',
-                filename: file,
-                reason: 'gif-too-large'
-              }));
-            }
-            gifCount++;
-            continue;
+              const buf = fs.readFileSync(filePath);
+              userConfig.saveGifToCache(buf, file, null);
+            } catch (_) {}
+            safeSend({ type: 'file-skipped', filename: file, reason: 'video' });
+            videoCount++;
           }
-        } catch (checkError) {
-          console.error(`   ❌ GIF 文件检查失败: ${checkError.message}`);
-          processingErrors.push({ filename: file, error: checkError.message });
-          continue;
+        } else if (isGif) {
+          try {
+            const st = fs.statSync(filePath);
+            if (st.size > 100 * 1024 * 1024) {
+              try {
+                const buf = fs.readFileSync(filePath);
+                const cr = userConfig.saveGifToCache(buf, file, null);
+                if (cr && cr.cacheId) saveCacheMapping(file, cr.cacheId);
+              } catch (_) {}
+              safeSend({ type: 'file-skipped', filename: file, reason: 'gif-too-large' });
+              gifCount++;
+            } else {
+              fileProgressCb('importing', 50);
+              await syncScreenshot(filePath, true, subfolder);
+              successCount++;
+              gifCount++;
+            }
+          } catch (checkErr) {
+            processingErrors.push({ filename: file, error: checkErr.message });
+          }
+        } else {
+          fileProgressCb('importing', 50);
+          await syncScreenshot(filePath, true, subfolder);
+          successCount++;
         }
+
+        completedCount++;
+        const pct = totalFiles > 0 ? Math.round((fileOrder / totalFiles) * 100) : 100;
+        sendProgress('manual-sync-progress', {
+          total: totalFiles, completed: completedCount, percent: pct,
+          fileIndex: fileOrder, filename: '', filePercent: 100, stage: 'file-done'
+        });
+
+      } catch (error) {
+        if (isManualSyncCancelledError(error)) { cancelled = true; break; }
+        console.error(`❌ 同步失败: ${file}`, error.message);
+        processingErrors.push({ filename: file, error: error.message });
+        completedCount++;
       }
-      
-      await syncScreenshot(filePath, true, subfolder);
-      successCount++;
-      
-      if (isGif) {
-        gifCount++;
-      }
-      
-      await sleep(300);
-    } catch (error) {
-      console.error(`❌ 同步失败: ${file}`, error.message);
-      processingErrors.push({ filename: file, error: error.message });
     }
-  }
-  
-  console.log(`\n✅ [手动模式] 同步完成！成功: ${successCount}/${allFiles.length}\n`);
-  if (processingErrors.length > 0) {
-    console.log(`   ❌ 失败: ${processingErrors.length} 个`);
-  }
-  
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({
+
+    if (cancelled) {
+      console.log(`\n🛑 [手动模式] 同步已取消 (已完成 ${completedCount}/${totalFiles})\n`);
+      safeSend({
+        type: 'manual-sync-cancelled',
+        count: successCount, totalFiles,
+        imageCount: successCount - gifCount - videoCount,
+        gifCount, completed: completedCount
+      });
+      return;
+    }
+
+    console.log(`\n✅ [手动模式] 同步完成！成功: ${successCount}/${totalFiles}\n`);
+    if (processingErrors.length > 0) {
+      console.log(`   ❌ 失败: ${processingErrors.length} 个`);
+    }
+
+    safeSend({
       type: 'manual-sync-complete',
       count: successCount,
-      gifCount: gifCount,
-      videoCount: videoCount,
+      totalFiles,
+      gifCount,
+      videoCount,
       errors: processingErrors
-    }));
+    });
+
+  } finally {
+    manualSyncAbortRequested = false;
+    isSyncing = false;
   }
 }
 
