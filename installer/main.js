@@ -787,6 +787,13 @@ async function tryInstallFromDmg(dmgUrl, dmgPath, mountPoint, imDir, sendLog) {
 
       const magickBin = path.join(appDest, 'Contents', 'MacOS', 'magick');
       if (fs.existsSync(magickBin)) {
+        // Verify binary actually runs on this CPU architecture before committing
+        try {
+          await execPromise(`"${magickBin}" -version`, { timeout: 10000 });
+        } catch (archErr) {
+          sendLog(`   ⚠️ DMG 中的二进制不兼容当前 CPU 架构: ${archErr.message}\n`);
+          return false;
+        }
         for (const cmd of ['magick', 'convert']) {
           const wrapperPath = path.join(LEGACY_BIN_DIR, cmd);
           fs.writeFileSync(wrapperPath, `#!/bin/bash\nexec "${magickBin}" ${cmd === 'convert' ? 'convert' : ''} "$@"\n`, { mode: 0o755 });
@@ -824,6 +831,13 @@ async function tryInstallFromTarball(tarUrl, tarPath, imDir, sendLog) {
     const magickBin = newBin.trim();
     if (magickBin && fs.existsSync(magickBin)) {
       await execPromise(`chmod +x "${magickBin}"`);
+      // Verify binary actually runs on this CPU architecture before committing
+      try {
+        await execPromise(`"${magickBin}" -version`, { timeout: 10000 });
+      } catch (archErr) {
+        sendLog(`   ⚠️ Tarball 中的二进制不兼容当前 CPU 架构: ${archErr.message}\n`);
+        return false;
+      }
       for (const cmd of ['magick', 'convert']) {
         const dest = path.join(LEGACY_BIN_DIR, cmd);
         try { fs.unlinkSync(dest); } catch (_) {}
