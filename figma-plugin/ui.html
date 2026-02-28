@@ -2819,6 +2819,21 @@
         position: relative;
         z-index: 1;
     }
+
+    .user-id-display .id-content.has-overflow-right {
+        -webkit-mask-image: linear-gradient(to right, black calc(100% - 12px), transparent 100%);
+        mask-image: linear-gradient(to right, black calc(100% - 12px), transparent 100%);
+    }
+
+    .user-id-display .id-content.has-overflow-left {
+        -webkit-mask-image: linear-gradient(to left, black calc(100% - 12px), transparent 100%);
+        mask-image: linear-gradient(to left, black calc(100% - 12px), transparent 100%);
+    }
+
+    .user-id-display .id-content.has-overflow-both {
+        -webkit-mask-image: linear-gradient(to right, transparent, black 12px, black calc(100% - 12px), transparent 100%);
+        mask-image: linear-gradient(to right, transparent, black 12px, black calc(100% - 12px), transparent 100%);
+    }
     
     .user-id-display .id-content::-webkit-scrollbar {
         display: none; /* Chrome/Safari/Webkit */
@@ -5663,8 +5678,8 @@
             const el = document.getElementById('displayUserId');
             if (el) {
               el.textContent = data.userId || t('toast_unknown_error');
-              // Remove i18n attr so applyLanguage() won't overwrite the actual userId
               if (data.userId) el.removeAttribute('data-i18n');
+              scheduleIdContentMaskUpdate();
             }
         } else if (data.type === 'plugin-update-info') {
           // 处理插件更新信息
@@ -6706,6 +6721,7 @@
           wsSend('get-sync-mode');
       }
       wsSend('get-user-id');
+      scheduleIdContentMaskUpdate();
         }
     }
 
@@ -6746,6 +6762,7 @@
           contentMobile.style.display = 'block';
           contentMobile.classList.add('active');
           updateQRCodeDisplay();
+          scheduleIdContentMaskUpdate();
       }
       
       settingsOverlay.classList.add('show');
@@ -8450,6 +8467,29 @@
     });
     
     
+    // User ID overflow mask
+    function updateIdContentMask(el) {
+      el.classList.remove('has-overflow-right', 'has-overflow-left', 'has-overflow-both');
+      if (el.scrollWidth <= el.clientWidth) return;
+      const atStart = el.scrollLeft < 1;
+      const atEnd = el.scrollLeft + el.clientWidth >= el.scrollWidth - 1;
+      if (atStart && !atEnd) el.classList.add('has-overflow-right');
+      else if (!atStart && atEnd) el.classList.add('has-overflow-left');
+      else if (!atStart && !atEnd) el.classList.add('has-overflow-both');
+    }
+    function scheduleIdContentMaskUpdate() {
+      const el = document.querySelector('.user-id-display .id-content');
+      if (!el) return;
+      requestAnimationFrame(() => updateIdContentMask(el));
+      setTimeout(() => updateIdContentMask(el), 80);
+      setTimeout(() => updateIdContentMask(el), 260);
+    }
+    const idContentEl = document.querySelector('.user-id-display .id-content');
+    if (idContentEl) {
+      idContentEl.addEventListener('scroll', () => updateIdContentMask(idContentEl));
+    }
+    window.addEventListener('resize', scheduleIdContentMaskUpdate);
+
     // Copy User ID Logic
     const copyUserIdBtn = document.getElementById('copyUserIdBtn');
     if (copyUserIdBtn) {
