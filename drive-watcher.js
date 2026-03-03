@@ -494,6 +494,15 @@ function safeSend(message) {
   }
 }
 
+function notifyLocalGifSaved(filename, syncSource = 'realtime') {
+  safeSend({
+    type: 'local-gif-saved',
+    filename,
+    syncSource,
+    timestamp: Date.now()
+  });
+}
+
 function requestManualSyncCancel() {
   if (!isSyncing) return false;
   manualSyncAbortRequested = true;
@@ -1090,12 +1099,18 @@ async function handleDriveFile(file, deleteAfterSync = false, progressCb = null,
             const bufForBackup = processedBuffer;
             const nameForBackup = file.name;
             deferredLocalBackup = async () => {
-              try { await saveFileToLocalFolder(bufForBackup, nameForBackup, 'image/gif'); } catch (_) {}
+              try {
+                const sr = await saveFileToLocalFolder(bufForBackup, nameForBackup, 'image/gif');
+                if (sr && sr.success && sr.isNew) {
+                  notifyLocalGifSaved(nameForBackup, syncSource);
+                }
+              } catch (_) {}
             };
-            backedUpLocally = true; // 先声明为已备份，实际在后台完成写入
+            backedUpLocally = false;
           } else {
             const sr = await saveFileToLocalFolder(processedBuffer, file.name, 'image/gif');
             backedUpLocally = (sr && sr.success && sr.isNew) || false;
+            if (backedUpLocally) notifyLocalGifSaved(file.name, syncSource);
           }
         }
         
@@ -1138,6 +1153,7 @@ async function handleDriveFile(file, deleteAfterSync = false, progressCb = null,
       if (shouldBackupGif) {
         const saveResult = await saveFileToLocalFolder(processedBuffer, file.name, file.mimeType);
         backedUpLocally = (saveResult && saveResult.success && saveResult.isNew) || false;
+        if (backedUpLocally) notifyLocalGifSaved(file.name, syncSource);
       } else {
         backedUpLocally = false;
       }
@@ -1315,7 +1331,6 @@ async function handleDriveFile(file, deleteAfterSync = false, progressCb = null,
     emitProgress('done', 100, looksLikeVideo ? { isVideo: true } : {});
     if (deferredLocalBackup) {
       setImmediate(() => { deferredLocalBackup(); });
-      backedUpLocally = true;
     }
 
     // 同步成功后立即删除云端源文件，释放云空间
@@ -1961,6 +1976,7 @@ function connectWebSocket() {
           if (cached && cached.path && fs.existsSync(cached.path)) {
             const saveResult = await saveFileToLocalFolder(fs.readFileSync(cached.path), filename, 'image/gif');
             if (saveResult && saveResult.success) {
+              if (saveResult.isNew) notifyLocalGifSaved(filename, 'realtime');
               console.log(`   ✅ 已保存到本地: ${saveResult.filename}`);
               safeSend({ type: 'force-save-gif-done', filename, success: true });
             } else {

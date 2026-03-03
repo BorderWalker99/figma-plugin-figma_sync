@@ -166,7 +166,9 @@
       height: 36px;
     }
     .track-label {
-      width: 100px;
+      width: 72px;
+      min-width: 72px;
+      max-width: 72px;
       font-size: 12px;
       color: var(--text-secondary);
       white-space: nowrap;
@@ -211,10 +213,10 @@
       /* Width will be set dynamically based on track-area width */
     }
     .track-bar-frame {
-      flex: 0 0 auto;
-      width: 40px; /* Fixed width per frame */
-      min-width: 0;
-      background-size: contain; /* Fit full thumbnail, avoid cropping */
+      flex: 0 0 40px;
+      width: 40px;
+      min-width: 40px;
+      background-size: contain;
       background-position: center;
       background-repeat: no-repeat;
       background-color: var(--track-frame-bg);
@@ -4166,7 +4168,7 @@
       </div>
 
       <!-- Tracks Area with Scrubber - scrollable -->
-      <div id="timelineTracksScroll" style="flex: 1 1 auto; min-height: 0; overflow-y: overlay; overflow-x: hidden; position: relative; background: var(--bg-app);">
+      <div id="timelineTracksScroll" style="flex: 1 1 auto; min-height: 0; overflow-y: overlay; overflow-x: auto; position: relative; background: var(--bg-app);">
         <!-- Scrubber Line (Global) - white style with pill handle, always on top -->
         <!-- pointer-events: none 让事件穿透到下层的拖拽条-->
         <div id="timelineScrubber" style="position: absolute; top: 0; width: 12px; margin-left: -5px; z-index: 9999; left: 0; pointer-events: none; display: none; min-height: 100%;">
@@ -4860,8 +4862,6 @@
     let serverInstallPath = null;
     let isMinimized = false;
     let gifBackupCount = 0;
-    // 去重同一 GIF 的“已保存”计数（避免 screenshot + timeout 双加）
-    let countedGifBackupKeys = new Set();
     let exportedGifCount = 0; // New counter for exported GIFs
     let justFinishedExport = false; // Flag to prioritize export status display
     
@@ -4888,29 +4888,14 @@
     const skippedFileCache = new Map();
     const SKIPPED_FILE_CACHE_MAX = 200; // 最多保留 200 条，防止内存无限增长
 
-    function buildGifBackupKey(filename, gifCacheId) {
-      const id = (gifCacheId || '').toString().trim();
-      if (id) return `cache:${id}`;
-      const name = (filename || '').toString().trim();
-      if (name) return `name:${name}`;
-      return '';
-    }
-
-    function increaseGifBackupCountOnce(filename, gifCacheId) {
-      const key = buildGifBackupKey(filename, gifCacheId);
-      if (!key) {
-        gifBackupCount++;
-        return true;
-      }
-      if (countedGifBackupKeys.has(key)) return false;
-      countedGifBackupKeys.add(key);
-      gifBackupCount++;
-      return true;
+    function increaseGifBackupCount(delta = 1) {
+      const n = Number(delta);
+      if (!Number.isFinite(n) || n <= 0) return;
+      gifBackupCount += Math.round(n);
     }
 
     function resetGifBackupCountTracking() {
       gifBackupCount = 0;
-      countedGifBackupKeys.clear();
     }
     
     // 从 localStorage 读取已安装的服务器版本（防止更新后 banner 再次弹出）
@@ -5262,19 +5247,14 @@
           if (isManualSyncing) {
             syncStarted = true;
           }
-          if (data.backedUpLocally || data.keptInIcloud) {
-             // ✅ 根据文件类型分别计数
-             // 只有 GIF 才增加 gifBackupCount，图片不计入（iCloud 模式下图片保留是正常行为）
-             if (data.isGif) {
-              const added = increaseGifBackupCountOnce(data.filename, data.gifCacheId);
-              if (added && isManualSyncing && data.syncSource === 'manual') {
-                 manualSyncSavedGifFromScreenshots++;
-               }
-             }
-             // Don't reset state - let currentButtonState handle locking
-             updateStatus('connected', '');
-          }
           handleScreenshot(data);
+        } else if (data.type === 'local-gif-saved') {
+          // 仅按“本地实际新增成功”计数
+          increaseGifBackupCount(1);
+          pendingStates.savedGif.active = true;
+          pendingStates.savedGif.count = gifBackupCount;
+          currentButtonState = 'gif-backup';
+          updateStatus('connected', '');
         } else if (data.type === 'file-skipped') {
           // ✅ 标记同步已开始（收到了服务器响应）
           if (isManualSyncing) {
@@ -5390,18 +5370,8 @@
           // imageCount = 成功导入 Figma 的纯图片数量
           const imageCount = data.imageCount || 0;
           const gifCount = data.gifCount || 0;
-          const savedGifCount = data.savedGifCount || 0;
           
           let toastMessage;
-
-          if (savedGifCount > 0) {
-            // 手动同步中的 GIF 往往已在 screenshot 消息中计入，这里只补差值，避免双计
-            const deltaSavedGif = Math.max(savedGifCount - manualSyncSavedGifFromScreenshots, 0);
-            gifBackupCount += deltaSavedGif;
-            pendingStates.savedGif.active = true;
-            pendingStates.savedGif.count = gifBackupCount;
-            currentButtonState = 'gif-backup';
-          }
 
           const parts = [];
           if (imageCount > 0) parts.push(tPlural('sync_images', imageCount));
@@ -8252,12 +8222,6 @@
           if (bm === 'none' && msg.gifCacheId) {
             wsSend('force-save-gif', { gifCacheId: msg.gifCacheId, filename: timeoutFilename });
           }
-
-          increaseGifBackupCountOnce(timeoutFilename, msg.gifCacheId);
-          pendingStates.savedGif.active = true;
-          pendingStates.savedGif.count = gifBackupCount;
-          currentButtonState = 'gif-backup';
-          updateStatus('connected', '');
         }
       } else if (msg.type === 'screenshot-added') {
         const addedFilename = msg.filename || '';
@@ -9384,6 +9348,18 @@
         stopTimelinePlayback();
         document.getElementById('timelineEditorOverlay').classList.remove('show');
         timelinePendingFrameLayerIds = new Set();
+        timelineZoom = 1;
+        timelineBaseTrackWidth = 0;
+        const timelineTracksEl = document.getElementById('timelineTracks');
+        if (timelineTracksEl && timelineTracksEl._scrubberResizeObserver) {
+            try { timelineTracksEl._scrubberResizeObserver.disconnect(); } catch (_) {}
+            timelineTracksEl._scrubberResizeObserver = null;
+        }
+        if (_zoomFilmstripTimer) { clearTimeout(_zoomFilmstripTimer); _zoomFilmstripTimer = null; }
+        if (timelineZoomAbortController) {
+            timelineZoomAbortController.abort();
+            timelineZoomAbortController = null;
+        }
         
         // 保存当前 Frame 的图层时间范围到缓存，供二次打开时恢复
         if (timelineFrameId && Object.keys(timelineData).length > 0) {
@@ -9468,16 +9444,170 @@
         const needsScroll = timelineTracks.scrollHeight > (tracksScroll.clientHeight + 1);
         if (!needsScroll) {
             tracksScroll.style.overflowY = 'hidden';
-            return;
+        } else {
+            const supportsOverlay = typeof CSS !== 'undefined' && CSS.supports && CSS.supports('overflow-y', 'overlay');
+            tracksScroll.style.overflowY = supportsOverlay ? 'overlay' : 'auto';
         }
 
-        const supportsOverlay = typeof CSS !== 'undefined' && CSS.supports && CSS.supports('overflow-y', 'overlay');
-        tracksScroll.style.overflowY = supportsOverlay ? 'overlay' : 'auto';
+        // 横向滚动由缩放后内容宽度决定
+        const needsXScroll = timelineTracks.scrollWidth > (tracksScroll.clientWidth + 1);
+        tracksScroll.style.overflowX = needsXScroll ? 'auto' : 'hidden';
     }
 
-    // 重新计算每个图层条中胶片帧容器的宽度和偏移。
-    // 时间线在 loading 态下会被隐藏，此时 offsetWidth 可能为 0，需在显示后再次计算。
-    function recalcTimelineFilmstrips() {
+    // 时间线缩放（触控板手势）：
+    // - 捏合/ctrl+wheel 放大缩小 track 区域，提升长录屏编辑精度
+    // - 限制最大缩放，防止无限放大
+    let timelineZoom = 1;
+    let timelineBaseTrackWidth = 0;
+    let timelineZoomAbortController = null;
+    const TIMELINE_ZOOM_MIN = 1;
+    // 最大缩放目标：在一个窗口内固定显示 16 帧
+    const TIMELINE_MAX_VISIBLE_FRAMES = 16;
+    const TIMELINE_ZOOM_MAX_CAP = 80;
+    const TIMELINE_ZOOM_STEP = 1.08;
+
+    function getTimelineFrameCountEstimate() {
+        const fps = Math.max(1, Number(getTimelineFrameRate ? getTimelineFrameRate() : 30) || 30);
+        const duration = Math.max(1, Number(timelineTotalDuration || 0) || 1);
+        return Math.max(1, Math.round(duration * fps));
+    }
+
+    function getTimelineZoomMax() {
+        const tracksScroll = document.getElementById('timelineTracksScroll');
+        const viewportWidth = tracksScroll ? Math.max(1, tracksScroll.clientWidth) : 1;
+        const baseWidth = Math.max(1, Number(timelineBaseTrackWidth || 0));
+        const frameCount = getTimelineFrameCountEstimate();
+
+        // 目标：max zoom 时，窗口可见帧数 = 16
+        // visibleFrames = totalFrames * (viewportWidth / (baseWidth * zoom))
+        // => zoom = totalFrames * viewportWidth / (baseWidth * 16)
+        const zoomForTargetFrames = (frameCount * viewportWidth) / (baseWidth * TIMELINE_MAX_VISIBLE_FRAMES);
+        if (!Number.isFinite(zoomForTargetFrames) || zoomForTargetFrames <= 0) {
+            return TIMELINE_ZOOM_MIN;
+        }
+        return Math.max(TIMELINE_ZOOM_MIN, Math.min(TIMELINE_ZOOM_MAX_CAP, zoomForTargetFrames));
+    }
+
+    function captureTimelineBaseTrackWidth() {
+        const firstTrackArea = document.querySelector('.track-area');
+        if (!firstTrackArea || firstTrackArea.offsetWidth <= 0) return;
+        timelineBaseTrackWidth = firstTrackArea.offsetWidth / Math.max(timelineZoom, 0.0001);
+    }
+
+    let _zoomFilmstripTimer = null;
+
+    function applyTimelineZoom(nextZoom) {
+        const tracksScroll = document.getElementById('timelineTracksScroll');
+        if (!tracksScroll) return;
+
+        const zoomMax = getTimelineZoomMax();
+        const clampedZoom = Math.max(TIMELINE_ZOOM_MIN, Math.min(zoomMax, Number(nextZoom) || 1));
+        if (Math.abs(clampedZoom - timelineZoom) < 0.001) return;
+
+        if (!timelineBaseTrackWidth || timelineBaseTrackWidth <= 0) {
+            captureTimelineBaseTrackWidth();
+        }
+        if (!timelineBaseTrackWidth || timelineBaseTrackWidth <= 0) return;
+
+        const beforeTrackArea = document.querySelector('.track-area');
+        let centerRatioInTrack = 0.5;
+        if (beforeTrackArea) {
+            const scrollRect = tracksScroll.getBoundingClientRect();
+            const trackRect = beforeTrackArea.getBoundingClientRect();
+            if (trackRect.width > 0) {
+                const trackLeftInContent = tracksScroll.scrollLeft + (trackRect.left - scrollRect.left);
+                const viewportCenterInContent = tracksScroll.scrollLeft + tracksScroll.clientWidth / 2;
+                centerRatioInTrack = (viewportCenterInContent - trackLeftInContent) / trackRect.width;
+                centerRatioInTrack = Math.max(0, Math.min(1, centerRatioInTrack));
+            }
+        }
+
+        timelineZoom = clampedZoom;
+        const targetTrackWidth = Math.max(160, timelineBaseTrackWidth * timelineZoom);
+        const trackAreas = document.querySelectorAll('.track-area');
+        trackAreas.forEach((el) => {
+            el.style.flex = '0 0 auto';
+            el.style.width = `${targetTrackWidth}px`;
+        });
+
+        updateTimelineTracksScrollability();
+        _updateFilmstripPositions();
+
+        requestAnimationFrame(() => {
+            const afterTrackArea = document.querySelector('.track-area');
+            if (afterTrackArea) {
+                const scrollRect = tracksScroll.getBoundingClientRect();
+                const trackRect = afterTrackArea.getBoundingClientRect();
+                const trackLeftInContent = tracksScroll.scrollLeft + (trackRect.left - scrollRect.left);
+                const nextCenterInContent = trackLeftInContent + centerRatioInTrack * trackRect.width;
+                const nextScrollLeft = nextCenterInContent - tracksScroll.clientWidth / 2;
+                const maxScrollLeft = Math.max(0, tracksScroll.scrollWidth - tracksScroll.clientWidth);
+                tracksScroll.scrollLeft = Math.max(0, Math.min(maxScrollLeft, nextScrollLeft));
+            }
+
+            invalidatePreviewCache();
+            updatePreview(currentScrubTime);
+        });
+
+        if (_zoomFilmstripTimer) clearTimeout(_zoomFilmstripTimer);
+        _zoomFilmstripTimer = setTimeout(() => {
+            _zoomFilmstripTimer = null;
+            recalcTimelineFilmstrips();
+        }, 120);
+    }
+
+    function setupTimelineZoomGestures() {
+        const tracksScroll = document.getElementById('timelineTracksScroll');
+        if (!tracksScroll) return;
+
+        if (timelineZoomAbortController) {
+            timelineZoomAbortController.abort();
+        }
+        timelineZoomAbortController = new AbortController();
+        const signal = timelineZoomAbortController.signal;
+
+        let _zoomRafPending = false;
+        let _zoomAccumDelta = 0;
+        tracksScroll.addEventListener('wheel', (e) => {
+            const isZoomGesture = e.ctrlKey || e.metaKey;
+            if (!isZoomGesture) return;
+            e.preventDefault();
+            _zoomAccumDelta += e.deltaY;
+            if (_zoomRafPending) return;
+            _zoomRafPending = true;
+            requestAnimationFrame(() => {
+                _zoomRafPending = false;
+                const delta = _zoomAccumDelta;
+                _zoomAccumDelta = 0;
+                const steps = Math.abs(delta) / 10;
+                const factor = delta > 0
+                    ? Math.pow(1 / TIMELINE_ZOOM_STEP, Math.min(steps, 5))
+                    : Math.pow(TIMELINE_ZOOM_STEP, Math.min(steps, 5));
+                applyTimelineZoom(timelineZoom * factor);
+            });
+        }, { passive: false, signal });
+
+        window.addEventListener('resize', () => {
+            if (!document.getElementById('timelineEditorOverlay')?.classList.contains('show')) return;
+            // 容器尺寸变化时重新计算基准宽度并维持当前缩放
+            if (timelineZoom <= TIMELINE_ZOOM_MIN + 0.001) {
+                // 1x 状态下，直接清空宽度回到自适应，再重采样基准
+                const trackAreas = document.querySelectorAll('.track-area');
+                trackAreas.forEach((el) => {
+                    el.style.width = '';
+                    el.style.flex = '1 1 auto';
+                });
+                timelineBaseTrackWidth = 0;
+                captureTimelineBaseTrackWidth();
+                applyTimelineZoom(1);
+            } else {
+                captureTimelineBaseTrackWidth();
+                applyTimelineZoom(timelineZoom);
+            }
+        }, { signal });
+    }
+
+    function _updateFilmstripPositions() {
         if (!layersForTimeline || layersForTimeline.length === 0) return;
         for (const layer of layersForTimeline) {
             const filmstrip = document.getElementById(`filmstrip-${layer.id}`);
@@ -9491,6 +9621,79 @@
             filmstrip.style.width = trackAreaWidth + 'px';
             filmstrip.style.left = (-(data.start / 100) * trackAreaWidth) + 'px';
         }
+    }
+
+    function recalcTimelineFilmstrips() {
+        if (!layersForTimeline || layersForTimeline.length === 0) return;
+        for (const layer of layersForTimeline) {
+            const filmstrip = document.getElementById(`filmstrip-${layer.id}`);
+            const bar = document.getElementById(`track-bar-${layer.id}`);
+            if (!filmstrip || !bar) continue;
+            const trackArea = bar.parentElement;
+            if (!trackArea) continue;
+            const trackAreaWidth = trackArea.offsetWidth;
+            if (!trackAreaWidth || trackAreaWidth <= 0) continue;
+            ensureFilmstripDensity(layer, filmstrip, trackAreaWidth);
+            const data = timelineData[layer.id] || { start: 0, end: 100 };
+            filmstrip.style.width = trackAreaWidth + 'px';
+            filmstrip.style.left = (-(data.start / 100) * trackAreaWidth) + 'px';
+        }
+    }
+
+    const FILMSTRIP_FRAME_WIDTH = 40;
+    const FILMSTRIP_MIN_FRAMES = 5;
+
+    function updateFilmstripFrameImages(layer, filmstrip) {
+        const frames = layerFrames[layer.id];
+        const frameEls = filmstrip.querySelectorAll('.track-bar-frame');
+        const total = frameEls.length || 0;
+        if (!total) return;
+
+        for (let i = 0; i < total; i++) {
+            const frameEl = frameEls[i];
+            if (layer.isVideoLayer && frames && frames.length > 0) {
+                const targetPercent = (i / Math.max(total - 1, 1)) * 100;
+                let closestFrame = frames[0];
+                let minDiff = Math.abs(targetPercent - frames[0].percent);
+                for (const frame of frames) {
+                    const diff = Math.abs(targetPercent - frame.percent);
+                    if (diff < minDiff) {
+                        minDiff = diff;
+                        closestFrame = frame;
+                    }
+                }
+                frameEl.style.backgroundImage = `url(data:image/png;base64,${closestFrame.data})`;
+            } else if (layer.thumbnail) {
+                frameEl.style.backgroundImage = `url(data:image/png;base64,${layer.thumbnail})`;
+            } else {
+                frameEl.style.backgroundImage = '';
+                frameEl.style.background = '#444';
+            }
+        }
+    }
+
+    function ensureFilmstripDensity(layer, filmstrip, trackAreaWidth, forceImageRefresh = false) {
+        const targetCount = Math.max(FILMSTRIP_MIN_FRAMES, Math.ceil(trackAreaWidth / FILMSTRIP_FRAME_WIDTH) + 2);
+        const currentCount = filmstrip.children.length;
+
+        if (currentCount === targetCount) {
+            if (forceImageRefresh) {
+                updateFilmstripFrameImages(layer, filmstrip);
+            }
+            return;
+        }
+
+        const frag = document.createDocumentFragment();
+        for (let i = 0; i < targetCount; i++) {
+            const frame = document.createElement('div');
+            frame.className = 'track-bar-frame';
+            frame.id = `frame-${layer.id}-${i}`;
+            frag.appendChild(frame);
+        }
+        filmstrip.textContent = '';
+        filmstrip.appendChild(frag);
+
+        updateFilmstripFrameImages(layer, filmstrip);
     }
 
     function recalcPreviewLayout() {
@@ -9701,20 +9904,6 @@
             filmstrip.className = 'track-bar-filmstrip';
             filmstrip.id = `filmstrip-${layer.id}`;
             
-            // 添加5个帧占位符
-            for (let i = 0; i < 5; i++) {
-                const frame = document.createElement('div');
-                frame.className = 'track-bar-frame';
-                frame.id = `frame-${layer.id}-${i}`;
-                // 初始使用缩略图作为背景
-                if (layer.thumbnail) {
-                    frame.style.backgroundImage = `url(data:image/png;base64,${layer.thumbnail})`;
-                } else {
-                    frame.style.background = '#444';
-                }
-                filmstrip.appendChild(frame);
-            }
-            
             bar.appendChild(filmstrip);
             
             // Initial position
@@ -9726,6 +9915,7 @@
             // 使用延迟确保track-area已渲染
             requestAnimationFrame(() => {
                 const trackAreaWidth = trackArea.offsetWidth;
+                ensureFilmstripDensity(layer, filmstrip, trackAreaWidth);
                 filmstrip.style.width = trackAreaWidth + 'px';
                 // 偏移量 = -(bar的left百分比 * track-area宽度)
                 const offsetLeft = -(data.start / 100) * trackAreaWidth;
@@ -9762,7 +9952,10 @@
         const initialProgress = preserveTime ? currentScrubTime : coverage.start;
         updatePreview(initialProgress);
         setupScrubber();
+        setupTimelineZoomGestures();
         requestAnimationFrame(() => {
+            captureTimelineBaseTrackWidth();
+            applyTimelineZoom(timelineZoom);
             recalcTimelineFilmstrips();
             updateTimelineTracksScrollability();
         });
@@ -9828,24 +10021,12 @@
             
             // 更新胶片条的帧缩略图（使用5个均匀分布的帧）
             const frames = data.frames;
-            const filmstripFrameCount = 5;
-            for (let i = 0; i < filmstripFrameCount; i++) {
-                const frameEl = document.getElementById(`frame-${data.layerId}-${i}`);
-                if (frameEl && frames.length > 0) {
-                    // 计算要显示的帧索引（均匀分布）
-                    const targetPercent = (i / (filmstripFrameCount - 1)) * 100;
-                    // 找到最接近的帧
-                    let closestFrame = frames[0];
-                    let minDiff = Math.abs(targetPercent - frames[0].percent);
-                    for (const frame of frames) {
-                        const diff = Math.abs(targetPercent - frame.percent);
-                        if (diff < minDiff) {
-                            minDiff = diff;
-                            closestFrame = frame;
-                        }
-                    }
-                    frameEl.style.backgroundImage = `url(data:image/png;base64,${closestFrame.data})`;
-                }
+            const filmstrip = document.getElementById(`filmstrip-${data.layerId}`);
+            const layer = layersForTimeline.find(l => l.id === data.layerId);
+            if (filmstrip && layer) {
+                const trackArea = filmstrip.parentElement ? filmstrip.parentElement.parentElement : null;
+                const trackAreaWidth = trackArea ? trackArea.offsetWidth : 0;
+                ensureFilmstripDensity(layer, filmstrip, trackAreaWidth || filmstrip.offsetWidth || 0, true);
             }
             
             // Update preview with new frames
@@ -9919,29 +10100,14 @@
         }
         if (fullscreenThumb) fullscreenThumb.style.left = progress + '%';
         
-        // Move scrubber line - 只在布局变化时重新计算
+        // Move scrubber line - 使用轨道内容坐标，避免缩放/横向滚动后错位
         if (scrubber) {
             const firstTrackArea = document.querySelector('.track-area');
             if (firstTrackArea && tracksScroll) {
-                const scrollRect = tracksScroll.getBoundingClientRect();
-                const trackRect = firstTrackArea.getBoundingClientRect();
-                
-                // 如果 track area 已渲染且有宽度
-                if (trackRect.width > 0) {
-                    // 尝试使用缓存，或者直接计算
-                    let trackLeftOffset, trackWidth;
-                    
-                    if (cachedScrubberLayout && cachedScrubberLayout.trackWidth > 0) {
-                        trackLeftOffset = cachedScrubberLayout.trackLeftOffset;
-                        trackWidth = cachedScrubberLayout.trackWidth;
-                    } else {
-                        // 计算并缓存
-                        trackLeftOffset = trackRect.left - scrollRect.left;
-                        trackWidth = trackRect.width;
-                        cachedScrubberLayout = { trackLeftOffset, trackWidth };
-                    }
-                    
-                    const scrubberLeft = trackLeftOffset + (progress / 100) * trackWidth;
+                const trackWidth = firstTrackArea.offsetWidth;
+                if (trackWidth > 0) {
+                    const trackLeftInContent = firstTrackArea.offsetLeft;
+                    const scrubberLeft = trackLeftInContent + (progress / 100) * trackWidth;
                     scrubber.style.left = scrubberLeft + 'px';
                 }
             }
@@ -10020,8 +10186,11 @@
         const scrubber = document.getElementById('timelineScrubber');
         const timelineTracks = document.getElementById('timelineTracks');
         if (scrubber && timelineTracks) {
-            // 使用 timelineTracks 的实际高度（包括所有图层）
-            const tracksHeight = timelineTracks.scrollHeight;
+            // 使用 timelineTracks 的实际内容高度（含所有图层与上下内边距）
+            const tracksHeight = Math.max(
+                timelineTracks.scrollHeight,
+                timelineTracks.getBoundingClientRect().height
+            );
             scrubber.style.height = Math.max(tracksHeight, 100) + 'px';
         }
     }
@@ -10030,6 +10199,7 @@
         const scrubber = document.getElementById('timelineScrubber');
         const scrubberHandle = document.getElementById('timelineScrubberHandle');
         const tracksScroll = document.getElementById('timelineTracksScroll');
+        const timelineTracks = document.getElementById('timelineTracks');
         
         let isDraggingScrubber = false;
 
@@ -10116,8 +10286,30 @@
                 tracksScroll._mouseAbortController.abort();
             }
             tracksScroll._mouseAbortController = new AbortController();
+            let scrollRafId = null;
+            const onScroll = () => {
+                if (scrollRafId) return;
+                scrollRafId = requestAnimationFrame(() => {
+                    scrollRafId = null;
+                    // 滚动后重算指示线位置，确保与图层轨道同频
+                    updatePreview(currentScrubTime);
+                });
+            };
             
             tracksScroll.addEventListener('mousedown', onTrackAreaMouseDown, { signal: tracksScroll._mouseAbortController.signal });
+            tracksScroll.addEventListener('scroll', onScroll, { signal: tracksScroll._mouseAbortController.signal, passive: true });
+        }
+
+        // 监听图层容器尺寸变化，确保时间线纵向始终贯穿所有图层
+        if (timelineTracks && typeof ResizeObserver !== 'undefined') {
+            if (timelineTracks._scrubberResizeObserver) {
+                try { timelineTracks._scrubberResizeObserver.disconnect(); } catch (_) {}
+            }
+            const ro = new ResizeObserver(() => {
+                updateScrubberHeight();
+            });
+            ro.observe(timelineTracks);
+            timelineTracks._scrubberResizeObserver = ro;
         }
     }
     
@@ -10833,6 +11025,8 @@
     
     // 吸附阈值（百分比）
     const SNAP_THRESHOLD = 2.5;
+    // 最小可选时间范围（百分比）
+    const MIN_TIMELINE_RANGE_PERCENT = 1;
     
     // 检查是否应该吸附到时间线位置
     function snapToPlayhead(value) {
@@ -10852,10 +11046,17 @@
         let initialWidth = 0;
         
         function onMouseDown(e) {
-            if (e.target === leftHandle) isDraggingLeft = true;
-            else if (e.target === rightHandle) isDraggingRight = true;
-            else if (e.target === bar) isDraggingBar = true;
-            else return;
+            const target = e.target;
+            if (target === leftHandle || target.closest('.track-handle.left')) {
+                isDraggingLeft = true;
+            } else if (target === rightHandle || target.closest('.track-handle.right')) {
+                isDraggingRight = true;
+            } else if (target === bar || target.closest('.track-bar') === bar) {
+                // 支持点击时间范围条内部任意区域（胶片/帧）整体拖动
+                isDraggingBar = true;
+            } else {
+                return;
+            }
             
             e.preventDefault(); // Prevent text selection
             startX = e.clientX;
@@ -10912,14 +11113,14 @@
                 let rawStart = initialLeft + deltaPercent;
                 const snapResult = snapToPlayhead(rawStart);
                 newStart = snapResult.snapped ? snapResult.value : rawStart;
-                // 边界限制：最小5%宽度
-                newStart = Math.max(0, Math.min(newEnd - 5, newStart));
+                // 边界限制：最小可选范围
+                newStart = Math.max(0, Math.min(newEnd - MIN_TIMELINE_RANGE_PERCENT, newStart));
             } else if (isDraggingRight) {
                 let rawEnd = initialLeft + initialWidth + deltaPercent;
                 const snapResult = snapToPlayhead(rawEnd);
                 newEnd = snapResult.snapped ? snapResult.value : rawEnd;
-                // 边界限制：最小5%宽度
-                newEnd = Math.max(newStart + 5, Math.min(100, newEnd));
+                // 边界限制：最小可选范围
+                newEnd = Math.max(newStart + MIN_TIMELINE_RANGE_PERCENT, Math.min(100, newEnd));
             }
             
             // Update Data

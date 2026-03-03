@@ -152,11 +152,15 @@ function cleanupOriginalVideo(videoPath, gifPath, displayFilename) {
   }
 }
 
-function schedulePostVideoOps(result, keepGif, displayFilename) {
+function schedulePostVideoOps(result, keepGif, displayFilename, syncSource = 'realtime') {
   setImmediate(() => {
     try {
       if (keepGif) {
-        try { fs.writeFileSync(result.gifPath, result.gifBuffer); } catch (_) {}
+        try {
+          const wasExisting = fs.existsSync(result.gifPath);
+          fs.writeFileSync(result.gifPath, result.gifBuffer);
+          if (!wasExisting) notifyLocalGifSaved(result.gifFilename, syncSource);
+        } catch (_) {}
         console.log(`   📌 根据备份设置，保留 GIF: ${result.gifFilename}`);
       }
       cleanupOriginalVideo(result.sourceVideoPath, result.gifPath, displayFilename);
@@ -186,6 +190,15 @@ function requestManualSyncCancel() {
 function safeSend(message) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return false;
   try { ws.send(JSON.stringify(message)); return true; } catch (_) { return false; }
+}
+
+function notifyLocalGifSaved(filename, syncSource = 'realtime') {
+  safeSend({
+    type: 'local-gif-saved',
+    filename,
+    syncSource,
+    timestamp: Date.now()
+  });
 }
 
 function sendProgress(type, data) {
@@ -830,8 +843,10 @@ function connectWebSocket() {
             const gifSub = path.join(CONFIG.icloudPath, CONFIG.subfolders.gif);
             if (!fs.existsSync(gifSub)) fs.mkdirSync(gifSub, { recursive: true });
             const destPath = path.join(gifSub, filename);
+            const wasExisting = fs.existsSync(destPath);
             fs.copyFileSync(cached.path, destPath);
             console.log(`   ✅ 已保存到本地: ${destPath}`);
+            if (!wasExisting) notifyLocalGifSaved(filename, 'realtime');
             safeSend({ type: 'force-save-gif-done', filename, success: true });
           } else {
             console.warn(`   ⚠️  缓存中找不到 GIF: ${filename}`);
@@ -1151,7 +1166,7 @@ function startWatching() {
         syncCount++;
         markFileAsProcessed(finalPath);
         emitProgress('done', 100, { isVideo: true });
-        schedulePostVideoOps(result, keepGif, displayFilename);
+        schedulePostVideoOps(result, keepGif, displayFilename, 'realtime');
         console.log(`   ✅ 视频转 GIF 完成并已同步到 Figma`);
       } catch (convErr) {
         console.error(`   ❌ [Video→GIF] 转换失败: ${convErr.message}`);
@@ -1480,7 +1495,7 @@ async function performManualSync() {
             successCount++;
             gifCount++;
             markFileAsProcessed(filePath);
-            schedulePostVideoOps(result, keepGif, file);
+            schedulePostVideoOps(result, keepGif, file, 'manual');
           } catch (convErr) {
             if (isManualSyncCancelledError(convErr) || (convErr && convErr.code === 'CONVERSION_ABORTED')) { cancelled = true; break; }
             console.error(`   ❌ [Video→GIF] 转换失败: ${convErr.message}`);
