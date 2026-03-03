@@ -324,7 +324,9 @@
     /* Preview layer styles */
     .preview-layer {
         pointer-events: none;
-        transition: opacity 0.15s ease;
+        object-fit: fill;
+        transform-origin: top left;
+        transition: left 0.12s ease-out, top 0.12s ease-out, width 0.12s ease-out, height 0.12s ease-out, opacity 0.12s ease-out;
     }
 
     @media (prefers-color-scheme: dark) {
@@ -2885,9 +2887,7 @@
       border: 1px solid var(--glass-border-subtle);
       border-radius: var(--radius-xl);
       padding: 8px 12px;
-      box-shadow: 
-        0 8px 32px rgba(0, 0, 0, 0.1),
-        inset 0 1px 0 rgba(255, 255, 255, 0.5);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
       font-size: 13px;
       font-weight: 500;
       color: var(--text-primary);
@@ -2904,9 +2904,7 @@
     
     @media (prefers-color-scheme: dark) {
         .toast {
-            box-shadow: 
-                0 8px 32px rgba(0, 0, 0, 0.35),
-                inset 0 1px 0 rgba(255, 255, 255, 0.08);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
         }
     }
     
@@ -5242,6 +5240,9 @@
              // 只有 GIF 才增加 gifBackupCount，图片不计入（iCloud 模式下图片保留是正常行为）
              if (data.isGif) {
                gifBackupCount++;
+               if (isManualSyncing && data.syncSource === 'manual') {
+                 manualSyncSavedGifFromScreenshots++;
+               }
              }
              // Don't reset state - let currentButtonState handle locking
              updateStatus('connected', '');
@@ -5286,11 +5287,7 @@
             manualDragCount++;
             log(`⚠️  ${data.filename} 需手动导入（${reasonText}）`);
             
-            // ✅ 立即更新状态pill，确保显示"已保存 X 段视频"
-            // 只有在当前没有更高优先级的状态锁定时才设置
-            if (!justFinishedExport && currentButtonState !== 'exported') {
-              currentButtonState = 'video'; // 锁定为video状态
-            }
+            // 记录手动导入文件，仅用于日志去重，不再显示“已保存视频”状态
           }
           
           // 即使重复，也尝试发送确认消息以确保后台状态同步（可选，但为了保险起见）
@@ -5317,6 +5314,7 @@
             clearTimeout(manualSyncTimeoutId);
             manualSyncTimeoutId = null;
           }
+          if (!isManualSyncing) return;
           syncStarted = false;
 
           const manualSyncBtn = document.getElementById('manualSyncBtn');
@@ -5370,9 +5368,11 @@
           let toastMessage;
 
           if (savedGifCount > 0) {
-            gifBackupCount = savedGifCount;
+            // 手动同步中的 GIF 往往已在 screenshot 消息中计入，这里只补差值，避免双计
+            const deltaSavedGif = Math.max(savedGifCount - manualSyncSavedGifFromScreenshots, 0);
+            gifBackupCount += deltaSavedGif;
             pendingStates.savedGif.active = true;
-            pendingStates.savedGif.count = savedGifCount;
+            pendingStates.savedGif.count = gifBackupCount;
             currentButtonState = 'gif-backup';
           }
 
@@ -5395,6 +5395,7 @@
           // Reset state
           isManualSyncing = false;
           isManualSyncCancelling = false;
+          manualSyncSavedGifFromScreenshots = 0;
           
           // 恢复同步按钮状态（保持旧的 syncBtn 逻辑以防万一）
           const syncBtn = document.getElementById('syncBtn');
@@ -5479,26 +5480,22 @@
             updateStatus('connected', t('status_sync_done'));
           }
         } else if (data.type === 'manual-sync-cancelled') {
-          if (manualSyncTimeoutId) {
-            clearTimeout(manualSyncTimeoutId);
-            manualSyncTimeoutId = null;
+          if (!isManualSyncing) {
+            if (manualSyncTimeoutId) { clearTimeout(manualSyncTimeoutId); manualSyncTimeoutId = null; }
+            syncStarted = false;
+            isManualSyncCancelling = false;
+            manualSyncSavedGifFromScreenshots = 0;
+            const manualSyncBtn = document.getElementById('manualSyncBtn');
+            if (manualSyncBtn) {
+              manualSyncBtn.classList.remove('exporting');
+              manualSyncBtn.setAttribute('data-tooltip', t('tooltip_manual_sync'));
+            }
+            if (progressRingManual) {
+              progressRingManual.style.opacity = 0;
+              progressRingManual.style.animation = '';
+            }
+            hideManualSyncProgress();
           }
-          syncStarted = false;
-          isManualSyncing = false;
-          isManualSyncCancelling = false;
-          const manualSyncBtn = document.getElementById('manualSyncBtn');
-          if (manualSyncBtn) {
-            manualSyncBtn.classList.remove('exporting');
-            manualSyncBtn.setAttribute('data-tooltip', t('tooltip_manual_sync'));
-          }
-          if (progressRingManual) {
-            progressRingManual.style.opacity = 0;
-            progressRingManual.style.animation = '';
-          }
-          hideManualSyncProgress();
-          updateStatus('connected', '');
-          showToast(t('toast_sync_cancelled'), 'info');
-          log(currentLang === 'zh' ? '🛑 手动同步已取消' : '🛑 Manual sync cancelled');
         } else if (data.type === 'error') {
           // 处理服务器通用错误消息
           console.error('❌ Server Error:', data.message);
@@ -5508,6 +5505,7 @@
           if (isManualSyncing) {
             isManualSyncing = false;
             isManualSyncCancelling = false;
+            manualSyncSavedGifFromScreenshots = 0;
             const manualSyncBtn = document.getElementById('manualSyncBtn');
             if (manualSyncBtn) {
               manualSyncBtn.classList.remove('exporting');
@@ -5745,6 +5743,7 @@
         
         isManualSyncing = false;
         isManualSyncCancelling = false;
+        manualSyncSavedGifFromScreenshots = 0;
         syncStarted = false;
         hideManualSyncProgress();
         hideRealtimeConversionSubtitle();
@@ -5771,6 +5770,7 @@
         if (updateCheckTimer) clearInterval(updateCheckTimer);
         isManualSyncing = false;
         isManualSyncCancelling = false;
+        manualSyncSavedGifFromScreenshots = 0;
         syncStarted = false;
         hideManualSyncProgress();
         hideRealtimeConversionSubtitle();
@@ -5804,32 +5804,51 @@
     let currentFileIdType = null;
     let currentFileBackedUp = false;
 
+    const _gifImportTimedOutFilenames = new Set();
+
     function handleScreenshot(data) {
       log(`📸 ${data.filename || '截图'}`);
       
       currentFileId = data.ossFileId || data.driveFileId || null;
       currentFileIdType = data.ossFileId ? 'oss' : (data.driveFileId ? 'drive' : null);
-      // 检查文件是否已备份（Google Drive）或保留（iCloud）
       currentFileBackedUp = data.backedUpLocally || data.keptInIcloud || false;
+
+      const fnLower = (data.filename || '').toLowerCase();
+      const isGifFile = fnLower.endsWith('.gif');
+      const hasGifUrl = typeof data.gifUrl === 'string' && data.gifUrl.length > 0;
+
+      // 速度优化：在 UI 层预解码 base64 → Uint8Array，避免 Figma 端重复解码
+      let bytesPayload = data.bytes;
+      if (!hasGifUrl && typeof data.bytes === 'string' && data.bytes.length > 0) {
+        try {
+          const raw = atob(data.bytes);
+          const arr = new Uint8Array(raw.length);
+          for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+          bytesPayload = arr;
+        } catch (_) {
+          bytesPayload = data.bytes;
+        }
+      }
 
       try {
       parent.postMessage({
         pluginMessage: {
           type: 'add-screenshot',
-          bytes: data.bytes,
+          bytes: bytesPayload,
+          gifUrl: hasGifUrl ? data.gifUrl : null,
+          imageWidth: data.imageWidth || null,
+          imageHeight: data.imageHeight || null,
           timestamp: data.timestamp,
           filename: data.filename,
           driveFileId: data.driveFileId,
           ossFileId: data.ossFileId,
-          gifCacheId: data.gifCacheId  // ✅ 传递 gifCacheId（用于 GIF 导出）
+          gifCacheId: data.gifCacheId
         }
       }, '*');
       } catch (error) {
         log('❌ 处理失败: ' + error.message);
         console.error('发送失败:', error);
         
-        // 如果发送到 Figma 失败（例如消息过大），但已经备份到本地
-        // 那么我们也应该通知服务器可以删除云端文件，因为本地已经有了
         if (currentFileBackedUp) {
           log('⚠️  发送到 Figma 失败，但文件已备份到本地，确认删除云端文件');
           showToast(t('toast_import_fail_local'), 'warning');
@@ -5846,7 +5865,6 @@
                 else if (currentFileIdType === 'drive') confirmMessage.driveFileId = currentFileId;
                 ws.send(JSON.stringify(confirmMessage));
                 
-                // Reset
                 currentFileId = null;
                 currentFileIdType = null;
                 currentFileBackedUp = false;
@@ -6048,10 +6066,8 @@
           // 规则：
           // 1. 导出完成时，立即清除所有"已保存"状态，只显示"已导出"
           // 2. 点击"已导出"后，恢复"已连接"
-          // 3. 同步完成时，"已保存视频"和"已保存GIF"可同时存在
-          // 4. 点击"已保存视频"后，只清除视频状态，继续显示GIF状态（如果有）
-          // 5. 点击"已保存GIF"后，只清除GIF状态，继续显示视频状态（如果有）
-          // 6. 所有状态都点击完后，恢复"已连接"
+          // 3. 同步完成时，仅展示"已保存GIF"
+          // 4. 点击"已保存GIF"后，恢复"已连接"
           // ========================================
 
           // 2. 导出完成 - 最高优先级，立即清除所有"已保存"状态
@@ -6137,60 +6153,12 @@
             return;
           }
           
-          // 4. 检查"已保存视频"状态
-          // 同步计数到 pendingStates
-          if (manualDragCount > 0) {
-            pendingStates.savedVideo.active = true;
-            pendingStates.savedVideo.count = manualDragCount;
-          }
-          
-          if (pendingStates.savedVideo.active && pendingStates.savedVideo.count > 0) {
-            currentButtonState = 'video';
-            const warningText = tPlural('status_saved_video', pendingStates.savedVideo.count);
-            statusEl.innerHTML = `
-              <div class="bezel"></div>
-              <div class="face"></div>
-              <span class="status-dot" style="position: relative; z-index: 2;"></span>
-              <span style="position: relative; z-index: 2;">${warningText}</span>
-              ${getPillChevronHTML()}${getPillCloseButtonHTML()}
-            `;
-            statusEl.className = 'connection-pill connected interactive';
-            statusEl.style.cursor = 'pointer';
-            statusEl.onclick = function() {
-              wsSend('open-local-folder', { targetFolder: '视频' });
-              // ✅ 只清除视频状态
-              pendingStates.savedVideo.active = false;
-              pendingStates.savedVideo.count = 0;
-              manualDragCount = 0;
-              skippedFilesSet.clear();
-              
-              // ✅ 检查是否还有 GIF 状态，如果有则继续显示
-              if (pendingStates.savedGif.active && pendingStates.savedGif.count > 0) {
-                currentButtonState = 'gif-backup';
-              } else {
-                currentButtonState = null;
-              }
-              justFinishedExport = false;
-              updateStatus('connected', '');
-            };
-            // 绑定关闭按钮（不打开文件夹，直接清除状态）
-            bindPillCloseButton(statusEl, function() {
-              pendingStates.savedVideo.active = false;
-              pendingStates.savedVideo.count = 0;
-              manualDragCount = 0;
-              skippedFilesSet.clear();
-              if (pendingStates.savedGif.active && pendingStates.savedGif.count > 0) {
-                currentButtonState = 'gif-backup';
-              } else {
-                currentButtonState = null;
-              }
-              justFinishedExport = false;
-              updateStatus('connected', '');
-            });
-            return;
-          }
-          
-          // 5. 检查"已保存GIF"状态
+          // 兼容清理：不再支持视频状态，强制清空旧值
+          pendingStates.savedVideo.active = false;
+          pendingStates.savedVideo.count = 0;
+          if (currentButtonState === 'video') currentButtonState = null;
+
+          // 4. 检查"已保存GIF"状态
           // 同步计数到 pendingStates
           if (gifBackupCount > 0) {
             pendingStates.savedGif.active = true;
@@ -6216,12 +6184,7 @@
               pendingStates.savedGif.count = 0;
               gifBackupCount = 0;
               
-              // ✅ 检查是否还有视频状态，如果有则继续显示
-              if (pendingStates.savedVideo.active && pendingStates.savedVideo.count > 0) {
-                currentButtonState = 'video';
-              } else {
-                currentButtonState = null;
-              }
+              currentButtonState = null;
               justFinishedExport = false;
               updateStatus('connected', '');
             };
@@ -6230,11 +6193,7 @@
               pendingStates.savedGif.active = false;
               pendingStates.savedGif.count = 0;
               gifBackupCount = 0;
-              if (pendingStates.savedVideo.active && pendingStates.savedVideo.count > 0) {
-                currentButtonState = 'video';
-              } else {
-                currentButtonState = null;
-              }
+              currentButtonState = null;
               justFinishedExport = false;
               updateStatus('connected', '');
             });
@@ -6465,7 +6424,7 @@
       updateStatus('connected', t('status_syncing'));
       manualDragCount = 0;
       skippedFilesSet.clear();
-      gifBackupCount = 0;
+      manualSyncSavedGifFromScreenshots = 0;
       
       // 立即发送同步请求
       try {
@@ -6489,15 +6448,17 @@
     }
 
     function stopRealtimeSync() {
-      // 🛡️ 防止初始化未完成时崩溃
       try {
-        // 无论当前模式是什么，只要 WebSocket 连接存在，就发送停止命令
-        // 这样可以确保在关闭插件时，所有正在运行的监听都会被停止
-        wsSend('stop-realtime');
+        const sent = wsSend('stop-realtime');
+        if (!sent) {
+          showToast(t('toast_server_offline'), 'error');
+          updateStatus('disconnected', t('status_reconnect'));
+          return;
+        }
         log('⏸️  已停止同步监听');
+        if (convHideTimer) { clearTimeout(convHideTimer); convHideTimer = null; }
         hideRealtimeConversionSubtitle();
-        
-        // Update UI to Idle
+
         updateStartScreenUI('idle');
         updateStatus('connected', t('status_connected'));
       } catch (error) {
@@ -7236,6 +7197,7 @@
     let lastToastMessage = ''; // 上一次显示的 toast 内容
     let lastToastTime = 0; // 上一次显示 toast 的时间
     const TOAST_DEBOUNCE_TIME = 500; // 去重时间窗口（毫秒）
+    const TOAST_DURATION_MS = 3000; // 统一 toast 显示时长
     
     function showToast(message, type = 'info') {
       // 🛡️ 防止初始化未完成时崩溃
@@ -7329,7 +7291,7 @@
           messageEl.textContent = '';
           toastTimer = null;
         }, 300);
-      }, 5000);
+      }, TOAST_DURATION_MS);
     }
 
     function showToastWithAction(message, actionText, actionCallback) {
@@ -7400,7 +7362,7 @@
           messageEl.innerHTML = '';
           toastTimer = null;
         }, 300);
-      }, 5000);
+      }, TOAST_DURATION_MS);
     }
 
     function closeSettings() {
@@ -8241,13 +8203,38 @@
       } else if (msg.type === 'frame-located') {
         if (msg.success) log('📍 ' + msg.message);
         else log('❌ ' + msg.message);
+      } else if (msg.type === 'screenshot-import-timeout') {
+        const timeoutFilename = msg.filename || '未命名文件';
+        if (!_gifImportTimedOutFilenames.has(timeoutFilename)) {
+          _gifImportTimedOutFilenames.add(timeoutFilename);
+          const timeoutMs = Number(msg.timeoutMs) || 8000;
+          log(`⚠️  GIF 放入画板超时 (${Math.round(timeoutMs / 1000)}秒)，请从本地备份拖入: ${timeoutFilename}`);
+          showToast(currentLang === 'zh' ? 'GIF过大，请从本地拖入' : 'GIF too large, auto-import timed out. Please drag from local backup.', 'warning');
+
+          const bm = (typeof originalSettings !== 'undefined' && originalSettings.backupMode) || 'gif_only';
+          if (bm === 'none' && msg.gifCacheId) {
+            wsSend('force-save-gif', { gifCacheId: msg.gifCacheId, filename: timeoutFilename });
+          }
+
+          gifBackupCount++;
+          pendingStates.savedGif.active = true;
+          pendingStates.savedGif.count = gifBackupCount;
+          currentButtonState = 'gif-backup';
+          updateStatus('connected', '');
+        }
       } else if (msg.type === 'screenshot-added') {
+        const addedFilename = msg.filename || '';
+        const wasTimedOut = _gifImportTimedOutFilenames.has(addedFilename);
+        if (wasTimedOut) _gifImportTimedOutFilenames.delete(addedFilename);
+
         if (msg.success) {
+          if (wasTimedOut) {
+            log(`ℹ️  ${msg.filename} 超时后仍成功导入画板`);
+          }
           screenshotCount++;
           document.getElementById('count').textContent = screenshotCount;
           
           if (ws && ws.readyState === WebSocket.OPEN) {
-            // 优先使用 plugin 返回的 ID
             const driveFileId = msg.driveFileId || (currentFileIdType === 'drive' ? currentFileId : null);
             const ossFileId = msg.ossFileId || (currentFileIdType === 'oss' ? currentFileId : null);
             
@@ -8534,6 +8521,7 @@
     let completedManualSyncFiles = 0;
     let isManualSyncing = false;
     let isManualSyncCancelling = false;
+    let manualSyncSavedGifFromScreenshots = 0; // 手动同步期间，已通过 screenshot 消息计入的 GIF 数
     let syncStarted = false; // ✅ 标记同步是否已经开始（收到了第一个响应）
     let manualSyncTimeoutId = null; // ✅ 保存超时 ID，以便清除
     
@@ -8619,8 +8607,23 @@
                     if (!isManualSyncCancelling) {
                         isManualSyncCancelling = true;
                         wsSend('cancel-manual-sync');
-                        manualSyncBtn.setAttribute('data-tooltip', t('tooltip_syncing'));
-                        showToast(t('toast_sync_canceling'), 'loading');
+
+                        // 立即重置 UI，不等服务器确认
+                        if (manualSyncTimeoutId) { clearTimeout(manualSyncTimeoutId); manualSyncTimeoutId = null; }
+                        syncStarted = false;
+                        isManualSyncing = false;
+                        isManualSyncCancelling = false;
+                        manualSyncSavedGifFromScreenshots = 0;
+                        manualSyncBtn.classList.remove('exporting');
+                        manualSyncBtn.setAttribute('data-tooltip', t('tooltip_manual_sync'));
+                        if (progressRingManual) {
+                            progressRingManual.style.opacity = 0;
+                            progressRingManual.style.animation = '';
+                        }
+                        hideManualSyncProgress();
+                        updateStatus('connected', '');
+                        showToast(t('toast_sync_cancelled'), 'info');
+                        log(currentLang === 'zh' ? '🛑 手动同步已取消' : '🛑 Manual sync cancelled');
                     }
                     return;
                 }
@@ -8635,10 +8638,9 @@
                 // ✅ 立即开始视觉反馈（无需等待）
                 isManualSyncing = true;
                 isManualSyncCancelling = false;
-                hideRealtimeConversionSubtitle();
                 manualDragCount = 0;
                 skippedFilesSet.clear();
-                gifBackupCount = 0;
+                manualSyncSavedGifFromScreenshots = 0;
                 
                 // ✅ 显示旋转的进度条（无限循环动画）
                 if (progressRingManual) {
@@ -8802,10 +8804,11 @@
     }
     
     function handleConversionProgress(data) {
+      if (!isRealtimeActive) return;
+
       const subtitle = document.getElementById('realtimeConversionSubtitle');
       if (!subtitle) return;
       
-      // 仅对录屏→GIF 转换显示副标题；普通图片处理太快，不显示
       const isVisible = subtitle.style.display !== 'none' && subtitle.textContent !== '';
       if (!data.isVideo && !isVisible) return;
       
@@ -9487,10 +9490,14 @@
         layersForTimeline.forEach(layer => {
             const el = document.getElementById(`preview-layer-${layer.id}`);
             if (!el) return;
-            el.style.left = ((layer.x || 0) * scale) + 'px';
-            el.style.top = ((layer.y || 0) * scale) + 'px';
-            el.style.width = (Math.max((layer.width || 50) * scale, 1)) + 'px';
-            el.style.height = (Math.max((layer.height || 50) * scale, 1)) + 'px';
+            const rx = (layer.renderX != null ? layer.renderX : layer.x) || 0;
+            const ry = (layer.renderY != null ? layer.renderY : layer.y) || 0;
+            const rw = (layer.renderWidth != null ? layer.renderWidth : layer.width) || 50;
+            const rh = (layer.renderHeight != null ? layer.renderHeight : layer.height) || 50;
+            el.style.left = (rx * scale) + 'px';
+            el.style.top = (ry * scale) + 'px';
+            el.style.width = (Math.max(rw * scale, 1)) + 'px';
+            el.style.height = (Math.max(rh * scale, 1)) + 'px';
         });
     }
 
@@ -9565,12 +9572,16 @@
                 timelineData[layer.id] = { start: 0, end: 100 }; // Percent
             }
             
-            // Position layer correctly based on its x, y relative to frame
+            // 使用渲染边界（含 effects）定位预览图——exportAsync 导出的 PNG 包含 effects
             const layerScale = scale;
-            const scaledLayerWidth = Math.max((layer.width || 50) * layerScale, 1); // Min 1px to allow compression
-            const scaledLayerHeight = Math.max((layer.height || 50) * layerScale, 1); // Min 1px to allow compression
-            const scaledX = (layer.x || 0) * layerScale;
-            const scaledY = (layer.y || 0) * layerScale;
+            const rw = (layer.renderWidth != null ? layer.renderWidth : layer.width) || 50;
+            const rh = (layer.renderHeight != null ? layer.renderHeight : layer.height) || 50;
+            const rx = (layer.renderX != null ? layer.renderX : layer.x) || 0;
+            const ry = (layer.renderY != null ? layer.renderY : layer.y) || 0;
+            const scaledLayerWidth = Math.max(rw * layerScale, 1);
+            const scaledLayerHeight = Math.max(rh * layerScale, 1);
+            const scaledX = rx * layerScale;
+            const scaledY = ry * layerScale;
             
             // Check if layer is within frame bounds
             const inBounds = scaledX >= -scaledLayerWidth && scaledX <= scaledWidth &&
@@ -9595,7 +9606,7 @@
                     top: ${scaledY}px;
                     width: ${scaledLayerWidth}px;
                     height: ${scaledLayerHeight}px;
-                    object-fit: contain;
+                    object-fit: fill;
                     opacity: 1;
                     visibility: visible;
                     z-index: ${zIndex};
@@ -10608,14 +10619,19 @@
             fullscreenScale = fullscreenWidth / previewWidth;
         }
         
-        // 更新每个图层的位置
+        // 更新每个图层的位置（使用渲染边界）
         for (const update of updates) {
+            const rx = (update.renderX != null ? update.renderX : update.x) || 0;
+            const ry = (update.renderY != null ? update.renderY : update.y) || 0;
+            const rw = (update.renderWidth != null ? update.renderWidth : update.width) || 50;
+            const rh = (update.renderHeight != null ? update.renderHeight : update.height) || 50;
+
             const layerEl = document.getElementById(`preview-layer-${update.id}`);
             if (layerEl) {
-                const scaledX = (update.x || 0) * scale;
-                const scaledY = (update.y || 0) * scale;
-                const scaledWidth = Math.max((update.width || 50) * scale, 1); // Min 1px to allow compression
-                const scaledHeight = Math.max((update.height || 50) * scale, 1); // Min 1px to allow compression
+                const scaledX = rx * scale;
+                const scaledY = ry * scale;
+                const scaledWidth = Math.max(rw * scale, 1);
+                const scaledHeight = Math.max(rh * scale, 1);
                 
                 layerEl.style.left = scaledX + 'px';
                 layerEl.style.top = scaledY + 'px';
@@ -10632,13 +10648,17 @@
                 }
             }
             
-            // 同时更新 layersForTimeline 中的数据
+            // 同时更新 layersForTimeline 中的数据（布局边界 + 渲染边界）
             const layerData = layersForTimeline.find(l => l.id === update.id);
             if (layerData) {
                 layerData.x = update.x;
                 layerData.y = update.y;
                 layerData.width = update.width;
                 layerData.height = update.height;
+                if (update.renderX != null) layerData.renderX = update.renderX;
+                if (update.renderY != null) layerData.renderY = update.renderY;
+                if (update.renderWidth != null) layerData.renderWidth = update.renderWidth;
+                if (update.renderHeight != null) layerData.renderHeight = update.renderHeight;
             }
         }
     }
@@ -10672,11 +10692,42 @@
     function updateLayerThumbnails(updates) {
         for (const update of updates) {
             const thumbDataUrl = `data:image/png;base64,${update.thumbnail}`;
-            
+
+            // 若附带渲染边界，同步更新 layersForTimeline 和预览元素尺寸
+            const hasRenderBounds = update.renderWidth != null;
+            if (hasRenderBounds) {
+                const layerData = layersForTimeline.find(l => l.id === update.id);
+                if (layerData) {
+                    layerData.renderX = update.renderX;
+                    layerData.renderY = update.renderY;
+                    layerData.renderWidth = update.renderWidth;
+                    layerData.renderHeight = update.renderHeight;
+                }
+            }
+
             // 1. 更新预览区的图层图片
             const previewImg = document.getElementById(`preview-layer-${update.id}`);
-            if (previewImg && previewImg.tagName === 'IMG') {
-                previewImg.src = thumbDataUrl;
+            if (previewImg) {
+                // 若有新的渲染边界，更新元素定位
+                if (hasRenderBounds) {
+                    const wrapper = document.getElementById('previewWrapper');
+                    const sc = wrapper ? parseFloat(wrapper.dataset.scale) || 1 : 1;
+                    previewImg.style.left = (update.renderX * sc) + 'px';
+                    previewImg.style.top = (update.renderY * sc) + 'px';
+                    previewImg.style.width = Math.max(update.renderWidth * sc, 1) + 'px';
+                    previewImg.style.height = Math.max(update.renderHeight * sc, 1) + 'px';
+                }
+
+                if (previewImg.tagName === 'IMG') {
+                    previewImg.src = thumbDataUrl;
+                } else {
+                    const img = document.createElement('img');
+                    img.id = previewImg.id;
+                    img.className = 'preview-layer';
+                    img.src = thumbDataUrl;
+                    img.style.cssText = previewImg.style.cssText + ';object-fit: fill; opacity: 1; visibility: visible; pointer-events: none;';
+                    previewImg.replaceWith(img);
+                }
             }
             
             // 2. 更新拖拽条的胶片帧
@@ -10695,8 +10746,22 @@
             
             // 4. 更新全屏预览（如果已打开）
             const fullscreenImg = document.getElementById(`fullscreen-layer-${update.id}`);
-            if (fullscreenImg && fullscreenImg.tagName === 'IMG') {
-                fullscreenImg.src = thumbDataUrl;
+            if (fullscreenImg) {
+                if (fullscreenImg.tagName === 'IMG') fullscreenImg.src = thumbDataUrl;
+                if (hasRenderBounds) {
+                    const wrapper = document.getElementById('previewWrapper');
+                    const fWrapper = document.getElementById('fullscreenPreviewWrapper');
+                    if (wrapper && fWrapper) {
+                        const pW = parseFloat(wrapper.style.width) || 1;
+                        const fW = parseFloat(fWrapper.style.width) || 1;
+                        const fRatio = fW / pW;
+                        const sc = parseFloat(wrapper.dataset.scale) || 1;
+                        fullscreenImg.style.left = (update.renderX * sc * fRatio) + 'px';
+                        fullscreenImg.style.top = (update.renderY * sc * fRatio) + 'px';
+                        fullscreenImg.style.width = Math.max(update.renderWidth * sc * fRatio, 1) + 'px';
+                        fullscreenImg.style.height = Math.max(update.renderHeight * sc * fRatio, 1) + 'px';
+                    }
+                }
             }
         }
     }

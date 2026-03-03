@@ -9,7 +9,7 @@
 #   3. 运行: chmod +x emergency-update.sh && ./emergency-update.sh
 # ═══════════════════════════════════════════════════════════════════════════════
 
-set -e
+set -euo pipefail
 
 REPO="BorderWalker99/figma-plugin-figma_sync"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -53,11 +53,21 @@ pkill -f "node.*start\.js" 2>/dev/null || true
 sleep 1
 echo -e "${GREEN}✅ 服务器进程已停止${NC}"
 
-# ─── 3. 检测系统架构 ─────────────────────────────────────────────────────────
-ARCH=$(uname -m)
-if [ "$ARCH" = "arm64" ]; then
+# ─── 3. 检测系统架构（兼容 Rosetta）───────────────────────────────────────────
+ARCH="$(uname -m)"
+IS_ARM64_MAC="0"
+# 在 Apple Silicon 机器上，即使终端跑在 Rosetta，hw.optional.arm64 仍为 1
+if [ "$(sysctl -n hw.optional.arm64 2>/dev/null || echo 0)" = "1" ]; then
+  IS_ARM64_MAC="1"
+fi
+
+if [ "$ARCH" = "arm64" ] || [ "$IS_ARM64_MAC" = "1" ]; then
   ASSET_NAME="ScreenSync-Apple.tar.gz"
-  ARCH_LABEL="Apple Silicon (M系列芯片)"
+  if [ "$ARCH" = "x86_64" ]; then
+    ARCH_LABEL="Apple Silicon (M系列芯片，检测到 Rosetta 终端)"
+  else
+    ARCH_LABEL="Apple Silicon (M系列芯片)"
+  fi
   NEW_PACKAGE_NAME="ScreenSync-Apple"
 else
   ASSET_NAME="ScreenSync-Intel.tar.gz"
@@ -114,7 +124,7 @@ echo -e "${YELLOW}📥 正在下载 ${ASSET_NAME}...${NC}"
 MAX_RETRIES=3
 RETRY=0
 while [ $RETRY -lt $MAX_RETRIES ]; do
-  if curl -L --progress-bar \
+  if curl -fL --progress-bar \
     -H "User-Agent: ScreenSync-EmergencyUpdate" \
     --connect-timeout 30 --max-time 300 \
     -o "$TAR_FILE" "$DOWNLOAD_URL"; then
@@ -399,10 +409,11 @@ echo -e "${YELLOW}📦 正在安装 Node.js 依赖...${NC}"
 
 if command -v npm &>/dev/null; then
   cd "$SCRIPT_DIR"
-  npm install --production --omit=dev --legacy-peer-deps 2>&1 | tail -5
+  npm install --production --omit=dev --legacy-peer-deps
   echo -e "${GREEN}✅ Node.js 依赖安装完成${NC}"
 else
-  echo -e "${RED}⚠️  未找到 npm，请确保 Node.js 已安装${NC}"
+  echo -e "${RED}❌ 未找到 npm，请先安装 Node.js（包含 npm）后重试${NC}"
+  exit 1
 fi
 
 # ─── 12. 检查系统依赖 ────────────────────────────────────────────────────────
@@ -471,6 +482,17 @@ else
   echo -e "${GREEN}✅ launchd 配置无需更新${NC}"
 fi
 
+# ─── 13.5 确认启动入口 ───────────────────────────────────────────────────────
+START_ENTRY=""
+if [ -f "$SCRIPT_DIR/start.js" ]; then
+  START_ENTRY="start.js"
+elif [ -f "$SCRIPT_DIR/server.js" ]; then
+  START_ENTRY="server.js"
+else
+  echo -e "${RED}❌ 更新后未找到启动文件（start.js/server.js）${NC}"
+  exit 1
+fi
+
 # ─── 14. 显示更新结果 ────────────────────────────────────────────────────────
 echo ""
 echo -e "${BLUE}═══════════════════════════════════════════════════════${NC}"
@@ -500,12 +522,47 @@ PLIST_PATH="$HOME/Library/LaunchAgents/com.screensync.server.plist"
 if [ -f "$PLIST_PATH" ]; then
   launchctl unload "$PLIST_PATH" 2>/dev/null || true
   sleep 1
-  launchctl load "$PLIST_PATH" 2>/dev/null || true
-  echo -e "${GREEN}✅ 服务器已通过 launchd 重启${NC}"
+  if launchctl load "$PLIST_PATH" 2>/dev/null; then
+    sleep 2
+    if launchctl list | grep -q "com.screensync.server"; then
+      echo -e "${GREEN}✅ 服务器已通过 launchd 重启${NC}"
+    else
+      echo -e "${YELLOW}⚠️  launchd 已加载但服务未出现，改用直接启动${NC}"
+      cd "$SCRIPT_DIR"
+      nohup node "$START_ENTRY" > /dev/null 2>&1 &
+      SERVER_PID="$!"
+      sleep 2
+      if kill -0 "$SERVER_PID" 2>/dev/null; then
+        echo -e "${GREEN}✅ 服务器已启动 (PID: $SERVER_PID, 入口: $START_ENTRY)${NC}"
+      else
+        echo -e "${RED}❌ 服务器启动失败，请检查日志或手动运行: node $START_ENTRY${NC}"
+        exit 1
+      fi
+    fi
+  else
+    echo -e "${YELLOW}⚠️  launchd 重启失败，改用直接启动${NC}"
+    cd "$SCRIPT_DIR"
+    nohup node "$START_ENTRY" > /dev/null 2>&1 &
+    SERVER_PID="$!"
+    sleep 2
+    if kill -0 "$SERVER_PID" 2>/dev/null; then
+      echo -e "${GREEN}✅ 服务器已启动 (PID: $SERVER_PID, 入口: $START_ENTRY)${NC}"
+    else
+      echo -e "${RED}❌ 服务器启动失败，请检查日志或手动运行: node $START_ENTRY${NC}"
+      exit 1
+    fi
+  fi
 else
   cd "$SCRIPT_DIR"
-  nohup node start.js > /dev/null 2>&1 &
-  echo -e "${GREEN}✅ 服务器已启动 (PID: $!)${NC}"
+  nohup node "$START_ENTRY" > /dev/null 2>&1 &
+  SERVER_PID="$!"
+  sleep 2
+  if kill -0 "$SERVER_PID" 2>/dev/null; then
+    echo -e "${GREEN}✅ 服务器已启动 (PID: $SERVER_PID, 入口: $START_ENTRY)${NC}"
+  else
+    echo -e "${RED}❌ 服务器启动失败，请检查日志或手动运行: node $START_ENTRY${NC}"
+    exit 1
+  fi
 fi
 
 echo ""

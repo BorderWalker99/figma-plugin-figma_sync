@@ -36,6 +36,7 @@ const execAsync = promisify(exec);
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const mediaTuning = require('./media-processing-tuning');
 
 // Inject ScreenSync local deps into PATH (for legacy macOS without Homebrew)
 (() => {
@@ -412,7 +413,8 @@ try {
     getDriveFolderId: () => null,
     updateDriveFolderId: () => {},
     updateLocalDownloadFolder: () => {},
-    getLocalDownloadFolder: () => null
+    getLocalDownloadFolder: () => null,
+    getGifFromCache: () => null
   };
 }
 
@@ -795,6 +797,32 @@ const cancelFlags = new Map(); // 跟踪每个连接的取消状态
 // Key: connectionId, Value: { figmaWs, registeredAt }
 const userInstances = new Map();
 
+function closeOtherFigmaPlugins(currentWs, currentConnectionId) {
+  for (const [cid, group] of connections.entries()) {
+    const figmaWs = group && group.figma;
+    if (!figmaWs || figmaWs === currentWs) continue;
+    if (figmaWs.readyState !== WebSocket.OPEN) continue;
+    try {
+      wsSend(figmaWs, {
+        type: 'force-close',
+        reason: 'newer-file-plugin-opened',
+        activeConnectionId: currentConnectionId
+      });
+      // 给 UI 1.5 秒显示提示后再强制断开
+      setTimeout(() => {
+        try {
+          if (figmaWs.readyState === WebSocket.OPEN || figmaWs.readyState === WebSocket.CONNECTING) {
+            figmaWs.close();
+          }
+        } catch (_) {}
+      }, 1500);
+      console.log(`🔒 [单实例] 已通知旧插件关闭: ${cid} -> ${currentConnectionId}`);
+    } catch (error) {
+      console.log(`⚠️  [单实例] 关闭旧插件失败 (${cid}): ${error.message}`);
+    }
+  }
+}
+
 let DRIVE_FOLDER_ID = process.env.GDRIVE_FOLDER_ID;
 
 // 如果环境变量未设置，尝试从 serviceAccountKey.js 读取默认值
@@ -807,6 +835,17 @@ const UPLOAD_TOKEN = process.env.UPLOAD_TOKEN || null;
 
 // 用户文件夹缓存：userId -> folderId，减少重复查找
 const userFolderCache = new Map();
+
+function getPayloadSize(data) {
+  if (!data) return 0;
+  if (typeof data === 'string') return data.length;
+  if (Buffer.isBuffer(data)) return data.length;
+  try {
+    return JSON.stringify(data).length;
+  } catch (_) {
+    return 0;
+  }
+}
 
 // ========== 上传队列管理器（控制并发和速率） ==========
 class UploadQueue {
@@ -836,13 +875,18 @@ class UploadQueue {
     // 记录大文件任务加入队列
     const isVideo = task.filename && (task.filename.toLowerCase().endsWith('.mp4') || task.filename.toLowerCase().endsWith('.mov'));
     const isGif = task.filename && task.filename.toLowerCase().endsWith('.gif');
-    const dataSize = task.data ? (typeof task.data === 'string' ? task.data.length : JSON.stringify(task.data).length) : 0;
+    const dataSize = getPayloadSize(task.data);
     const dataSizeMB = (dataSize / 1024 / 1024).toFixed(2);
     
     if (isVideo || isGif || dataSize > 10 * 1024 * 1024) {
     }
 
-    this.queue.push(task);
+    // 大文件优先，减少用户感知等待（不影响质量）
+    if (task && task.priority === 'high') {
+      this.queue.unshift(task);
+    } else {
+      this.queue.push(task);
+    }
     const queueLength = this.queue.length;
     const waitTime = Date.now() - task.startTime;
     
@@ -851,38 +895,27 @@ class UploadQueue {
   }
 
   async process() {
-    // 如果已达到最大并发数，等待
-    if (this.processing >= this.maxConcurrent) {
-      return;
+    while (this.processing < this.maxConcurrent && this.queue.length > 0) {
+      const task = this.queue.shift();
+      if (!task) break;
+
+      this.processing++;
+      this.lastProcessTime = Date.now();
+      this.processedCount++;
+      
+      // 标记任务正在处理中（用于去重）
+      const taskKey = `${task.userId || 'default'}:${task.filename}`;
+      this.processingTasks.add(taskKey);
+
+      // 异步处理任务（不阻塞队列处理）
+      this.processTask(task).finally(() => {
+        this.processing--;
+        // 移除处理中标记
+        this.processingTasks.delete(taskKey);
+        // 立即继续处理队列中的下一个任务（不等待）
+        setImmediate(() => this.process());
+      });
     }
-
-    // 如果队列为空，返回
-    if (this.queue.length === 0) {
-      return;
-    }
-
-    // 从队列中取出任务（移除速率限制延迟，只保留并发控制，提高处理速度）
-    const task = this.queue.shift();
-    if (!task) {
-      return;
-    }
-
-    this.processing++;
-    this.lastProcessTime = Date.now();
-    this.processedCount++;
-    
-    // 标记任务正在处理中（用于去重）
-    const taskKey = `${task.userId || 'default'}:${task.filename}`;
-    this.processingTasks.add(taskKey);
-
-    // 异步处理任务（不阻塞队列处理）
-    this.processTask(task).finally(() => {
-      this.processing--;
-      // 移除处理中标记
-      this.processingTasks.delete(taskKey);
-      // 立即继续处理队列中的下一个任务（不等待）
-      setImmediate(() => this.process());
-    });
   }
 
   async processTask(task) {
@@ -892,7 +925,7 @@ class UploadQueue {
     // 记录任务开始处理
     const isVideo = filename && (filename.toLowerCase().endsWith('.mp4') || filename.toLowerCase().endsWith('.mov'));
     const isGif = filename && filename.toLowerCase().endsWith('.gif');
-    const dataSize = data ? (typeof data === 'string' ? data.length : JSON.stringify(data).length) : 0;
+    const dataSize = getPayloadSize(data);
     const dataSizeMB = (dataSize / 1024 / 1024).toFixed(2);
     
     // 提前声明变量，确保在 catch 块中可访问
@@ -905,10 +938,12 @@ class UploadQueue {
       // 优化：先解析 Base64 字符串（只解析一次）
       let base64String = data;
       let detectedMime = mimeType;
-      const dataUrlMatch = /^data:(.+);base64,(.*)$/.exec(base64String);
-      if (dataUrlMatch) {
-        detectedMime = detectedMime || dataUrlMatch[1];
-        base64String = dataUrlMatch[2];
+      if (typeof base64String === 'string') {
+        const dataUrlMatch = /^data:(.+);base64,(.*)$/.exec(base64String);
+        if (dataUrlMatch) {
+          detectedMime = detectedMime || dataUrlMatch[1];
+          base64String = dataUrlMatch[2];
+        }
       }
       detectedMime = detectedMime || 'image/jpeg';
       
@@ -959,6 +994,10 @@ class UploadQueue {
         // 优化：使用 setImmediate 避免阻塞事件循环，提高响应速度
         // 对于大文件（GIF/视频），添加超时和内存保护
         (async () => {
+          if (Buffer.isBuffer(data)) {
+            // 分块上传完成路径：已是二进制，跳过 Base64 解码
+            return data;
+          }
           return new Promise((resolve, reject) => {
             const decodeStartTime = Date.now();
             const base64Length = base64String ? base64String.length : 0;
@@ -1236,8 +1275,8 @@ class UploadQueue {
         }
       }
 
-      // 大文件预上传压缩：>50MB 的 GIF/视频在上传到 Drive 前先压缩
-      const COMPRESS_THRESHOLD = 50 * 1024 * 1024; // 50MB
+      // 大文件预上传压缩：超过阈值后压缩再上传
+      const COMPRESS_THRESHOLD = mediaTuning.thresholds.uploadCompressMb * 1024 * 1024;
       if ((isVideo || isGif) && finalBuffer && finalBuffer.length > COMPRESS_THRESHOLD) {
         const origSizeMB = (finalBuffer.length / 1024 / 1024).toFixed(1);
         const tempDir = path.join(os.tmpdir(), `screensync-compress-${Date.now()}`);
@@ -1251,8 +1290,21 @@ class UploadQueue {
             console.log(`   🎬 [上传压缩] GIF ${origSizeMB}MB > 50MB，gifsicle 压缩中...`);
             await execAsync(`gifsicle -O3 --lossy=30 "${tempIn}" -o "${tempOut}"`, { timeout: 300000 });
           } else {
-            console.log(`   🎥 [上传压缩] 视频 ${origSizeMB}MB > 50MB，FFmpeg 压缩中...`);
-            await execAsync(`ffmpeg -i "${tempIn}" -vf "scale='min(1920,iw)':'min(1080,ih)':force_original_aspect_ratio=decrease" -c:v libx264 -preset medium -crf 18 -c:a aac -b:a 128k -movflags +faststart -y "${tempOut}"`, { timeout: 300000 });
+            const sizeMB = finalBuffer.length / 1024 / 1024;
+            const isUltraLarge = sizeMB > mediaTuning.thresholds.ultraSpeedVideoMb;
+            const isTier80 = sizeMB > mediaTuning.thresholds.uploadTier80Mb;
+            const crf = isUltraLarge
+              ? mediaTuning.serverUpload.ultra.crf
+              : (isTier80 ? mediaTuning.serverUpload.normal.crf80plus : mediaTuning.serverUpload.normal.crf50to80);
+            const preset = isUltraLarge
+              ? mediaTuning.serverUpload.ultra.preset
+              : (isTier80 ? mediaTuning.serverUpload.normal.preset80plus : mediaTuning.serverUpload.normal.preset50to80);
+            const scaleFilter = isUltraLarge
+              ? `scale='min(${mediaTuning.serverUpload.ultra.maxWidth},iw)':'min(${mediaTuning.serverUpload.ultra.maxHeight},ih)':force_original_aspect_ratio=decrease`
+              : `scale='min(${mediaTuning.serverUpload.normal.maxWidth},iw)':'min(${mediaTuning.serverUpload.normal.maxHeight},ih)':force_original_aspect_ratio=decrease`;
+            const audioBitrate = isUltraLarge ? mediaTuning.serverUpload.ultra.audioBitrate : mediaTuning.serverUpload.normal.audioBitrate;
+            console.log(`   🎥 [上传压缩] 视频 ${origSizeMB}MB > 50MB，FFmpeg 压缩中 (preset=${preset}, CRF=${crf})...`);
+            await execAsync(`ffmpeg -i "${tempIn}" -vf "${scaleFilter}" -c:v libx264 -preset ${preset} -crf ${crf} -c:a aac -b:a ${audioBitrate} -movflags +faststart -y "${tempOut}"`, { timeout: 600000 });
           }
           
           if (fs.existsSync(tempOut)) {
@@ -1454,11 +1506,15 @@ app.use((req, res, next) => {
 // 注意：Base64 编码会增加约 33% 的大小，所以需要足够大的限制
 // 对于大文件，大幅增加限制以支持大视频文件（100MB视频Base64后约133MB，JSON整体可能更大）
 app.use(express.json({ 
-  limit: '1024mb', // 增加到 1024MB 以支持大视频文件
-  strict: false, // 允许非严格 JSON（更快）
-  type: ['application/json', 'text/plain', '*/*'], // 宽容模式：尝试解析所有类型的请求体为JSON
+  limit: '1024mb',
+  strict: false,
+  type: (req) => {
+    // Skip JSON parsing for chunked upload binary endpoint
+    if (req.url && req.url.startsWith('/upload-chunk')) return false;
+    const ct = req.headers['content-type'] || '';
+    return ct.includes('json') || ct.includes('text/plain') || !ct;
+  },
   verify: (req, res, buf, encoding) => {
-    // 在解析前记录大请求
     if (buf && buf.length > 10 * 1024 * 1024) {
       const sizeMB = (buf.length / 1024 / 1024).toFixed(2);
     }
@@ -1618,6 +1674,31 @@ app.get('/health', (req, res) => {
   }
 });
 
+// 从 GIF 缓存提供临时访问（供 Figma createImageAsync 直接拉取）
+app.get('/gif-temp/:cacheId', (req, res) => {
+  try {
+    const cacheId = (req.params.cacheId || '').trim();
+    const filename = (req.query.filename || '').toString();
+    if (!cacheId) {
+      return res.status(400).json({ error: 'missing cacheId' });
+    }
+
+    const cached = userConfig.getGifFromCache(filename, cacheId);
+    if (!cached || !cached.path || !fs.existsSync(cached.path)) {
+      return res.status(404).json({ error: 'gif cache not found' });
+    }
+
+    const ext = path.extname(cached.path).toLowerCase();
+    if (ext === '.png') res.setHeader('Content-Type', 'image/png');
+    else if (ext === '.jpg' || ext === '.jpeg') res.setHeader('Content-Type', 'image/jpeg');
+    else res.setHeader('Content-Type', 'image/gif');
+    res.setHeader('Cache-Control', 'no-store');
+    return res.sendFile(path.resolve(cached.path));
+  } catch (error) {
+    return res.status(500).json({ error: error.message || 'internal error' });
+  }
+});
+
 // 根路径也返回健康状态（Cloud Run 健康检查可能使用根路径）
 app.get('/', (req, res) => {
   res.status(200).json({ 
@@ -1665,7 +1746,7 @@ if (aliyunOSSEnabled && ossUploadBuffer) {
       const isLargeFile = isVideo || isGif;
       
       if (isLargeFile) {
-        const dataLength = data ? (typeof data === 'string' ? data.length : JSON.stringify(data).length) : 0;
+        const dataLength = getPayloadSize(data);
         const dataSizeMB = (dataLength / 1024 / 1024).toFixed(2);
         
         const estimatedOriginalSizeMB = (dataLength * 0.75 / 1024 / 1024).toFixed(2);
@@ -1699,7 +1780,8 @@ if (aliyunOSSEnabled && ossUploadBuffer) {
           data,
           mimeType: body.mimeType,
           startTime,
-          useOSS: true // 标记使用 OSS
+          useOSS: true, // 标记使用 OSS
+          priority: isLargeFile ? 'high' : 'normal'
         });
       });
     } catch (error) {
@@ -1763,7 +1845,7 @@ if (googleDriveEnabled && uploadBuffer) {
       const isLargeFile = isVideo || isGif;
       
       if (isLargeFile) {
-        const dataLength = data ? (typeof data === 'string' ? data.length : JSON.stringify(data).length) : 0;
+        const dataLength = getPayloadSize(data);
         const dataSizeMB = (dataLength / 1024 / 1024).toFixed(2);
         
         // 估算原始文件大小（Base64 编码会增加约 33%）
@@ -1805,7 +1887,8 @@ if (googleDriveEnabled && uploadBuffer) {
           filename,
           data,
           mimeType: body.mimeType,
-          startTime
+          startTime,
+          priority: isLargeFile ? 'high' : 'normal'
         });
       });
     } catch (error) {
@@ -1883,6 +1966,226 @@ if (googleDriveEnabled && uploadBuffer) {
 } else {
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// Chunked upload API: /upload-init, /upload-chunk, /upload-finish
+// Allows iOS Shortcuts to upload large files (>100MB) as small binary chunks,
+// avoiding the Base64 memory bottleneck and single-body size limits.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const chunkedSessions = new Map(); // sessionId -> { userId, filename, mimeType, totalSize, tempDir, receivedChunks, receivedBytes, createdAt }
+const CHUNK_SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+const CHUNK_UPLOAD_MAX_MB = 32;
+const CHUNK_UPLOAD_RECOMMENDED_BYTES = 16 * 1024 * 1024; // 16MB
+
+// Auto-cleanup stale chunked upload sessions
+setInterval(() => {
+  const now = Date.now();
+  for (const [sessionId, session] of chunkedSessions) {
+    if (now - session.createdAt > CHUNK_SESSION_TIMEOUT_MS) {
+      console.log(`🗑️  [分块上传] 清理超时会话: ${sessionId} (${session.filename})`);
+      try { fs.rmSync(session.tempDir, { recursive: true, force: true }); } catch (_) {}
+      chunkedSessions.delete(sessionId);
+    }
+  }
+}, 60000);
+
+app.post('/upload-init', (req, res) => {
+  const userId = req.headers['x-user-id'] || req.body.userId || null;
+  if (!validateUserId(userId, res)) return;
+  if (!validateUploadToken(req.headers['x-upload-token'], res)) return;
+
+  const { filename, mimeType, totalSize } = req.body;
+  if (!filename) {
+    return res.status(400).json({ error: 'Missing filename' });
+  }
+
+  const sessionId = `chunk-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const tempDir = path.join(os.tmpdir(), `screensync-chunk-${sessionId}`);
+  fs.mkdirSync(tempDir, { recursive: true });
+
+  chunkedSessions.set(sessionId, {
+    userId, filename, mimeType: mimeType || 'application/octet-stream',
+    totalSize: totalSize || 0, tempDir,
+    receivedChunks: new Set(), receivedBytes: 0, createdAt: Date.now()
+  });
+
+  console.log(`📦 [分块上传] 新会话 ${sessionId}: ${filename} (预计 ${((totalSize || 0) / 1024 / 1024).toFixed(1)}MB)`);
+  res.json({
+    success: true,
+    sessionId,
+    chunkMaxBytes: CHUNK_UPLOAD_MAX_MB * 1024 * 1024,
+    recommendedChunkBytes: CHUNK_UPLOAD_RECOMMENDED_BYTES
+  });
+});
+
+app.post(`/upload-chunk`, express.raw({ type: '*/*', limit: `${CHUNK_UPLOAD_MAX_MB}mb` }), async (req, res) => {
+  const sessionId = req.headers['x-session-id'] || req.query.sessionId;
+  const chunkIndex = parseInt(req.headers['x-chunk-index'] || req.query.chunkIndex, 10);
+
+  if (!sessionId || isNaN(chunkIndex)) {
+    return res.status(400).json({ error: 'Missing sessionId or chunkIndex' });
+  }
+
+  const session = chunkedSessions.get(sessionId);
+  if (!session) {
+    return res.status(404).json({ error: 'Session not found or expired' });
+  }
+
+  const chunkPath = path.join(session.tempDir, `chunk-${String(chunkIndex).padStart(6, '0')}`);
+  try {
+    // 幂等处理：重复 chunk 直接确认成功，避免重复写入拖慢上传
+    if (session.receivedChunks.has(chunkIndex) && fs.existsSync(chunkPath)) {
+      session.createdAt = Date.now();
+      return res.json({ success: true, chunkIndex, received: session.receivedChunks.size, duplicate: true });
+    }
+
+    await fs.promises.writeFile(chunkPath, req.body);
+    session.receivedChunks.add(chunkIndex);
+    session.receivedBytes += (req.body && req.body.length) ? req.body.length : 0;
+    // 心跳续期：持续上传过程中避免被清理器误删会话
+    session.createdAt = Date.now();
+    res.json({ success: true, chunkIndex, received: session.receivedChunks.size });
+  } catch (err) {
+    console.error(`❌ [分块上传] 写入 chunk ${chunkIndex} 失败:`, err.message);
+    res.status(500).json({ error: 'Failed to write chunk' });
+  }
+});
+
+app.post('/upload-finish', async (req, res) => {
+  const userId = req.headers['x-user-id'] || req.body.userId || null;
+  const sessionId = req.body.sessionId || req.headers['x-session-id'];
+  const totalChunks = parseInt(req.body.totalChunks || req.headers['x-total-chunks'], 10);
+
+  if (!sessionId) {
+    return res.status(400).json({ error: 'Missing sessionId' });
+  }
+
+  const session = chunkedSessions.get(sessionId);
+  if (!session) {
+    return res.status(404).json({ error: 'Session not found or expired' });
+  }
+
+  const expectedChunks = Number.isFinite(totalChunks) && totalChunks > 0 ? totalChunks : null;
+  if (expectedChunks && session.receivedChunks.size < expectedChunks) {
+    return res.status(400).json({
+      error: `Incomplete: received ${session.receivedChunks.size}/${expectedChunks} chunks`
+    });
+  }
+
+  // Respond immediately so the Shortcut finishes fast
+  res.json({ success: true, message: 'Upload finalizing', filename: session.filename });
+
+  // Reassemble + process in background
+  process.nextTick(async () => {
+    const { filename, mimeType, tempDir } = session;
+    try {
+      // Sort and reassemble chunks
+      const chunkFiles = (await fs.promises.readdir(tempDir))
+        .filter(f => f.startsWith('chunk-'))
+        .sort((a, b) => {
+          const ai = parseInt(a.slice('chunk-'.length), 10);
+          const bi = parseInt(b.slice('chunk-'.length), 10);
+          return ai - bi;
+        });
+
+      if (chunkFiles.length === 0) {
+        console.error(`❌ [分块上传] 会话 ${sessionId} 没有有效 chunk`);
+        chunkedSessions.delete(sessionId);
+        return;
+      }
+
+      if (expectedChunks) {
+        const missing = [];
+        for (let i = 0; i < expectedChunks; i++) {
+          if (!session.receivedChunks.has(i)) {
+            missing.push(i);
+            if (missing.length >= 10) break;
+          }
+        }
+        if (missing.length > 0) {
+          console.error(`❌ [分块上传] 会话 ${sessionId} 缺失分块: ${missing.join(', ')}${missing.length >= 10 ? ' ...' : ''}`);
+          return;
+        }
+      }
+
+      // 直接在内存中组装，避免“先落盘再读回”的双重 I/O
+      const chunkBuffers = [];
+      let assembledBytes = 0;
+      for (const cf of chunkFiles) {
+        const chunkData = await fs.promises.readFile(path.join(tempDir, cf));
+        chunkBuffers.push(chunkData);
+        assembledBytes += chunkData.length;
+      }
+      let finalBuffer = Buffer.concat(chunkBuffers, assembledBytes);
+      chunkBuffers.length = 0;
+      const origSizeMB = (finalBuffer.length / 1024 / 1024).toFixed(1);
+      console.log(`✅ [分块上传] 已组装: ${filename} (${origSizeMB}MB, ${chunkFiles.length} chunks)`);
+
+      const isVideo = /\.(mp4|mov)$/i.test(filename);
+      const isGif = /\.gif$/i.test(filename);
+
+      // Compress large videos before cloud upload
+      if (isVideo && finalBuffer.length > mediaTuning.thresholds.uploadCompressMb * 1024 * 1024) {
+        const tempIn = path.join(tempDir, `raw_${filename}`);
+        const tempOut = path.join(tempDir, `comp_${filename}`);
+        await fs.promises.writeFile(tempIn, finalBuffer);
+
+        const sizeMB = finalBuffer.length / 1024 / 1024;
+        const isUltraLarge = sizeMB > mediaTuning.thresholds.ultraSpeedVideoMb;
+        const isTier80 = sizeMB > mediaTuning.thresholds.uploadTier80Mb;
+        const crf = isUltraLarge
+          ? mediaTuning.serverUpload.ultra.crf
+          : (isTier80 ? mediaTuning.serverUpload.normal.crf80plus : mediaTuning.serverUpload.normal.crf50to80);
+        const preset = isUltraLarge
+          ? mediaTuning.serverUpload.ultra.preset
+          : (isTier80 ? mediaTuning.serverUpload.normal.preset80plus : mediaTuning.serverUpload.normal.preset50to80);
+        const scaleFilter = isUltraLarge
+          ? `scale='min(${mediaTuning.serverUpload.ultra.maxWidth},iw)':'min(${mediaTuning.serverUpload.ultra.maxHeight},ih)':force_original_aspect_ratio=decrease`
+          : `scale='min(${mediaTuning.serverUpload.normal.maxWidth},iw)':'min(${mediaTuning.serverUpload.normal.maxHeight},ih)':force_original_aspect_ratio=decrease`;
+        const audioBitrate = isUltraLarge ? mediaTuning.serverUpload.ultra.audioBitrate : mediaTuning.serverUpload.normal.audioBitrate;
+
+        console.log(`   🎥 [分块上传] 压缩视频: ${origSizeMB}MB, preset=${preset}, CRF=${crf}...`);
+        try {
+          await execAsync(
+            `ffmpeg -i "${tempIn}" -vf "${scaleFilter}" -c:v libx264 -preset ${preset} -crf ${crf} -c:a aac -b:a ${audioBitrate} -movflags +faststart -y "${tempOut}"`,
+            { timeout: 600000 }
+          );
+          if (fs.existsSync(tempOut)) {
+            const compBuf = await fs.promises.readFile(tempOut);
+            const newSizeMB = (compBuf.length / 1024 / 1024).toFixed(1);
+            const ratio = ((1 - compBuf.length / finalBuffer.length) * 100).toFixed(1);
+            console.log(`   ✅ [分块上传] ${origSizeMB}MB → ${newSizeMB}MB (节省 ${ratio}%)`);
+            finalBuffer = compBuf;
+          }
+        } catch (compErr) {
+          console.warn(`   ⚠️  [分块上传] 压缩失败，使用原始文件: ${compErr.message}`);
+        }
+      }
+
+      // Upload to cloud (reuse uploadQueue logic)
+      const effectiveUserId = userId || session.userId;
+
+      uploadQueue.add({
+        userId: effectiveUserId,
+        filename,
+        data: finalBuffer, // 直接传 Buffer，避免 Buffer->Base64->Buffer 的额外开销
+        mimeType,
+        startTime: Date.now(),
+        priority: (isVideo || isGif) ? 'high' : 'normal'
+      });
+      finalBuffer = null;
+
+      console.log(`📤 [分块上传] ${filename} 已加入上传队列`);
+
+    } catch (err) {
+      console.error(`❌ [分块上传] 组装/处理失败 (${filename}):`, err.message);
+    } finally {
+      try { await fs.promises.rm(tempDir, { recursive: true, force: true }); } catch (_) {}
+      chunkedSessions.delete(sessionId);
+    }
+  });
+});
+
 wss.on('connection', (ws, req) => {
   const params = new URLSearchParams(req.url.split('?')[1]);
   const connectionId = params.get('id');
@@ -1911,6 +2214,10 @@ wss.on('connection', (ws, req) => {
   }
   
   group[clientType] = ws;
+  if (clientType === 'figma') {
+    // 新文件中的插件一旦连上，立即关闭其他文件中的插件实例
+    closeOtherFigmaPlugins(ws, connectionId);
+  }
   
   // 消息处理
   ws.on('message', async (message) => {
@@ -2008,11 +2315,12 @@ wss.on('connection', (ws, req) => {
     }
     
     // 控制消息处理
-    if (data.type === 'start-realtime' || 
-        data.type === 'stop-realtime' || 
+    if (data.type === 'start-realtime' ||
+        data.type === 'stop-realtime' ||
         data.type === 'manual-sync' ||
         data.type === 'manual-sync-count-files' ||
-        data.type === 'cancel-manual-sync') {
+        data.type === 'cancel-manual-sync' ||
+        data.type === 'force-save-gif') {
       const tryForwardToMac = () => {
         const latestGroup = connections.get(connectionId);
         if (latestGroup && latestGroup.mac && latestGroup.mac.readyState === WebSocket.OPEN) {
@@ -2390,7 +2698,7 @@ wss.on('connection', (ws, req) => {
         const fileSizeMB = bytes.length / 1024 / 1024;
         const isVideo = ['.mov', '.mp4'].includes(fileExt);
         const isGif = fileExt === '.gif';
-        const COMPRESS_THRESHOLD_MB = 50;
+        const COMPRESS_THRESHOLD_MB = mediaTuning.thresholds.uploadCompressMb;
         const needsCompression = (isVideo || isGif) && fileSizeMB > COMPRESS_THRESHOLD_MB;
         
         let processedFilePath = tempFilePath;
@@ -2405,8 +2713,19 @@ wss.on('connection', (ws, req) => {
               console.log(`   🎬 [压缩] GIF 文件 ${fileSizeMB.toFixed(1)}MB > ${COMPRESS_THRESHOLD_MB}MB，使用 gifsicle 压缩...`);
               await execAsync(gifsicleCmd, { timeout: 300000 }); // 5分钟超时
             } else {
-              // 视频: FFmpeg 高质量压缩（CRF 18 近无损，保留原始帧率）
-              const ffmpegCmd = `ffmpeg -i "${tempFilePath}" -vf "scale='min(1920,iw)':'min(1080,ih)':force_original_aspect_ratio=decrease" -c:v libx264 -preset medium -crf 18 -c:a aac -b:a 128k -movflags +faststart -y "${compressedPath}"`;
+              const isUltraLarge = fileSizeMB > mediaTuning.thresholds.ultraSpeedVideoMb;
+              const isTier80 = fileSizeMB > mediaTuning.thresholds.uploadTier80Mb;
+              const crf = isUltraLarge
+                ? mediaTuning.serverUpload.ultra.crf
+                : (isTier80 ? mediaTuning.serverUpload.normal.crf80plus : mediaTuning.serverUpload.normal.crf50to80);
+              const preset = isUltraLarge
+                ? mediaTuning.serverUpload.ultra.preset
+                : (isTier80 ? mediaTuning.serverUpload.normal.preset80plus : mediaTuning.serverUpload.normal.preset50to80);
+              const scaleFilter = isUltraLarge
+                ? `scale='min(${mediaTuning.serverUpload.ultra.maxWidth},iw)':'min(${mediaTuning.serverUpload.ultra.maxHeight},ih)':force_original_aspect_ratio=decrease`
+                : `scale='min(${mediaTuning.serverUpload.normal.maxWidth},iw)':'min(${mediaTuning.serverUpload.normal.maxHeight},ih)':force_original_aspect_ratio=decrease`;
+              const audioBitrate = isUltraLarge ? mediaTuning.serverUpload.ultra.audioBitrate : mediaTuning.serverUpload.normal.audioBitrate;
+              const ffmpegCmd = `ffmpeg -i "${tempFilePath}" -vf "${scaleFilter}" -c:v libx264 -preset ${preset} -crf ${crf} -c:a aac -b:a ${audioBitrate} -movflags +faststart -y "${compressedPath}"`;
               console.log(`   🎥 [压缩] 视频文件 ${fileSizeMB.toFixed(1)}MB > ${COMPRESS_THRESHOLD_MB}MB，使用 FFmpeg 压缩...`);
               await execAsync(ffmpegCmd, { timeout: 300000 });
             }
@@ -3143,7 +3462,8 @@ wss.on('connection', (ws, req) => {
     // 同步相关消息 → 转发到 Figma
     if (['manual-sync-complete', 'manual-sync-cancelled', 'manual-sync-file-count', 'manual-sync-progress',
          'conversion-progress', 'oversized-files-cleaned',
-         'gif-backup-setting-updated', 'keep-gif-in-icloud-setting-updated'].includes(data.type)) {
+         'gif-backup-setting-updated', 'keep-gif-in-icloud-setting-updated',
+         'force-save-gif-done'].includes(data.type)) {
       sendToFigma(targetGroup, data);
       return;
     }

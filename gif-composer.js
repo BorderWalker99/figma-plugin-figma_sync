@@ -786,8 +786,56 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
     const frameH = Math.round(frameBounds.height);
     
     // 🕐 如果有时间线数据，强制使用多 GIF 模式（支持按帧控制可见性）
-    const hasTimelineEdits = timelineData && Object.keys(timelineData).length > 0 && 
+    const hasTimelineEdits = timelineData && Object.keys(timelineData).length > 0 &&
                              Object.values(timelineData).some(range => range.start > 0 || range.end < 100);
+
+    // 仅基于“参与导出的图层 + 真正被编辑的区间”计算时间线覆盖范围，
+    // 避免 timelineData 中默认 0-100 图层把裁剪范围拉回全长，导致无图层段黑屏。
+    const getEffectiveTimelineTrimPercent = () => {
+      if (!hasTimelineEdits || !timelineData) {
+        return { start: 0, end: 100, hasEditedCoverage: false };
+      }
+
+      const exportLayerIds = new Set();
+      if (gifPaths && Array.isArray(gifPaths)) {
+        gifPaths.forEach(g => { if (g && g.layerId) exportLayerIds.add(g.layerId); });
+      }
+      if (staticLayerPaths && Array.isArray(staticLayerPaths)) {
+        staticLayerPaths.forEach(l => { if (l && l.layerId) exportLayerIds.add(l.layerId); });
+      }
+      if (annotationLayerPaths && Array.isArray(annotationLayerPaths)) {
+        annotationLayerPaths.forEach(l => { if (l && l.layerId) exportLayerIds.add(l.layerId); });
+      }
+
+      const editedRanges = [];
+      for (const [layerId, rawRange] of Object.entries(timelineData)) {
+        if (!rawRange) continue;
+        if (exportLayerIds.size > 0 && !exportLayerIds.has(layerId)) continue;
+
+        const startNum = Number(rawRange.start);
+        const endNum = Number(rawRange.end);
+        if (!Number.isFinite(startNum) || !Number.isFinite(endNum)) continue;
+
+        const start = Math.max(0, Math.min(100, startNum));
+        const end = Math.max(0, Math.min(100, endNum));
+        if (end <= start) continue;
+
+        // 只看实际编辑过的区间，默认 0-100 不参与裁剪覆盖计算
+        if (start > 0 || end < 100) {
+          editedRanges.push({ start, end });
+        }
+      }
+
+      if (editedRanges.length === 0) {
+        return { start: 0, end: 100, hasEditedCoverage: false };
+      }
+
+      return {
+        start: Math.min(...editedRanges.map(r => r.start)),
+        end: Math.max(...editedRanges.map(r => r.end)),
+        hasEditedCoverage: true
+      };
+    };
     
     if (gifPaths.length === 1) {
       // 单个 GIF：使用 FFmpeg 管道优化（支持时间线编辑 via enable 表达式）
@@ -874,6 +922,29 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
         }
         
         reportProgress(15, '正在构建 FFmpeg 合成管道...');
+
+        // 基于有效时间线覆盖裁掉头尾无图层段，避免导出黑屏
+        let pipeTrimStartFrame = 0;
+        let pipeTrimEndFrame = Math.max(0, (pipeTotalFrames || 1) - 1);
+        let applyPipeTrim = false;
+        if (pipeTotalFrames > 1) {
+          const effectiveTrim = getEffectiveTimelineTrimPercent();
+          if (effectiveTrim.hasEditedCoverage) {
+            const den = Math.max(1, pipeTotalFrames - 1);
+            // 与 enable=between 的边界保持一致：start 用 ceil，end 用 floor
+            // 避免 end 向上取整多带出一帧“全图层不可见”的黑屏尾帧
+            const sf = Math.max(0, Math.ceil((effectiveTrim.start / 100) * den));
+            const ef = Math.min(pipeTotalFrames - 1, Math.floor((effectiveTrim.end / 100) * den));
+            if (ef >= sf) {
+              pipeTrimStartFrame = sf;
+              pipeTrimEndFrame = ef;
+              applyPipeTrim = true;
+            }
+          }
+        }
+        const pipeOutputFrames = applyPipeTrim
+          ? (pipeTrimEndFrame - pipeTrimStartFrame + 1)
+          : pipeTotalFrames;
         
         // ── 构建 FFmpeg 滤镜图 ──────────────────────────────────────
         const ffInputs = [];
@@ -1123,6 +1194,12 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
           
         }
         
+        if (applyPipeTrim) {
+          const trimEndExclusive = pipeTrimEndFrame + 1;
+          filterParts.push(`[${prevStream}]trim=start_frame=${pipeTrimStartFrame}:end_frame=${trimEndExclusive},setpts=PTS-STARTPTS[trimmed]`);
+          prevStream = 'trimmed';
+        }
+
         // 🚀 三步走：消除 split 内存瓶颈
         // 旧方案: split 缓冲全部帧到内存（178帧×860×1864×4×2 ≈ 2.3GB），导致超慢
         // 新方案: 合成→PNG序列（流式O(1)内存）→ 两阶段调色板 → GIF
@@ -1132,12 +1209,12 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
         const pipeFramesDir = path.join(tempDir, 'pipe_frames');
         if (!fs.existsSync(pipeFramesDir)) fs.mkdirSync(pipeFramesDir, { recursive: true });
         const pipeTempGifPath = path.join(tempDir, 'pipe_output.gif');
-        const framesArg = pipeTotalFrames > 0 ? `-frames:v ${pipeTotalFrames}` : '';
-        const pipelineTimeout = Math.max(120000, (pipeTotalFrames || 200) * 5000);
+        const framesArg = pipeOutputFrames > 0 ? `-frames:v ${pipeOutputFrames}` : '';
+        const pipelineTimeout = Math.max(120000, (pipeOutputFrames || 200) * 5000);
         
         const pipeCompositeCmd = `ffmpeg -threads 0 ${ffInputs.join(' ')} -filter_complex "${filterComplex}" -map "[${prevStream}]" ${framesArg} -threads 0 -start_number 0 -y "${pipeFramesDir}/frame_%04d.png"`;
         
-        console.log(`   🚀 单 GIF 管道 Step 1/2: ${ffInputs.length} 输入, ${pipeTotalFrames || '?'} 帧 → PNG 序列`);
+        console.log(`   🚀 单 GIF 管道 Step 1/2: ${ffInputs.length} 输入, ${pipeOutputFrames || '?'} 帧 → PNG 序列`);
         reportProgress(20, `正在合成帧 (流式)...`);
         await execAsync(pipeCompositeCmd, { maxBuffer: 200 * 1024 * 1024, timeout: pipelineTimeout });
         
@@ -1169,7 +1246,7 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
           const gifsicleTimeout = Math.max(60000, Math.ceil(pipePreStats.size / (1024 * 1024)) * 5000);
           const adaptivePipe = getAdaptiveProfile({
             preSizeMB: pipePreStats.size / (1024 * 1024),
-            frameCount: pipeTotalFrames || 0,
+            frameCount: pipeOutputFrames || 0,
             hasVideoLayers: hasVideo
           });
           
@@ -1710,24 +1787,18 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
       let trimEndPercent = 100;
       
       if (hasTimelineEdits && timelineData) {
-        const allStarts = [];
-        const allEnds = [];
-        Object.values(timelineData).forEach(range => {
-          if (range && typeof range.start === 'number' && typeof range.end === 'number') {
-            allStarts.push(range.start);
-            allEnds.push(range.end);
-          }
-        });
-        if (allStarts.length > 0) {
-          trimStartPercent = Math.min(...allStarts);
-          trimEndPercent = Math.max(...allEnds);
+        const effectiveTrim = getEffectiveTimelineTrimPercent();
+        if (effectiveTrim.hasEditedCoverage) {
+          trimStartPercent = effectiveTrim.start;
+          trimEndPercent = effectiveTrim.end;
         }
       }
       
       // 将百分比转换为帧索引
-      const trimStartFrame = Math.floor((trimStartPercent / 100) * (totalSourceFrames - 1));
-      const trimEndFrame = Math.ceil((trimEndPercent / 100) * (totalSourceFrames - 1));
-      const totalOutputFrames = trimEndFrame - trimStartFrame + 1;
+      // 与图层 enable 逻辑保持一致，避免尾帧越界导致黑屏
+      const trimStartFrame = Math.ceil((trimStartPercent / 100) * (totalSourceFrames - 1));
+      const trimEndFrame = Math.floor((trimEndPercent / 100) * (totalSourceFrames - 1));
+      const totalOutputFrames = Math.max(1, trimEndFrame - trimStartFrame + 1);
       
       // 裁剪后的实际时长
       const trimmedDuration = (totalOutputFrames * outputDelay) / 100;

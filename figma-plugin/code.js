@@ -24,12 +24,34 @@ let screenshotIndex = 0; // 截屏图片计数器
 let screenRecordingIndex = 0; // 录屏计数器
 let cancelGifExport = false; // GIF导出取消标志
 let serverCheckTimer = null; // Server 缓存检查超时计时器
+let focusNodeTimer = null;
+let pendingFocusNode = null;
+const GIF_IMPORT_TIMEOUT_MS = 8000;
+const timelineThumbnailRetryTimers = new Map(); // Map<frameId, number[]>
 
 // 时间线编辑器状态
 let isTimelineEditorOpen = false;
 let timelineFrameId = null;
 let lastTimelineLayerIds = []; // 用于检测图层顺序变化
 let structuralRefreshTimer = null; // debounce 定时器
+
+// 计算图层相对于 Frame 的渲染边界（含 effects / strokes 等视觉溢出）
+// exportAsync 导出的 PNG 包含 effects，因此预览定位必须使用渲染边界而非布局边界
+function getLayerRenderBounds(child, frame) {
+  try {
+    const rb = child.absoluteRenderBounds;
+    const fb = frame.absoluteBoundingBox;
+    if (rb && fb) {
+      return {
+        renderX: rb.x - fb.x,
+        renderY: rb.y - fb.y,
+        renderWidth: rb.width,
+        renderHeight: rb.height
+      };
+    }
+  } catch (e) {}
+  return null;
+}
 
 // 刷新时间线图层列表（用于检测到增删/重排序时）
 // force=true 时跳过 orderChanged 检查（由 documentchange 检测触发时使用）
@@ -92,6 +114,7 @@ async function refreshTimelineLayers(frame, force) {
           }
         }
         
+        const rb = getLayerRenderBounds(child, frame);
         return {
           id: child.id,
           name: child.name,
@@ -101,6 +124,10 @@ async function refreshTimelineLayers(frame, force) {
           height: child.height,
           x: child.x,
           y: child.y,
+          renderX: rb ? rb.renderX : child.x,
+          renderY: rb ? rb.renderY : child.y,
+          renderWidth: rb ? rb.renderWidth : child.width,
+          renderHeight: rb ? rb.renderHeight : child.height,
           isVideoLayer: isVideoLayer,
           videoId: videoId,
           originalFilename: originalFilename,
@@ -124,11 +151,24 @@ async function refreshTimelineLayers(frame, force) {
             }
           } catch (e) { fallbackIsVideo = true; }
         }
+        const fbW = (typeof child.width === 'number' ? child.width : 50);
+        const fbH = (typeof child.height === 'number' ? child.height : 50);
+        const fbX = (typeof child.x === 'number' ? child.x : 0);
+        const fbY = (typeof child.y === 'number' ? child.y : 0);
+        const rbFb = getLayerRenderBounds(child, frame);
         return {
           id: child.id,
           name: safeName,
           type: child.type,
           thumbnail: null,
+          width: fbW,
+          height: fbH,
+          x: fbX,
+          y: fbY,
+          renderX: rbFb ? rbFb.renderX : fbX,
+          renderY: rbFb ? rbFb.renderY : fbY,
+          renderWidth: rbFb ? rbFb.renderWidth : fbW,
+          renderHeight: rbFb ? rbFb.renderHeight : fbH,
           isVideoLayer: fallbackIsVideo,
           videoId: fallbackVideoId,
           originalFilename: fallbackOrigFilename,
@@ -138,6 +178,12 @@ async function refreshTimelineLayers(frame, force) {
     });
     
     const processedLayers = await Promise.all(exportPromises);
+    const missingThumbnailLayerIds = processedLayers
+      .filter(layer => !layer.thumbnail && !layer.isVideoLayer)
+      .map(layer => layer.id);
+    if (missingThumbnailLayerIds.length > 0) {
+      scheduleTimelineThumbnailRetry(frame.id, missingThumbnailLayerIds);
+    }
     
     figma.ui.postMessage({
       type: 'timeline-layers-refresh',
@@ -381,6 +427,101 @@ function ensureFrame() {
   } catch (error) {
     return false;
   }
+}
+
+function scheduleFocusOnNode(node) {
+  pendingFocusNode = node;
+  if (focusNodeTimer) {
+    clearTimeout(focusNodeTimer);
+  }
+  focusNodeTimer = setTimeout(() => {
+    try {
+      if (pendingFocusNode && pendingFocusNode.removed !== true) {
+        figma.currentPage.selection = [pendingFocusNode];
+        figma.viewport.scrollAndZoomIntoView([pendingFocusNode]);
+      }
+    } catch (_) {}
+    pendingFocusNode = null;
+    focusNodeTimer = null;
+  }, 120);
+}
+
+async function createImageFromUrlWithTimeout(url, timeoutMs) {
+  let timeoutId = null;
+  try {
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutId = setTimeout(() => {
+        const error = new Error(`GIF 导入超时（>${timeoutMs}ms）`);
+        error.code = 'GIF_IMPORT_TIMEOUT';
+        reject(error);
+      }, timeoutMs);
+    });
+    return await Promise.race([figma.createImageAsync(url), timeoutPromise]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
+
+function clearTimelineThumbnailRetryTimers(frameId) {
+  const timers = timelineThumbnailRetryTimers.get(frameId);
+  if (timers && timers.length) {
+    timers.forEach(t => clearTimeout(t));
+  }
+  timelineThumbnailRetryTimers.delete(frameId);
+}
+
+function scheduleTimelineThumbnailRetry(frameId, layerIds) {
+  if (!frameId || !Array.isArray(layerIds) || layerIds.length === 0) return;
+  clearTimelineThumbnailRetryTimers(frameId);
+
+  const retryDelays = [500, 1500, 3000, 5000, 8000];
+  const timers = [];
+  const unresolved = new Set(layerIds);
+
+  const runRetry = async () => {
+    if (!isTimelineEditorOpen || timelineFrameId !== frameId || unresolved.size === 0) return;
+    const frame = figma.getNodeById(frameId);
+    if (!frame || frame.type !== 'FRAME') return;
+
+    const updates = [];
+    for (const id of Array.from(unresolved)) {
+      try {
+        const node = figma.getNodeById(id);
+        if (!node || !('exportAsync' in node)) continue;
+        const bytes = await node.exportAsync({
+          format: 'PNG',
+          constraint: { type: 'HEIGHT', value: 800 }
+        });
+        if (bytes && bytes.length > 0) {
+          const rb = getLayerRenderBounds(node, frame);
+          updates.push({
+            id,
+            thumbnail: figma.base64Encode(bytes),
+            renderX: rb ? rb.renderX : node.x,
+            renderY: rb ? rb.renderY : node.y,
+            renderWidth: rb ? rb.renderWidth : node.width,
+            renderHeight: rb ? rb.renderHeight : node.height
+          });
+          unresolved.delete(id);
+        }
+      } catch (_) {
+        // 当前轮导出失败，等待下一轮重试
+      }
+    }
+
+    if (updates.length > 0) {
+      figma.ui.postMessage({
+        type: 'timeline-layer-thumbnails-updated',
+        updates
+      });
+    }
+  };
+
+  for (const delay of retryDelays) {
+    const timer = setTimeout(() => { runRetry(); }, delay);
+    timers.push(timer);
+  }
+  timelineThumbnailRetryTimers.set(frameId, timers);
 }
 
 // 查找画板上第一个空位
@@ -1655,7 +1796,7 @@ figma.ui.onmessage = async (msg) => {
   
   if (msg.type === 'add-screenshot') {
     try {
-      const { bytes, timestamp, filename, driveFileId, ossFileId, gifCacheId } = msg;
+      const { bytes, gifUrl, imageWidth, imageHeight, timestamp, filename, driveFileId, ossFileId, gifCacheId } = msg;
       
       // ✅ 缓存文件信息（即使后续创建失败，也要保留信息以便手动拖入后关联）
       if (filename) {
@@ -1680,8 +1821,8 @@ figma.ui.onmessage = async (msg) => {
         
       }
       
-      if (!bytes) {
-        throw new Error('缺少 bytes 数据');
+      if (!bytes && !gifUrl) {
+        throw new Error('缺少 bytes/gifUrl 数据');
       }
       
       const filenameLower = filename ? filename.toLowerCase() : '';
@@ -1690,20 +1831,25 @@ figma.ui.onmessage = async (msg) => {
       const isScreenRecording = isVideo || isGif;
       
       let uint8Array;
+      let image;
       
-      if (typeof bytes === 'string') {
-        try {
-          uint8Array = figma.base64Decode(bytes);
-        } catch (error) {
-          throw new Error('base64 解码失败: ' + error.message);
+      if (!gifUrl) {
+        if (bytes instanceof Uint8Array) {
+          uint8Array = bytes;
+        } else if (typeof bytes === 'string') {
+          try {
+            uint8Array = figma.base64Decode(bytes);
+          } catch (error) {
+            throw new Error('base64 解码失败: ' + error.message);
+          }
+        } else if (Array.isArray(bytes) || (bytes && bytes.length !== undefined && !(bytes instanceof Uint8Array))) {
+          if (bytes.length === 0) {
+            throw new Error('bytes 数组为空');
+          }
+          uint8Array = new Uint8Array(bytes);
+        } else {
+          throw new Error('bytes 必须是 Uint8Array、字符串（base64）或数组，实际类型: ' + typeof bytes);
         }
-      } else if (Array.isArray(bytes)) {
-        if (bytes.length === 0) {
-          throw new Error('bytes 数组为空');
-        }
-        uint8Array = new Uint8Array(bytes);
-      } else {
-        throw new Error('bytes 必须是字符串（base64）或数组，实际类型: ' + typeof bytes);
       }
       
       let mediaSize;
@@ -1712,7 +1858,12 @@ figma.ui.onmessage = async (msg) => {
       if (isVideo) {
         throw new Error('Figma 插件 API 不支持视频文件。请通过 Figma 界面直接拖放视频文件，或使用 GIF 格式。');
       } else {
-        const image = figma.createImage(uint8Array);
+        if (gifUrl) {
+          // 8s 超时从“真正调用 Figma API 导入 URL”这一刻开始计时
+          image = await createImageFromUrlWithTimeout(gifUrl, GIF_IMPORT_TIMEOUT_MS);
+        } else {
+          image = figma.createImage(uint8Array);
+        }
         
         if (!image) {
           throw new Error('figma.createImage() 返回 undefined，可能是 GIF 格式不支持或文件损坏');
@@ -1724,23 +1875,29 @@ figma.ui.onmessage = async (msg) => {
         
         mediaHash = image.hash;
         
-        try {
-          mediaSize = await image.getSizeAsync();
-          
-          if (!mediaSize) {
-            throw new Error('image.getSizeAsync() 返回 undefined，可能是 GIF 格式不支持或文件损坏');
-          }
-          
-          if (typeof mediaSize.width !== 'number' || typeof mediaSize.height !== 'number' || 
-              mediaSize.width <= 0 || mediaSize.height <= 0) {
-            throw new Error(`图片尺寸无效: ${mediaSize.width}x${mediaSize.height}，可能是 GIF 格式不支持或文件损坏`);
-          }
-        } catch (sizeError) {
-          const errorMsg = sizeError && sizeError.message ? sizeError.message : String(sizeError);
-          if (isGif) {
-            throw new Error(`GIF 文件无法获取尺寸: ${errorMsg}。可能是 GIF 格式不支持或文件损坏，请尝试手动拖入或使用其他格式`);
-          } else {
-            throw new Error(`无法获取图片尺寸: ${errorMsg}`);
+        const widthNum = Number(imageWidth);
+        const heightNum = Number(imageHeight);
+        if (widthNum > 0 && heightNum > 0) {
+          mediaSize = { width: widthNum, height: heightNum };
+        } else {
+          try {
+            mediaSize = await image.getSizeAsync();
+            
+            if (!mediaSize) {
+              throw new Error('image.getSizeAsync() 返回 undefined，可能是 GIF 格式不支持或文件损坏');
+            }
+            
+            if (typeof mediaSize.width !== 'number' || typeof mediaSize.height !== 'number' || 
+                mediaSize.width <= 0 || mediaSize.height <= 0) {
+              throw new Error(`图片尺寸无效: ${mediaSize.width}x${mediaSize.height}，可能是 GIF 格式不支持或文件损坏`);
+            }
+          } catch (sizeError) {
+            const errorMsg = sizeError && sizeError.message ? sizeError.message : String(sizeError);
+            if (isGif) {
+              throw new Error(`GIF 文件无法获取尺寸: ${errorMsg}。可能是 GIF 格式不支持或文件损坏，请尝试手动拖入或使用其他格式`);
+            } else {
+              throw new Error(`无法获取图片尺寸: ${errorMsg}`);
+            }
           }
         }
       }
@@ -1820,6 +1977,9 @@ figma.ui.onmessage = async (msg) => {
       const frameCreated = ensureFrame();
       
       if (isFrameValid()) {
+        const wasFrameEmpty = currentFrame.children.length === 0;
+        const viewportCenterAtInsert = { x: figma.viewport.center.x, y: figma.viewport.center.y };
+
         if (currentFrame.layoutMode === 'NONE') {
           currentFrame.layoutMode = 'HORIZONTAL';
           currentFrame.itemSpacing = 10;
@@ -1866,6 +2026,12 @@ figma.ui.onmessage = async (msg) => {
             // 如果设置 layoutSizing 失败，不抛出错误，让图片正常添加
           }
         }
+
+        // 首次添加图片时，强制把 Frame 放到当前视窗中心，避免视窗跳动
+        if (wasFrameEmpty) {
+          currentFrame.x = viewportCenterAtInsert.x - (currentFrame.width / 2);
+          currentFrame.y = viewportCenterAtInsert.y - (currentFrame.height / 2);
+        }
         
       } else {
         rect.x = figma.viewport.center.x;
@@ -1875,8 +2041,7 @@ figma.ui.onmessage = async (msg) => {
       
       screenshotCount++;
       
-      figma.currentPage.selection = [rect];
-      figma.viewport.scrollAndZoomIntoView([rect]);
+      scheduleFocusOnNode(rect);
       
       figma.ui.postMessage({
         type: 'screenshot-added',
@@ -1900,7 +2065,16 @@ figma.ui.onmessage = async (msg) => {
                                  errorMessage.toLowerCase().includes('返回 undefined')
                                ));
       
-      if (isUndefinedError) {
+      if (error && error.code === 'GIF_IMPORT_TIMEOUT') {
+        figma.ui.postMessage({
+          type: 'screenshot-import-timeout',
+          filename: msg.filename || '未命名文件',
+          gifCacheId: msg.gifCacheId || null,
+          driveFileId: msg.driveFileId,
+          ossFileId: msg.ossFileId,
+          timeoutMs: GIF_IMPORT_TIMEOUT_MS
+        });
+      } else if (isUndefinedError) {
         const isGif = msg.filename && msg.filename.toLowerCase().endsWith('.gif');
         const errorText = isGif 
           ? 'GIF 文件导入失败（可能是格式不支持或文件损坏），需要手动拖入'
@@ -2247,6 +2421,7 @@ figma.ui.onmessage = async (msg) => {
             }
           }
           
+          const rb = getLayerRenderBounds(child, frame);
           return {
             id: child.id,
             name: child.name,
@@ -2256,6 +2431,10 @@ figma.ui.onmessage = async (msg) => {
             height: child.height,
             x: child.x,
             y: child.y,
+            renderX: rb ? rb.renderX : child.x,
+            renderY: rb ? rb.renderY : child.y,
+            renderWidth: rb ? rb.renderWidth : child.width,
+            renderHeight: rb ? rb.renderHeight : child.height,
             isVideoLayer: isVideoLayer,
             videoId: videoId,
             originalFilename: originalFilename,
@@ -2263,7 +2442,6 @@ figma.ui.onmessage = async (msg) => {
           };
         } catch (err) {
           console.error(`Failed to export layer ${child.name}:`, err);
-          // 即使 exportAsync 失败（视频节点常见），仍尝试从 pluginData 检测视频信息
           let fallbackVideoId = null;
           let fallbackIsVideo = false;
           let fallbackOriginalFilename = null;
@@ -2286,13 +2464,26 @@ figma.ui.onmessage = async (msg) => {
               if ('fills' in child && Array.isArray(child.fills)) {
                 fallbackIsVideo = child.fills.some(f => f.type === 'VIDEO');
               }
-            } catch (e) { fallbackIsVideo = true; } // 访问 fills 失败通常意味着是视频节点
+            } catch (e) { fallbackIsVideo = true; }
           }
+          const fbW = (typeof child.width === 'number' ? child.width : 50);
+          const fbH = (typeof child.height === 'number' ? child.height : 50);
+          const fbX = (typeof child.x === 'number' ? child.x : 0);
+          const fbY = (typeof child.y === 'number' ? child.y : 0);
+          const rbFb = getLayerRenderBounds(child, frame);
           return {
             id: child.id,
             name: child.name,
             type: child.type,
             thumbnail: null,
+            width: fbW,
+            height: fbH,
+            x: fbX,
+            y: fbY,
+            renderX: rbFb ? rbFb.renderX : fbX,
+            renderY: rbFb ? rbFb.renderY : fbY,
+            renderWidth: rbFb ? rbFb.renderWidth : fbW,
+            renderHeight: rbFb ? rbFb.renderHeight : fbH,
             isVideoLayer: fallbackIsVideo,
             videoId: fallbackVideoId,
             originalFilename: fallbackOriginalFilename,
@@ -2302,6 +2493,12 @@ figma.ui.onmessage = async (msg) => {
       });
       
       const processedLayers = await Promise.all(exportPromises);
+      const missingThumbnailLayerIds = processedLayers
+        .filter(layer => !layer.thumbnail && !layer.isVideoLayer)
+        .map(layer => layer.id);
+      if (missingThumbnailLayerIds.length > 0) {
+        scheduleTimelineThumbnailRetry(frame.id, missingThumbnailLayerIds);
+      }
       
       figma.ui.postMessage({
         type: 'timeline-layers-response',
@@ -2318,6 +2515,9 @@ figma.ui.onmessage = async (msg) => {
 
   // 处理时间线编辑器关闭
   if (msg.type === 'timeline-editor-closed') {
+    if (timelineFrameId) {
+      clearTimelineThumbnailRetryTimers(timelineFrameId);
+    }
     isTimelineEditorOpen = false;
     timelineFrameId = null;
     lastTimelineLayerIds = [];
@@ -2538,12 +2738,17 @@ figma.on('documentchange', (event) => {
               try {
                 const node = figma.getNodeById(change.id);
                 if (node && 'x' in node) {
+                  const rb = getLayerRenderBounds(node, frame);
                   updates.push({
                     id: node.id,
                     x: node.x,
                     y: node.y,
                     width: node.width,
-                    height: node.height
+                    height: node.height,
+                    renderX: rb ? rb.renderX : node.x,
+                    renderY: rb ? rb.renderY : node.y,
+                    renderWidth: rb ? rb.renderWidth : node.width,
+                    renderHeight: rb ? rb.renderHeight : node.height
                   });
                   
                   // 检查名称变化
@@ -2610,9 +2815,14 @@ figma.on('documentchange', (event) => {
                       format: 'PNG',
                       constraint: { type: 'HEIGHT', value: 800 }
                     });
+                    const rb = getLayerRenderBounds(item.node, frame);
                     thumbResults.push({
                       id: item.id,
-                      thumbnail: figma.base64Encode(bytes)
+                      thumbnail: figma.base64Encode(bytes),
+                      renderX: rb ? rb.renderX : item.node.x,
+                      renderY: rb ? rb.renderY : item.node.y,
+                      renderWidth: rb ? rb.renderWidth : item.node.width,
+                      renderHeight: rb ? rb.renderHeight : item.node.height
                     });
                   } catch (e) {
                     console.warn('缩略图导出失败:', item.id, e);
