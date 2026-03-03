@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
+const mediaTuning = require('./media-processing-tuning');
 
 // 🔒 并发导出序号锁：防止多个导出同时扫描文件夹时拿到相同序号
 const _reservedExportNumbers = new Set();
@@ -71,10 +72,11 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
     if (frameCount > 0) score *= Math.min(6, Math.max(1, frameCount / 120));
     if (hasVideoLayers) score *= 1.15;
 
-    let videoFpsCap = 15;
-    if (score > 12_000_000 || preSizeMB > 80) videoFpsCap = 12;
-    else if (score > 6_000_000 || preSizeMB > 40) videoFpsCap = 13;
-    else if (score > 2_500_000 || preSizeMB > 20) videoFpsCap = 14;
+    const ct = mediaTuning.composer || {};
+    let videoFpsCap = ct.fpsCap || 24;
+    if (score > 12_000_000 || preSizeMB > 80) videoFpsCap = ct.fpsCapXLarge || 16;
+    else if (score > 6_000_000 || preSizeMB > 40) videoFpsCap = ct.fpsCapLarge || 20;
+    else if (score > 2_500_000 || preSizeMB > 20) videoFpsCap = ct.fpsCapMedium || 22;
 
     let lossy = 80;
     if (score > 12_000_000 || preSizeMB > 80) lossy = 102;
@@ -590,13 +592,19 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
       const targetW = Math.round(item.bounds.width);
       const targetH = Math.round(item.bounds.height);
       
-      // 🚀 缓存：源视频→GIF 的转换结果（只基于源文件属性+目标尺寸+抖动算法）
+      // 🚀 缓存：源视频→GIF 的转换结果（包含目标尺寸+抖动算法+当前帧率上限配置）
       // 这个缓存是安全的，因为它只缓存源视频/GIF 文件本身的转换，
       // 不影响后续的帧合成步骤（帧合成每次都会重新读取所有图层）
       const fileStats = fs.statSync(item.path);
-      // v5: stats_mode=full 全局调色板 + gifsicle lossy=80，使旧缓存自动失效
+      const adaptive = getAdaptiveProfile({
+        preSizeMB: fileStats.size / (1024 * 1024),
+        hasVideoLayers: true
+      });
+      const composerCfg = mediaTuning.composer || {};
+      const composerSig = `fc${composerCfg.fpsCap || 24}_${composerCfg.fpsCapMedium || 22}_${composerCfg.fpsCapLarge || 20}_${composerCfg.fpsCapXLarge || 16}`;
+      // v6: 加入 composer 帧率参数签名，调参后自动失效旧缓存
       const cacheKey = crypto.createHash('md5')
-        .update(`v5_${item.path}_${fileStats.size}_${fileStats.mtime.getTime()}_${targetW}x${targetH}_dither_${ditherMode}_full_l80`)
+        .update(`v6_${item.path}_${fileStats.size}_${fileStats.mtime.getTime()}_${targetW}x${targetH}_dither_${ditherMode}_vf${adaptive.videoFpsCap}_${composerSig}_full_l80`)
         .digest('hex');
       
       const localFolder = userConfig.getLocalDownloadFolder();
@@ -635,10 +643,6 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
         }
       }
       
-      const adaptive = getAdaptiveProfile({
-        preSizeMB: fileStats.size / (1024 * 1024),
-        hasVideoLayers: true
-      });
       let gifFps = Math.min(sourceFps, adaptive.videoFpsCap);
       
       // 🚀 两阶段调色板生成（替代单命令 split 方案）

@@ -813,11 +813,30 @@ async function handleDriveFile(file, deleteAfterSync = false, progressCb = null,
     const looksLikeVideo = fileNameLower.endsWith('.mp4') || fileNameLower.endsWith('.mov') || fileMimeLower.startsWith('video/');
     
     emitProgress('downloading', 5, looksLikeVideo ? { isVideo: true } : {});
+    let downloadProgressTimer = null;
+    if (looksLikeVideo) {
+      let downloadingPct = 5;
+      // 无损优化：下载阶段平滑推进，避免大文件长时间停在 5%
+      downloadProgressTimer = setInterval(() => {
+        try {
+          downloadingPct = Math.min(19, downloadingPct + 1);
+          emitProgress('downloading', downloadingPct, { isVideo: true, stageDetail: 'downloading-large-video' });
+        } catch (_) {}
+      }, 1200);
+    }
     let backedUpLocally = false;
     let gifCacheId = null;
     let deferredLocalBackup = null;
     const downloadTimeout = looksLikeVideo ? 300000 : 60000; // 视频 5 分钟，图片 60 秒
-    let originalBuffer = await downloadFileBuffer(file.id, downloadTimeout);
+    let originalBuffer;
+    try {
+      originalBuffer = await downloadFileBuffer(file.id, downloadTimeout);
+    } finally {
+      if (downloadProgressTimer) {
+        clearInterval(downloadProgressTimer);
+        downloadProgressTimer = null;
+      }
+    }
     throwIfAborted();
     const downloadedSizeKB = (originalBuffer.length / 1024).toFixed(2);
     emitProgress('downloading', 20, { sizeKB: parseFloat(downloadedSizeKB), ...(looksLikeVideo ? { isVideo: true } : {}) });
@@ -845,39 +864,35 @@ async function handleDriveFile(file, deleteAfterSync = false, progressCb = null,
                 mimeType === 'video/x-m4v';
     }
     
-    // 检测是否为 GIF 格式
+    // 检测是否为 GIF / HEIF（视频文件直接跳过 sharp 元数据探测，减少无损耗时）
     let isGif = fileNameIsGif;
-    if (!isGif) {
-      // 先检查 MIME 类型
-      const mimeType = (file.mimeType || '').toLowerCase();
-      if (mimeType === 'image/gif') {
-        isGif = true;
-      } else {
-        // 尝试使用 sharp 检测格式
+    let isHeif = fileNameIsHeif;
+    if (!isVideo) {
+      if (!isGif) {
+        const mimeType = (file.mimeType || '').toLowerCase();
+        if (mimeType === 'image/gif') {
+          isGif = true;
+        } else {
+          try {
+            const sharpImage = sharp(originalBuffer);
+            const metadata = await sharpImage.metadata();
+            isGif = metadata.format === 'gif';
+          } catch (metaError) {
+            isGif = false;
+          }
+        }
+      }
+
+      if (!isHeif) {
         try {
           const sharpImage = sharp(originalBuffer);
           const metadata = await sharpImage.metadata();
-          isGif = metadata.format === 'gif';
+          isHeif = metadata.format === 'heif' || metadata.format === 'heic';
         } catch (metaError) {
-          // 如果检测失败，根据文件名判断
-          isGif = false;
-        }
-      }
-    }
-    
-    // 检测是否为 HEIF 格式
-    let isHeif = fileNameIsHeif;
-    if (!isHeif) {
-      // 尝试使用 sharp 检测格式（如果失败，根据错误信息判断）
-      try {
-        const sharpImage = sharp(originalBuffer);
-        const metadata = await sharpImage.metadata();
-        isHeif = metadata.format === 'heif' || metadata.format === 'heic';
-      } catch (metaError) {
-        // 如果错误信息包含 HEIF 相关错误，也标记为 HEIF
-        const errorMsg = metaError.message.toLowerCase();
-        if (errorMsg.includes('heif') || errorMsg.includes('heic') || errorMsg.includes('codec')) {
-          isHeif = true;
+          const errorMsg = metaError.message.toLowerCase();
+          if (errorMsg.includes('heif') || errorMsg.includes('heic') || errorMsg.includes('codec')) {
+            isHeif = true;
+          }
         }
       }
     }
@@ -943,6 +958,7 @@ async function handleDriveFile(file, deleteAfterSync = false, progressCb = null,
           const cmd = `ffmpeg -hwaccel auto -threads 0 -i "${sourceVideoPath}" -lavfi "setpts=PTS,fps=${fps},scale=${scaleExpr}:flags=bicubic,split[s0][s1];[s0]palettegen=max_colors=${maxColors}:stats_mode=diff[p];[s1][p]paletteuse=dither=${dither}:diff_mode=rectangle" -loop 0 -y "${tempGifOut}"`;
           await execAsync(cmd, { timeout, maxBuffer: 200 * 1024 * 1024 });
         };
+        const buildUltraScaleExpr = (divisor) => `'trunc(iw/${divisor})*2':'trunc(ih/${divisor})*2'`;
 
         const runTwoPass = async (sourceVideoPath, scaleFilter, pass1Timeout, pass2Timeout) => {
           const pass1Cmd = `ffmpeg -hwaccel auto -threads 0 -i "${sourceVideoPath}" -vf "${scaleFilter},palettegen=max_colors=256:stats_mode=full" -y "${tempPalette}"`;
@@ -960,7 +976,7 @@ async function handleDriveFile(file, deleteAfterSync = false, progressCb = null,
             await runSinglePass(
               tempVideoPath,
               mediaTuning.watcher.ultra.fps,
-              `'trunc(iw/${mediaTuning.watcher.ultra.scaleDivisor})*2':'trunc(ih/${mediaTuning.watcher.ultra.scaleDivisor})*2'`,
+              buildUltraScaleExpr(mediaTuning.watcher.ultra.scaleDivisor),
               mediaTuning.watcher.ultra.maxColors,
               mediaTuning.watcher.ultra.dither,
               mediaTuning.watcher.ultra.timeoutMs
@@ -1027,7 +1043,7 @@ async function handleDriveFile(file, deleteAfterSync = false, progressCb = null,
               ? Math.max(mediaTuning.watcher.ultra.fallbackMinFps, mediaTuning.watcher.ultra.fps - 1)
               : mediaTuning.watcher.fallbackLossy.fps,
             isUltraLargeFile
-              ? `'trunc(iw/${Math.max(mediaTuning.watcher.ultra.fallbackScaleDivisorMin, mediaTuning.watcher.ultra.scaleDivisor)})*2':'trunc(ih/${Math.max(mediaTuning.watcher.ultra.fallbackScaleDivisorMin, mediaTuning.watcher.ultra.scaleDivisor)})*2'`
+              ? buildUltraScaleExpr(Math.max(mediaTuning.watcher.ultra.fallbackScaleDivisorMin, mediaTuning.watcher.ultra.scaleDivisor))
               : `'trunc(iw/${mediaTuning.watcher.fallbackLossy.scaleDivisor})*2':'trunc(ih/${mediaTuning.watcher.fallbackLossy.scaleDivisor})*2'`,
             isUltraLargeFile
               ? Math.max(mediaTuning.watcher.ultra.fallbackMinColors, mediaTuning.watcher.ultra.maxColors - 16)

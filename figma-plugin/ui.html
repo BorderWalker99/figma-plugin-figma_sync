@@ -5994,6 +5994,16 @@
         const statusEl = document.getElementById('status');
         if (!statusEl) return; // 元素不存在时直接返回
 
+        // 只要处于未连接态（断开/重连中/WS 不可用），实时同步按钮立即灭灯
+        const isDisconnectedLikeState =
+          type === 'disconnected' ||
+          type === 'waiting' ||
+          !ws ||
+          ws.readyState !== WebSocket.OPEN;
+        if (isDisconnectedLikeState) {
+          updateStartScreenUI('idle');
+        }
+
         // ✅ 强制检查：如果 WebSocket 断开，清除所有锁定状态并强制显示断开
         if (!ws || ws.readyState !== WebSocket.OPEN) {
         if (type !== 'disconnected' && type !== 'waiting') {

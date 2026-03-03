@@ -99,7 +99,13 @@ module.exports = {
     // 服务端普通压缩分层阈值
     uploadTier80Mb: envNumber('UPLOAD_TIER_80_MB', 80),
     // 手动同步小图极速直通阈值（<=该值时可跳过 sharp 压缩，直传到 Figma）
-    manualImageFastPassKb: envNumber('MANUAL_IMAGE_FAST_PASS_KB', 1024)
+    manualImageFastPassKb: envNumber('MANUAL_IMAGE_FAST_PASS_KB', 1024),
+
+    // ── 分块上传参数（手机→服务器的切片策略）──
+    // 值越大 → 越少的 HTTP 往返 → 上传越快，但单次失败重传代价更大
+    chunkRecommendedMb: envNumber('CHUNK_RECOMMENDED_MB', 8),
+    // 服务端允许的单个 chunk 最大尺寸（需 >= recommended）
+    chunkMaxMb: envNumber('CHUNK_MAX_MB', 32)
   },
 
   // B. watcher 侧转换参数（drive/icloud 共用）
@@ -162,20 +168,35 @@ module.exports = {
     ultra: {
       // 极速档优先通过“降帧”换速度：在保留颜色/清晰度前提下显著提速
       // （如需更丝滑可升高；如需更快可再降低）
-      fps: envNumber('ULTRA_SPEED_GIF_FPS', 12),
+      fps: envNumber('ULTRA_SPEED_GIF_FPS', 15),
       scaleDivisor: envNumber('ULTRA_SPEED_GIF_SCALE_DIVISOR', 5),
       maxColors: envNumber('ULTRA_SPEED_GIF_MAX_COLORS', 144),
-      dither: envString('ULTRA_SPEED_GIF_DITHER', 'bayer:bayer_scale=3'),
+      dither: envString('ULTRA_SPEED_GIF_DITHER', 'bayer:bayer_scale=2'),
       timeoutMs: envNumber('ULTRA_SPEED_GIF_TIMEOUT_MS', 210000),
 
       // 极速回退参数
       fallbackDither: envString('ULTRA_SPEED_GIF_FALLBACK_DITHER', 'bayer:bayer_scale=4'),
-      fallbackMinFps: envNumber('ULTRA_SPEED_FALLBACK_MIN_FPS', 12),
+      fallbackMinFps: envNumber('ULTRA_SPEED_FALLBACK_MIN_FPS', 15),
       fallbackScaleDivisorMin: envNumber('ULTRA_SPEED_FALLBACK_SCALE_DIV_MIN', 4),
       fallbackMinColors: envNumber('ULTRA_SPEED_FALLBACK_MIN_COLORS', 96),
       fallbackTimeoutFloorMs: envNumber('ULTRA_SPEED_FALLBACK_TIMEOUT_FLOOR_MS', 150000),
       fallbackTimeoutReduceMs: envNumber('ULTRA_SPEED_FALLBACK_TIMEOUT_REDUCE_MS', 30000)
     }
+  },
+
+  // B2. 时间线编辑器导出参数（gif-composer 使用）
+  // videoFpsCap 决定导出 GIF 的最大帧率（源视频 fps 与此值取较小值）
+  //   越大 => 越流畅（文件越大、编码越慢）
+  //   越小 => 越掉帧（文件越小、编码越快）
+  composer: {
+    // 默认帧率上限（小文件 / 低分辨率）
+    fpsCap: envNumber('COMPOSER_FPS_CAP', 60),
+    // 中等文件（>20MB 或像素量 >250万）帧率上限
+    fpsCapMedium: envNumber('COMPOSER_FPS_CAP_MEDIUM', 50),
+    // 大文件（>40MB 或像素量 >600万）帧率上限
+    fpsCapLarge: envNumber('COMPOSER_FPS_CAP_LARGE', 30),
+    // 超大文件（>80MB 或像素量 >1200万）帧率上限
+    fpsCapXLarge: envNumber('COMPOSER_FPS_CAP_XLARGE', 15)
   },
 
   // C. server 侧上传压缩参数

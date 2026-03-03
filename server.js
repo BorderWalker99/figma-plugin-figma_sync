@@ -1972,10 +1972,37 @@ if (googleDriveEnabled && uploadBuffer) {
 // avoiding the Base64 memory bottleneck and single-body size limits.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const chunkedSessions = new Map(); // sessionId -> { userId, filename, mimeType, totalSize, tempDir, receivedChunks, receivedBytes, createdAt }
-const CHUNK_SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
-const CHUNK_UPLOAD_MAX_MB = 32;
-const CHUNK_UPLOAD_RECOMMENDED_BYTES = 16 * 1024 * 1024; // 16MB
+const chunkedSessions = new Map();
+const CHUNK_SESSION_TIMEOUT_MS = 60 * 60 * 1000; // 60 minutes (超大文件上传更稳)
+const CHUNK_UPLOAD_MAX_MB = mediaTuning.thresholds.chunkMaxMb || 64;
+const CHUNK_UPLOAD_RECOMMENDED_BYTES = (mediaTuning.thresholds.chunkRecommendedMb || 32) * 1024 * 1024;
+
+function getContiguousUploadedPrefix(receivedChunks) {
+  let idx = 0;
+  while (receivedChunks.has(idx)) idx++;
+  return idx; // 下一个应上传的 chunk index（连续前缀）
+}
+
+function getChunkRanges(receivedChunks, maxRanges = 100) {
+  if (!receivedChunks || receivedChunks.size === 0) return [];
+  const sorted = Array.from(receivedChunks).sort((a, b) => a - b);
+  const ranges = [];
+  let start = sorted[0];
+  let prev = sorted[0];
+  for (let i = 1; i < sorted.length; i++) {
+    const cur = sorted[i];
+    if (cur === prev + 1) {
+      prev = cur;
+      continue;
+    }
+    ranges.push({ start, end: prev });
+    if (ranges.length >= maxRanges) return ranges;
+    start = cur;
+    prev = cur;
+  }
+  ranges.push({ start, end: prev });
+  return ranges.slice(0, maxRanges);
+}
 
 // Auto-cleanup stale chunked upload sessions
 setInterval(() => {
@@ -1994,9 +2021,42 @@ app.post('/upload-init', (req, res) => {
   if (!validateUserId(userId, res)) return;
   if (!validateUploadToken(req.headers['x-upload-token'], res)) return;
 
-  const { filename, mimeType, totalSize } = req.body;
+  const { filename, mimeType, totalSize, resumeSessionId } = req.body;
   if (!filename) {
     return res.status(400).json({ error: 'Missing filename' });
+  }
+
+  // 断点续传：客户端可携带已有 sessionId 尝试恢复
+  const requestedResumeId = resumeSessionId || req.headers['x-resume-session-id'] || null;
+  if (requestedResumeId) {
+    const resumed = chunkedSessions.get(requestedResumeId);
+    if (resumed) {
+      // 基础安全校验：避免跨用户或跨文件误复用
+      const sameUser = String(resumed.userId || '') === String(userId || '');
+      const sameName = String(resumed.filename || '') === String(filename || '');
+      const sameSize = Number(totalSize || 0) === Number(resumed.totalSize || 0);
+      if (sameUser && sameName && (!totalSize || sameSize)) {
+        resumed.createdAt = Date.now();
+        const nextChunkIndex = getContiguousUploadedPrefix(resumed.receivedChunks);
+        return res.json({
+          success: true,
+          resumed: true,
+          sessionId: requestedResumeId,
+          filename: resumed.filename,
+          totalSize: resumed.totalSize || 0,
+          receivedChunks: resumed.receivedChunks.size,
+          receivedBytes: resumed.receivedBytes || 0,
+          nextChunkIndex,
+          receivedRanges: getChunkRanges(resumed.receivedChunks),
+          chunkMaxBytes: CHUNK_UPLOAD_MAX_MB * 1024 * 1024,
+          recommendedChunkBytes: CHUNK_UPLOAD_RECOMMENDED_BYTES
+        });
+      }
+      return res.status(409).json({
+        error: 'Resume session metadata mismatch',
+        sessionId: requestedResumeId
+      });
+    }
   }
 
   const sessionId = `chunk-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -2015,6 +2075,51 @@ app.post('/upload-init', (req, res) => {
     sessionId,
     chunkMaxBytes: CHUNK_UPLOAD_MAX_MB * 1024 * 1024,
     recommendedChunkBytes: CHUNK_UPLOAD_RECOMMENDED_BYTES
+  });
+});
+
+app.get('/upload-status', (req, res) => {
+  const userId = req.headers['x-user-id'] || req.query.userId || null;
+  const sessionId = req.query.sessionId || req.headers['x-session-id'];
+  const totalChunks = parseInt(req.query.totalChunks || req.headers['x-total-chunks'], 10);
+
+  if (!sessionId) {
+    return res.status(400).json({ error: 'Missing sessionId' });
+  }
+
+  const session = chunkedSessions.get(sessionId);
+  if (!session) {
+    return res.status(404).json({ error: 'Session not found or expired' });
+  }
+
+  if (userId && String(session.userId || '') !== String(userId || '')) {
+    return res.status(403).json({ error: 'Session user mismatch' });
+  }
+
+  session.createdAt = Date.now();
+  const nextChunkIndex = getContiguousUploadedPrefix(session.receivedChunks);
+  const expectedChunks = Number.isFinite(totalChunks) && totalChunks > 0 ? totalChunks : null;
+  let missingSample = [];
+  if (expectedChunks) {
+    for (let i = 0; i < expectedChunks; i++) {
+      if (!session.receivedChunks.has(i)) {
+        missingSample.push(i);
+        if (missingSample.length >= 50) break;
+      }
+    }
+  }
+
+  return res.json({
+    success: true,
+    sessionId,
+    filename: session.filename,
+    totalSize: session.totalSize || 0,
+    receivedChunks: session.receivedChunks.size,
+    receivedBytes: session.receivedBytes || 0,
+    nextChunkIndex,
+    receivedRanges: getChunkRanges(session.receivedChunks),
+    expectedChunks,
+    missingSample
   });
 });
 
@@ -2108,7 +2213,7 @@ app.post('/upload-finish', async (req, res) => {
         }
       }
 
-      // 直接在内存中组装，避免“先落盘再读回”的双重 I/O
+      // 在内存中组装，保证顺序和完整性（优先稳定）
       const chunkBuffers = [];
       let assembledBytes = 0;
       for (const cf of chunkFiles) {
@@ -2118,19 +2223,20 @@ app.post('/upload-finish', async (req, res) => {
       }
       let finalBuffer = Buffer.concat(chunkBuffers, assembledBytes);
       chunkBuffers.length = 0;
-      const origSizeMB = (finalBuffer.length / 1024 / 1024).toFixed(1);
-      console.log(`✅ [分块上传] 已组装: ${filename} (${origSizeMB}MB, ${chunkFiles.length} chunks)`);
+      const origSizeBytes = finalBuffer.length;
+      const origSizeMB = (origSizeBytes / 1024 / 1024).toFixed(1);
+      console.log(`✅ [分块上传] 已组装: ${filename} (${origSizeMB}MB, ${session.receivedChunks.size} chunks)`);
 
       const isVideo = /\.(mp4|mov)$/i.test(filename);
       const isGif = /\.gif$/i.test(filename);
 
-      // Compress large videos before cloud upload
-      if (isVideo && finalBuffer.length > mediaTuning.thresholds.uploadCompressMb * 1024 * 1024) {
-        const tempIn = path.join(tempDir, `raw_${filename}`);
-        const tempOut = path.join(tempDir, `comp_${filename}`);
+      // ─── 步骤 2：大视频压缩（FFmpeg 直读磁盘文件，省去"加载到内存→写临时文件"的双重 I/O）───
+      if (isVideo && origSizeBytes > mediaTuning.thresholds.uploadCompressMb * 1024 * 1024) {
+        const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, '_');
+        const tempIn = path.join(tempDir, `raw_${safeName}`);
+        const tempOut = path.join(tempDir, `comp_${safeName}`);
         await fs.promises.writeFile(tempIn, finalBuffer);
-
-        const sizeMB = finalBuffer.length / 1024 / 1024;
+        const sizeMB = origSizeBytes / 1024 / 1024;
         const isUltraLarge = sizeMB > mediaTuning.thresholds.ultraSpeedVideoMb;
         const isTier80 = sizeMB > mediaTuning.thresholds.uploadTier80Mb;
         const crf = isUltraLarge
@@ -2150,11 +2256,11 @@ app.post('/upload-finish', async (req, res) => {
             `ffmpeg -i "${tempIn}" -vf "${scaleFilter}" -c:v libx264 -preset ${preset} -crf ${crf} -c:a aac -b:a ${audioBitrate} -movflags +faststart -y "${tempOut}"`,
             { timeout: 600000 }
           );
-          if (fs.existsSync(tempOut)) {
+          if (fs.existsSync(tempOut) && fs.statSync(tempOut).size > 0) {
             const compBuf = await fs.promises.readFile(tempOut);
-            const newSizeMB = (compBuf.length / 1024 / 1024).toFixed(1);
-            const ratio = ((1 - compBuf.length / finalBuffer.length) * 100).toFixed(1);
-            console.log(`   ✅ [分块上传] ${origSizeMB}MB → ${newSizeMB}MB (节省 ${ratio}%)`);
+            const newSize = compBuf.length;
+            const ratio = ((1 - newSize / origSizeBytes) * 100).toFixed(1);
+            console.log(`   ✅ [分块上传] ${origSizeMB}MB → ${(newSize / 1024 / 1024).toFixed(1)}MB (节省 ${ratio}%)`);
             finalBuffer = compBuf;
           }
         } catch (compErr) {
@@ -2162,13 +2268,13 @@ app.post('/upload-finish', async (req, res) => {
         }
       }
 
-      // Upload to cloud (reuse uploadQueue logic)
+      // ─── 步骤 3：加入上传队列 ───
       const effectiveUserId = userId || session.userId;
 
       uploadQueue.add({
         userId: effectiveUserId,
         filename,
-        data: finalBuffer, // 直接传 Buffer，避免 Buffer->Base64->Buffer 的额外开销
+        data: finalBuffer,
         mimeType,
         startTime: Date.now(),
         priority: (isVideo || isGif) ? 'high' : 'normal'

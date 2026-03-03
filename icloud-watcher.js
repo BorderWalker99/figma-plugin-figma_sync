@@ -251,6 +251,7 @@ async function convertVideoToGif(videoPath, displayFilename, progressCb) {
       const cmd = `ffmpeg -hwaccel auto -threads 0 -i "${sourceVideoPath}" -lavfi "setpts=PTS,fps=${fps},scale=${scaleExpr}:flags=bicubic,split[s0][s1];[s0]palettegen=max_colors=${maxColors}:stats_mode=diff[p];[s1][p]paletteuse=dither=${dither}:diff_mode=rectangle" -loop 0 -y "${tempGifOut}"`;
       await execAsync(cmd, { timeout, maxBuffer: 200 * 1024 * 1024 });
     };
+    const buildUltraScaleExpr = (divisor) => `'trunc(iw/${divisor})*2':'trunc(ih/${divisor})*2'`;
 
     const runTwoPass = async (sourceVideoPath, scaleFilter, pass1Timeout, pass2Timeout) => {
       const pass1Cmd = `ffmpeg -hwaccel auto -threads 0 -i "${sourceVideoPath}" -vf "${scaleFilter},palettegen=max_colors=256:stats_mode=full" -y "${tempPalette}"`;
@@ -276,7 +277,7 @@ async function convertVideoToGif(videoPath, displayFilename, progressCb) {
         await runSinglePass(
           videoPath,
           mediaTuning.watcher.ultra.fps,
-          `'trunc(iw/${mediaTuning.watcher.ultra.scaleDivisor})*2':'trunc(ih/${mediaTuning.watcher.ultra.scaleDivisor})*2'`,
+          buildUltraScaleExpr(mediaTuning.watcher.ultra.scaleDivisor),
           mediaTuning.watcher.ultra.maxColors,
           mediaTuning.watcher.ultra.dither,
           mediaTuning.watcher.ultra.timeoutMs
@@ -349,7 +350,7 @@ async function convertVideoToGif(videoPath, displayFilename, progressCb) {
           ? Math.max(mediaTuning.watcher.ultra.fallbackMinFps, mediaTuning.watcher.ultra.fps - 1)
           : mediaTuning.watcher.fallbackLossy.fps,
         isUltraLargeFile
-          ? `'trunc(iw/${Math.max(mediaTuning.watcher.ultra.fallbackScaleDivisorMin, mediaTuning.watcher.ultra.scaleDivisor)})*2':'trunc(ih/${Math.max(mediaTuning.watcher.ultra.fallbackScaleDivisorMin, mediaTuning.watcher.ultra.scaleDivisor)})*2'`
+          ? buildUltraScaleExpr(Math.max(mediaTuning.watcher.ultra.fallbackScaleDivisorMin, mediaTuning.watcher.ultra.scaleDivisor))
           : `'trunc(iw/${mediaTuning.watcher.fallbackLossy.scaleDivisor})*2':'trunc(ih/${mediaTuning.watcher.fallbackLossy.scaleDivisor})*2'`,
         isUltraLargeFile
           ? Math.max(mediaTuning.watcher.ultra.fallbackMinColors, mediaTuning.watcher.ultra.maxColors - 16)
@@ -389,7 +390,25 @@ async function convertVideoToGif(videoPath, displayFilename, progressCb) {
  * @returns {{ gifBuffer, gifPath, gifFilename, gifCacheId, sourceVideoPath }} 或 null（失败时）
  */
 async function processVideoFile(videoPath, displayFilename, subfolder, progressCb) {
-  const downloaded = await waitForICloudDownload(videoPath, 300000); // 视频文件给 5 分钟下载时间
+  let waitProgressTimer = null;
+  if (progressCb) {
+    let waitingPct = 10;
+    progressCb('downloading', waitingPct, { isVideo: true, stageDetail: 'icloud-download-wait' });
+    // 无损优化：iCloud 大文件等待阶段平滑推进，避免进度长时间卡住
+    waitProgressTimer = setInterval(() => {
+      waitingPct = Math.min(24, waitingPct + 1);
+      progressCb('downloading', waitingPct, { isVideo: true, stageDetail: 'icloud-download-wait' });
+    }, 1200);
+  }
+  let downloaded = false;
+  try {
+    downloaded = await waitForICloudDownload(videoPath, 300000); // 视频文件给 5 分钟下载时间
+  } finally {
+    if (waitProgressTimer) {
+      clearInterval(waitProgressTimer);
+      waitProgressTimer = null;
+    }
+  }
   if (!downloaded) {
     console.log(`   ⚠️  视频可能未完全下载，尝试继续转换...`);
   }
