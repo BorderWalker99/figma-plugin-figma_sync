@@ -901,6 +901,7 @@ window.finishInstallation = async function() {
       button.textContent = originalText;
       showToast(t('server_start_failed'), 'error');
       console.error('服务器启动失败:', startResult.error);
+      showErrorDetailModal(startResult.error || '', t('server_start_failed'));
       return; // 提前返回，不配置自启动
     }
     
@@ -993,10 +994,18 @@ function extractErrorLog(logText) {
 }
 
 // Error detail modal
-function showErrorDetailModal(logText) {
+function showErrorDetailModal(logText, titleText = t('error_detail_title')) {
   const overlay = document.getElementById('errorDetailOverlay');
+  const titleEl = document.getElementById('errorDetailTitle');
+  const subtitleEl = document.getElementById('errorDetailSubtitle');
   const content = document.getElementById('errorDetailContent');
   const errorLog = extractErrorLog(logText);
+  if (titleEl) {
+    titleEl.textContent = titleText || t('error_detail_title');
+  }
+  if (subtitleEl) {
+    subtitleEl.textContent = t('error_detail_subtitle');
+  }
   content.textContent = errorLog;
   content.dataset.copyText = errorLog;
   overlay.classList.add('show');
