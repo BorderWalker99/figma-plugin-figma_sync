@@ -4860,6 +4860,8 @@
     let serverInstallPath = null;
     let isMinimized = false;
     let gifBackupCount = 0;
+    // 去重同一 GIF 的“已保存”计数（避免 screenshot + timeout 双加）
+    let countedGifBackupKeys = new Set();
     let exportedGifCount = 0; // New counter for exported GIFs
     let justFinishedExport = false; // Flag to prioritize export status display
     
@@ -4885,6 +4887,31 @@
     // 键：文件名，值：{ gifCacheId, driveFileId, ossFileId, timestamp }
     const skippedFileCache = new Map();
     const SKIPPED_FILE_CACHE_MAX = 200; // 最多保留 200 条，防止内存无限增长
+
+    function buildGifBackupKey(filename, gifCacheId) {
+      const id = (gifCacheId || '').toString().trim();
+      if (id) return `cache:${id}`;
+      const name = (filename || '').toString().trim();
+      if (name) return `name:${name}`;
+      return '';
+    }
+
+    function increaseGifBackupCountOnce(filename, gifCacheId) {
+      const key = buildGifBackupKey(filename, gifCacheId);
+      if (!key) {
+        gifBackupCount++;
+        return true;
+      }
+      if (countedGifBackupKeys.has(key)) return false;
+      countedGifBackupKeys.add(key);
+      gifBackupCount++;
+      return true;
+    }
+
+    function resetGifBackupCountTracking() {
+      gifBackupCount = 0;
+      countedGifBackupKeys.clear();
+    }
     
     // 从 localStorage 读取已安装的服务器版本（防止更新后 banner 再次弹出）
     // 注意：Figma 插件环境可能不支持 localStorage，需要 try-catch 保护
@@ -5239,8 +5266,8 @@
              // ✅ 根据文件类型分别计数
              // 只有 GIF 才增加 gifBackupCount，图片不计入（iCloud 模式下图片保留是正常行为）
              if (data.isGif) {
-               gifBackupCount++;
-               if (isManualSyncing && data.syncSource === 'manual') {
+              const added = increaseGifBackupCountOnce(data.filename, data.gifCacheId);
+              if (added && isManualSyncing && data.syncSource === 'manual') {
                  manualSyncSavedGifFromScreenshots++;
                }
              }
@@ -5735,7 +5762,7 @@
         justFinishedExport = false;
         exportedGifCount = 0;
         manualDragCount = 0;
-        gifBackupCount = 0;
+        resetGifBackupCountTracking();
         // ✅ 重置新的状态系统
         pendingStates.exported = { count: 0, active: false };
         pendingStates.savedVideo = { count: 0, active: false };
@@ -5760,7 +5787,7 @@
         justFinishedExport = false;
         exportedGifCount = 0;
         manualDragCount = 0;
-        gifBackupCount = 0;
+        resetGifBackupCountTracking();
         // ✅ 重置新的状态系统
         pendingStates.exported = { count: 0, active: false };
         pendingStates.savedVideo = { count: 0, active: false };
@@ -6088,7 +6115,7 @@
             pendingStates.savedGif.active = false;
             pendingStates.savedGif.count = 0;
             manualDragCount = 0;
-            gifBackupCount = 0;
+            resetGifBackupCountTracking();
             skippedFilesSet.clear();
             
             // 设置导出状态
@@ -6192,7 +6219,7 @@
               // ✅ 只清除 GIF 状态
               pendingStates.savedGif.active = false;
               pendingStates.savedGif.count = 0;
-              gifBackupCount = 0;
+              resetGifBackupCountTracking();
               
               currentButtonState = null;
               justFinishedExport = false;
@@ -6202,7 +6229,7 @@
             bindPillCloseButton(statusEl, function() {
               pendingStates.savedGif.active = false;
               pendingStates.savedGif.count = 0;
-              gifBackupCount = 0;
+              resetGifBackupCountTracking();
               currentButtonState = null;
               justFinishedExport = false;
               updateStatus('connected', '');
@@ -6375,7 +6402,7 @@
       screenshotCount = 0;
       manualDragCount = 0;
       skippedFilesSet.clear();
-      gifBackupCount = 0;
+      resetGifBackupCountTracking();
       isManualSyncing = false;
       isManualSyncCancelling = false;
       document.getElementById('count').textContent = '0';
@@ -8226,7 +8253,7 @@
             wsSend('force-save-gif', { gifCacheId: msg.gifCacheId, filename: timeoutFilename });
           }
 
-          gifBackupCount++;
+          increaseGifBackupCountOnce(timeoutFilename, msg.gifCacheId);
           pendingStates.savedGif.active = true;
           pendingStates.savedGif.count = gifBackupCount;
           currentButtonState = 'gif-backup';

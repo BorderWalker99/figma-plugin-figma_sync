@@ -933,6 +933,7 @@ class UploadQueue {
     var targetFolderId = null;
     var buffer = null;
     var finalFilename = filename;
+    const retryAttempt = Number(task.retryAttempt || 0);
     
     try {
       // 优化：先解析 Base64 字符串（只解析一次）
@@ -1454,6 +1455,17 @@ class UploadQueue {
         if (error.stack) {
           console.error(`      - 堆栈: ${error.stack.split('\n').slice(0, 5).join('\n')}`);
         }
+      }
+
+      // 超大文件上传失败时自动重试（指数退避），提升弱网稳定性
+      const isLargeUpload = isVideo || isGif || dataSize > 10 * 1024 * 1024;
+      const maxRetries = isLargeUpload ? 4 : 2;
+      if (retryAttempt < maxRetries && isRetryableUploadError(error)) {
+        const nextAttempt = retryAttempt + 1;
+        const delayMs = Math.min(12000, 1000 * Math.pow(2, retryAttempt));
+        const retryTask = { ...task, retryAttempt: nextAttempt };
+        console.warn(`   🔁 [上传重试] ${filename} 将在 ${delayMs}ms 后重试 (${nextAttempt}/${maxRetries})`);
+        setTimeout(() => this.add(retryTask), delayMs);
       }
     }
   }
@@ -2004,6 +2016,84 @@ function getChunkRanges(receivedChunks, maxRanges = 100) {
   return ranges.slice(0, maxRanges);
 }
 
+function getMissingChunkRanges(receivedChunks, totalChunks, maxRanges = 100) {
+  if (!totalChunks || totalChunks <= 0) return [];
+  const missingRanges = [];
+  let rangeStart = null;
+  for (let i = 0; i < totalChunks; i++) {
+    const missing = !receivedChunks.has(i);
+    if (missing && rangeStart === null) rangeStart = i;
+    if (!missing && rangeStart !== null) {
+      missingRanges.push({ start: rangeStart, end: i - 1 });
+      if (missingRanges.length >= maxRanges) return missingRanges;
+      rangeStart = null;
+    }
+  }
+  if (rangeStart !== null) {
+    missingRanges.push({ start: rangeStart, end: totalChunks - 1 });
+  }
+  return missingRanges.slice(0, maxRanges);
+}
+
+function buildRetryHintFromMissingRanges(missingRanges, maxChunks = 24) {
+  // 仅作为客户端“优先补传”建议，不参与服务端逻辑判定
+  const hint = [];
+  for (const r of missingRanges) {
+    for (let i = r.start; i <= r.end; i++) {
+      hint.push(i);
+      if (hint.length >= maxChunks) return hint;
+    }
+  }
+  return hint;
+}
+
+async function waitForChunkCompletion(session, expectedChunks, waitMs = 12000, pollMs = 400) {
+  if (!session || !expectedChunks || expectedChunks <= 0) {
+    return { complete: true, missing: [] };
+  }
+  const start = Date.now();
+  while (Date.now() - start < waitMs) {
+    if (session.receivedChunks.size >= expectedChunks) {
+      const missing = [];
+      for (let i = 0; i < expectedChunks; i++) {
+        if (!session.receivedChunks.has(i)) {
+          missing.push(i);
+          if (missing.length >= 50) break;
+        }
+      }
+      if (missing.length === 0) return { complete: true, missing: [] };
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+  }
+
+  const missing = [];
+  for (let i = 0; i < expectedChunks; i++) {
+    if (!session.receivedChunks.has(i)) {
+      missing.push(i);
+      if (missing.length >= 50) break;
+    }
+  }
+  return { complete: missing.length === 0, missing };
+}
+
+function isRetryableUploadError(error) {
+  if (!error) return false;
+  const msg = String(error.message || '').toLowerCase();
+  const code = String(error.code || '').toUpperCase();
+  const status = error.response && error.response.status ? Number(error.response.status) : null;
+  if (status && (status === 408 || status === 429 || status >= 500)) return true;
+  if (code === 'ECONNRESET' || code === 'ETIMEDOUT' || code === 'EPIPE' || code === 'ENOTFOUND' || code === 'ECONNABORTED') return true;
+  return (
+    msg.includes('timeout') ||
+    msg.includes('socket hang up') ||
+    msg.includes('connection reset') ||
+    msg.includes('rate limit') ||
+    msg.includes('too many requests') ||
+    msg.includes('temporarily unavailable') ||
+    msg.includes('internal error')
+  );
+}
+
 // Auto-cleanup stale chunked upload sessions
 setInterval(() => {
   const now = Date.now();
@@ -2172,9 +2262,17 @@ app.post('/upload-finish', async (req, res) => {
 
   const expectedChunks = Number.isFinite(totalChunks) && totalChunks > 0 ? totalChunks : null;
   if (expectedChunks && session.receivedChunks.size < expectedChunks) {
-    return res.status(400).json({
-      error: `Incomplete: received ${session.receivedChunks.size}/${expectedChunks} chunks`
-    });
+    const waited = await waitForChunkCompletion(session, expectedChunks, 12000, 400);
+    if (!waited.complete) {
+      const missingRanges = getMissingChunkRanges(session.receivedChunks, expectedChunks, 200);
+      return res.status(400).json({
+        error: `Incomplete: received ${session.receivedChunks.size}/${expectedChunks} chunks`,
+        nextChunkIndex: getContiguousUploadedPrefix(session.receivedChunks),
+        missingSample: waited.missing,
+        missingRanges,
+        retryHint: buildRetryHintFromMissingRanges(missingRanges, 24)
+      });
+    }
   }
 
   // Respond immediately so the Shortcut finishes fast
@@ -2213,16 +2311,22 @@ app.post('/upload-finish', async (req, res) => {
         }
       }
 
-      // 在内存中组装，保证顺序和完整性（优先稳定）
-      const chunkBuffers = [];
-      let assembledBytes = 0;
+      // 流式组装到磁盘，降低超大文件内存峰值
+      const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const assembledPath = path.join(tempDir, `assembled_${safeName}`);
+      const wsAssemble = fs.createWriteStream(assembledPath);
       for (const cf of chunkFiles) {
         const chunkData = await fs.promises.readFile(path.join(tempDir, cf));
-        chunkBuffers.push(chunkData);
-        assembledBytes += chunkData.length;
+        if (!wsAssemble.write(chunkData)) {
+          await new Promise((resolve) => wsAssemble.once('drain', resolve));
+        }
       }
-      let finalBuffer = Buffer.concat(chunkBuffers, assembledBytes);
-      chunkBuffers.length = 0;
+      await new Promise((resolve, reject) => {
+        wsAssemble.on('error', reject);
+        wsAssemble.end(() => resolve());
+      });
+
+      let finalBuffer = await fs.promises.readFile(assembledPath);
       const origSizeBytes = finalBuffer.length;
       const origSizeMB = (origSizeBytes / 1024 / 1024).toFixed(1);
       console.log(`✅ [分块上传] 已组装: ${filename} (${origSizeMB}MB, ${session.receivedChunks.size} chunks)`);
@@ -2232,7 +2336,6 @@ app.post('/upload-finish', async (req, res) => {
 
       // ─── 步骤 2：大视频压缩（FFmpeg 直读磁盘文件，省去"加载到内存→写临时文件"的双重 I/O）───
       if (isVideo && origSizeBytes > mediaTuning.thresholds.uploadCompressMb * 1024 * 1024) {
-        const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, '_');
         const tempIn = path.join(tempDir, `raw_${safeName}`);
         const tempOut = path.join(tempDir, `comp_${safeName}`);
         await fs.promises.writeFile(tempIn, finalBuffer);

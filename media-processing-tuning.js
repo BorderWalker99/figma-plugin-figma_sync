@@ -95,7 +95,8 @@ module.exports = {
     // 大文件分界（视频->GIF）
     largeVideoMb: envNumber('LARGE_VIDEO_THRESHOLD_MB', 30),
     // 上传前压缩触发阈值
-    uploadCompressMb: envNumber('UPLOAD_COMPRESS_THRESHOLD_MB', 50),
+    // 优先无损链路：仅在更大体积时再启用上传前压缩
+    uploadCompressMb: envNumber('UPLOAD_COMPRESS_THRESHOLD_MB', 120),
     // 服务端普通压缩分层阈值
     uploadTier80Mb: envNumber('UPLOAD_TIER_80_MB', 80),
     // 手动同步小图极速直通阈值（<=该值时可跳过 sharp 压缩，直传到 Figma）
