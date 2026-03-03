@@ -376,6 +376,61 @@ function findExecutable(name) {
   return null;
 }
 
+function isUsableNodeBinary(nodePath) {
+  if (!nodePath || typeof nodePath !== 'string') return false;
+  try {
+    if (!path.isAbsolute(nodePath) || !fs.existsSync(nodePath)) return false;
+    require('child_process').execSync(`"${nodePath}" -v`, { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'pipe'] });
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function resolveNodeBinary() {
+  const candidates = [];
+
+  const found = findExecutable('node');
+  if (found) candidates.push(found);
+
+  candidates.push(
+    path.join(os.homedir(), '.screensync', 'deps', 'node', 'bin', 'node'),
+    '/usr/local/bin/node',
+    '/opt/homebrew/bin/node'
+  );
+
+  // NVM: choose latest available version
+  try {
+    const nvmDir = path.join(os.homedir(), '.nvm/versions/node');
+    if (fs.existsSync(nvmDir)) {
+      const versions = fs.readdirSync(nvmDir).sort().reverse();
+      for (const v of versions) {
+        candidates.push(path.join(nvmDir, v, 'bin', 'node'));
+      }
+    }
+  } catch (_) {}
+
+  // Login shell lookup (handles users who only have node in shell profile)
+  try {
+    const shellNode = require('child_process')
+      .execSync(`${process.env.SHELL || '/bin/zsh'} -l -c "command -v node"`, { encoding: 'utf8', timeout: 5000 })
+      .trim()
+      .split('\n')[0]
+      .trim();
+    if (shellNode) candidates.unshift(shellNode);
+  } catch (_) {}
+
+  const seen = new Set();
+  for (const candidate of candidates) {
+    if (!candidate || seen.has(candidate)) continue;
+    seen.add(candidate);
+    if (isUsableNodeBinary(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
 ipcMain.handle('check-homebrew', async () => {
   const darwinVersion = parseInt(os.release().split('.')[0], 10);
   const isLegacyMacOS = darwinVersion < 23;
@@ -402,12 +457,12 @@ ipcMain.handle('check-homebrew', async () => {
 
 ipcMain.handle('check-node', async () => {
   return new Promise((resolve) => {
-    const nodePath = findExecutable('node');
+    const nodePath = resolveNodeBinary();
     
     if (nodePath) {
-      exec('node -v', (error, version) => {
+      exec(`"${nodePath}" -v`, (error, version) => {
         resolve({ 
-          installed: true, 
+          installed: !error, 
           version: version ? version.trim() : 'unknown' 
         });
       });
@@ -1727,13 +1782,17 @@ ipcMain.handle('start-server', async (event, installPath) => {
       return;
     }
 
-    const nodePath = findExecutable('node')
-      || (process.arch === 'arm64' ? '/opt/homebrew/bin/node' : '/usr/local/bin/node');
+    const nodePath = resolveNodeBinary();
     
     const startScript = path.join(installPath, 'start.js');
     
     if (!fs.existsSync(startScript)) {
       resolve({ success: false, error: '未找到 start.js 文件' });
+      return;
+    }
+
+    if (!nodePath) {
+      resolve({ success: false, error: '未找到可用的 Node.js 可执行文件（请检查 Node 安装）' });
       return;
     }
     
@@ -1810,119 +1869,39 @@ ipcMain.handle('copy-to-clipboard', async (event, text) => {
 ipcMain.handle('setup-autostart', async (event, installPath) => {
   return new Promise((resolve) => {
     try {
-      // 使用 findExecutable 找到正确的 node 路径，确保与 install-dependencies 阶段使用的环境一致
-      // 避免出现"依赖是用 Node A 安装的，但 LaunchAgent 用 Node B 启动"导致的原生模块(sharp)崩溃
-      let nodePath = findExecutable('node');
-      
-      // 如果 findExecutable 失败，尝试回退路径（按优先级）
-      if (!nodePath) {
-        console.warn('⚠️  findExecutable("node") 返回 null，尝试回退路径...');
-        
-        const fallbackPaths = [
-          path.join(os.homedir(), '.screensync', 'deps', 'node', 'bin', 'node'),
-          '/usr/local/bin/node',
-          '/opt/homebrew/bin/node',
-          'node'
-        ];
-        
-        for (const fallback of fallbackPaths) {
-          if (fallback === 'node' || fs.existsSync(fallback)) {
-            nodePath = fallback;
-            console.log(`   使用回退路径: ${nodePath}`);
-            break;
-          }
-        }
-      }
-      
+      const nodePath = resolveNodeBinary();
       if (!nodePath) {
         throw new Error('无法找到 Node.js 可执行文件。请确保 Node.js 已正确安装。');
       }
-      
       console.log('🚀 配置自启动，使用 Node 路径:', nodePath);
-      
-      const homeDir = require('os').homedir();
-      const launchAgentsDir = path.join(homeDir, 'Library', 'LaunchAgents');
-      const plistName = 'com.screensync.server.plist';
-      const plistPath = path.join(launchAgentsDir, plistName);
-      const templatePath = path.join(installPath, plistName);
-      
-      // 确保 LaunchAgents 目录存在
-      if (!fs.existsSync(launchAgentsDir)) {
-        fs.mkdirSync(launchAgentsDir, { recursive: true });
+
+      // 复用更健壮的 setup-autostart.js（含 load/bootstrap 双路径、端口验证、直接启动兜底）
+      const scriptPath = path.join(installPath, 'setup-autostart.js');
+      if (!fs.existsSync(scriptPath)) {
+        throw new Error(`未找到 setup-autostart.js: ${scriptPath}`);
       }
-      
-      // 读取模板文件
-      let plistContent = fs.readFileSync(templatePath, 'utf8');
-      
-      // 构建包含所有可能 Node.js 路径的 PATH
-      const comprehensivePath = [
-        path.join(os.homedir(), '.screensync', 'bin'),          // ScreenSync 本地安装 (legacy macOS)
-        path.join(os.homedir(), '.screensync', 'deps', 'node', 'bin'), // 本地 Node.js
-        '/usr/local/bin',           // 官网安装
-        '/opt/homebrew/bin',        // Homebrew Apple Silicon
-        '/usr/bin',
-        '/bin',
-        '/usr/sbin',
-        '/sbin',
-        path.join(os.homedir(), '.nvm/versions/node/*/bin')  // NVM (glob pattern)
-      ].join(':');
-      
-      // 替换占位符
-      plistContent = plistContent
-        .replace(/__NODE_PATH__/g, nodePath)
-        .replace(/__INSTALL_PATH__/g, installPath)
-        // 更新 PATH 环境变量，避免模板文本微调后替换失效
-        .replace(
-          /(<key>PATH<\/key>\s*<string>)([^<]*)(<\/string>)/,
-          `$1${comprehensivePath}$3`
-        );
-      
-      console.log('📝 LaunchAgent PATH:', comprehensivePath);
-      
-      // 写入到 LaunchAgents 目录
-      fs.writeFileSync(plistPath, plistContent, 'utf8');
-      
-      // 卸载旧的服务（忽略错误）
-      exec(`launchctl unload "${plistPath}" 2>/dev/null`, () => {
-        // 等待 1 秒确保卸载完成
-        setTimeout(() => {
-          // 加载新服务（RunAtLoad 为 true，会自动启动）
-        exec(`launchctl load "${plistPath}"`, (loadError, stdout, stderr) => {
-            // 检查是否加载成功
-          if (loadError && !stderr.includes('already loaded')) {
-              console.error('❌ Launchctl load 失败:', loadError.message);
-              console.error('   stderr:', stderr);
-              resolve({ 
-                success: false, 
-                error: `配置自动启动失败\n${stderr || loadError.message}` 
-              });
-              return;
-            }
-            
-            console.log('✅ LaunchAgent 已加载');
-            console.log('   正在验证服务是否成功启动...');
-            
-            // 等待 5 秒后验证服务是否真的在运行
-            setTimeout(async () => {
-              const isRunning = await checkPort(8888);
-              if (isRunning) {
-                console.log('✅ 服务器运行验证成功');
-                console.log('   服务已配置为开机自动启动');
-                  resolve({ 
-                  success: true, 
-                  message: '服务器已配置为开机自动启动' 
-                  });
-                } else {
-                console.warn('⚠️  LaunchAgent 已配置，但服务未运行');
-                console.warn('   开机后将自动启动');
-                  resolve({ 
-                    success: true, 
-                  message: '服务器已配置为开机自动启动（当前未运行，开机后自动启动）' 
-                  });
-                }
-            }, 5000);
+
+      exec(`"${nodePath}" "${scriptPath}" "${installPath}"`, (error, stdout, stderr) => {
+        let parsed = null;
+        try {
+          const line = (stdout || '').trim().split('\n').filter(Boolean).pop();
+          parsed = line ? JSON.parse(line) : null;
+        } catch (_) {}
+
+        if (parsed && parsed.success) {
+          resolve({
+            success: true,
+            message: parsed.message || '服务器已配置为开机自动启动'
           });
-        }, 1000);
+          return;
+        }
+
+        const detail = (parsed && (parsed.error || parsed.message))
+          || (stderr || stdout || (error && error.message) || '未知错误');
+        resolve({
+          success: false,
+          error: `配置自动启动失败\n${detail}`
+        });
       });
       
     } catch (error) {
