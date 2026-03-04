@@ -111,7 +111,8 @@ function getCurrentServerVersion() {
     const versionFile = path.join(__dirname, 'VERSION.txt');
     if (fs.existsSync(versionFile)) {
       const content = fs.readFileSync(versionFile, 'utf8');
-      const match = content.match(/版本:\s*([^\n]+)/);
+      // 兼容中文/英文版本字段（历史包中可能是 Version:）
+      const match = content.match(/(?:版本|Version)\s*:\s*([^\n]+)/i);
       return match ? match[1].trim() : null;
     }
   } catch (error) {
@@ -122,8 +123,17 @@ function getCurrentServerVersion() {
 
 // 比较版本号
 function compareVersions(v1, v2) {
-  const parts1 = v1.split('.').map(Number);
-  const parts2 = v2.split('.').map(Number);
+  const normalizeVersion = (v) => {
+    if (!v) return [0, 0, 0];
+    const clean = String(v).trim().replace(/^v/i, '');
+    const core = clean.split('-')[0];
+    return core.split('.').map((part) => {
+      const m = String(part).match(/\d+/);
+      return m ? Number(m[0]) : 0;
+    });
+  };
+  const parts1 = normalizeVersion(v1);
+  const parts2 = normalizeVersion(v2);
   const maxLength = Math.max(parts1.length, parts2.length);
   
   for (let i = 0; i < maxLength; i++) {
