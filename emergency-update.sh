@@ -302,13 +302,22 @@ install_gifsicle_fallback() {
 install_imagemagick_fallback() {
   local local_bin="$HOME/.screensync/bin"
   local im_dir="$HOME/.screensync/deps/imagemagick"
-  local tmp_dir
+  local tmp_dir install_budget start_ts now_ts elapsed
   tmp_dir="$(mktemp -d)"
+  install_budget="${IMAGEMAGICK_INSTALL_MAX_SEC:-210}"
+  start_ts="$(date +%s)"
   mkdir -p "$im_dir" "$local_bin"
 
+  within_install_budget() {
+    now_ts="$(date +%s)"
+    elapsed=$((now_ts - start_ts))
+    [ "$elapsed" -lt "$install_budget" ]
+  }
+
   echo "   ↪️  尝试本地安装 ImageMagick（便携 DMG）..."
-  if install_imagemagick_from_dmg "https://mendelson.org/imagemagick.dmg" "$tmp_dir" "$im_dir" "$local_bin" || \
-     install_imagemagick_from_dmg "https://mendelson.org/PortableImageMagickInstaller.dmg" "$tmp_dir" "$im_dir" "$local_bin"; then
+  if within_install_budget && \
+     (install_imagemagick_from_dmg "https://mendelson.org/imagemagick.dmg" "$tmp_dir" "$im_dir" "$local_bin" || \
+      install_imagemagick_from_dmg "https://mendelson.org/PortableImageMagickInstaller.dmg" "$tmp_dir" "$im_dir" "$local_bin"); then
     ensure_local_bins_path
     if verify_imagemagick_health; then
       rm -rf "$tmp_dir"
@@ -319,7 +328,7 @@ install_imagemagick_fallback() {
 
   if [ "$(uname -m)" = "x86_64" ]; then
     echo "   ↪️  尝试 Intel 预编译包安装 ImageMagick..."
-    if install_imagemagick_from_tarball \
+    if within_install_budget && install_imagemagick_from_tarball \
       "https://download.imagemagick.org/archive/binaries/ImageMagick-x86_64-apple-darwin20.1.0.tar.gz" \
       "$tmp_dir" "$im_dir" "$local_bin"; then
       ensure_local_bins_path
@@ -332,6 +341,11 @@ install_imagemagick_fallback() {
   fi
 
   if [ "${ENABLE_IMAGEMAGICK_SOURCE_BUILD:-0}" = "1" ]; then
+    if ! within_install_budget; then
+      echo "   ⏭️  安装超时预算已用尽（>${install_budget}s），跳过源码编译"
+      rm -rf "$tmp_dir"
+      return 1
+    fi
     echo "   ↪️  尝试源码编译 ImageMagick（最后兜底）..."
     if install_imagemagick_from_source "$tmp_dir" "$im_dir" "$local_bin"; then
       ensure_local_bins_path
@@ -362,7 +376,10 @@ install_imagemagick_from_dmg() {
   rm -f "$dmg_path" 2>/dev/null || true
   rm -rf "$mount_point" 2>/dev/null || true
 
-  curl -fL --connect-timeout 10 --max-time 60 --progress-bar "$dmg_url" -o "$dmg_path" 2>&1 || return 1
+  curl -fL --connect-timeout 8 --max-time 45 \
+    --retry 2 --retry-delay 1 --retry-all-errors \
+    --speed-time 15 --speed-limit 1024 \
+    --progress-bar "$dmg_url" -o "$dmg_path" 2>&1 || return 1
   mkdir -p "$mount_point"
   timeout_cmd 15 hdiutil attach "$dmg_path" -nobrowse -readonly -mountpoint "$mount_point" >/dev/null 2>&1 || return 1
 
@@ -399,7 +416,10 @@ install_imagemagick_from_tarball() {
   rm -rf "$extract_dir" 2>/dev/null || true
   mkdir -p "$extract_dir"
 
-  curl -fL --connect-timeout 10 --max-time 90 --progress-bar "$tar_url" -o "$tar_path" 2>&1 || return 1
+  curl -fL --connect-timeout 8 --max-time 70 \
+    --retry 2 --retry-delay 1 --retry-all-errors \
+    --speed-time 20 --speed-limit 1024 \
+    --progress-bar "$tar_url" -o "$tar_path" 2>&1 || return 1
   timeout_cmd 30 tar xzf "$tar_path" -C "$extract_dir" >/dev/null 2>&1 || return 1
   magick_bin="$(python3 -c "import os; p='$extract_dir'; out='';\
 for r,_,fs in os.walk(p):\
@@ -510,26 +530,58 @@ run_with_timeout() {
 }
 
 verify_imagemagick_health() {
-  local tmp_dir probe_in probe_out magick_path
+  local mode tmp_dir probe_in probe_out magick_path
+  local cache_file cache_ttl
+  mode="${1:-full}"
+  cache_file="$HOME/.screensync/deps/imagemagick/.health-ok"
+  cache_ttl="${IMAGEMAGICK_HEALTH_CACHE_TTL_SEC:-86400}"
+
+  is_cache_fresh() {
+    local f="$1"
+    local ttl="$2"
+    local now ts
+    [ -f "$f" ] || return 1
+    now="$(date +%s)"
+    ts="$(stat -f %m "$f" 2>/dev/null || echo 0)"
+    [ "$ts" -gt 0 ] || return 1
+    [ $((now - ts)) -le "$ttl" ]
+  }
+
   magick_path="$(command -v magick 2>/dev/null || true)"
   [ -n "$magick_path" ] && [ -x "$magick_path" ] || return 1
+
+  # 快速检测：用于“检查系统依赖”阶段，避免在异常机型上长时间卡住。
+  if [ "$mode" = "quick" ]; then
+    if is_cache_fresh "$cache_file" "$cache_ttl"; then
+      return 0
+    fi
+    timeout_cmd 3 magick -version >/dev/null 2>&1
+    return $?
+  fi
+
   tmp_dir="$(mktemp -d)"
   probe_in="$tmp_dir/probe.png"
   probe_out="$tmp_dir/probe_out.png"
 
-  if ! timeout_cmd 8 magick -version >/dev/null 2>&1; then
+  if ! timeout_cmd 5 magick -version >/dev/null 2>&1; then
+    rm -f "$cache_file" 2>/dev/null || true
     rm -rf "$tmp_dir"; return 1
   fi
-  if ! timeout_cmd 8 magick -size 2x2 xc:none "$probe_in" >/dev/null 2>&1; then
+  if ! timeout_cmd 5 magick -size 2x2 xc:none "$probe_in" >/dev/null 2>&1; then
+    rm -f "$cache_file" 2>/dev/null || true
     rm -rf "$tmp_dir"; return 1
   fi
-  if ! timeout_cmd 8 magick "$probe_in" -resize 1x1 "$probe_out" >/dev/null 2>&1; then
+  if ! timeout_cmd 5 magick "$probe_in" -resize 1x1 "$probe_out" >/dev/null 2>&1; then
+    rm -f "$cache_file" 2>/dev/null || true
     rm -rf "$tmp_dir"; return 1
   fi
-  if ! timeout_cmd 8 magick identify "$probe_out" >/dev/null 2>&1; then
+  if ! timeout_cmd 5 magick identify "$probe_out" >/dev/null 2>&1; then
+    rm -f "$cache_file" 2>/dev/null || true
     rm -rf "$tmp_dir"; return 1
   fi
 
+  mkdir -p "$(dirname "$cache_file")" 2>/dev/null || true
+  date +%s > "$cache_file" 2>/dev/null || true
   rm -rf "$tmp_dir"
   return 0
 }
@@ -1054,7 +1106,7 @@ ensure_local_bins_path
 check_dep_quick() {
   local cmd="$1"
   if [ "$cmd" = "magick" ]; then
-    verify_imagemagick_health 2>/dev/null
+    verify_imagemagick_health quick 2>/dev/null
   else
     command -v "$cmd" &>/dev/null
   fi
@@ -1100,6 +1152,18 @@ if [ -n "$MISSING_DEPS" ]; then
   for dep in $MISSING_DEPS; do
     dep_cmd="$dep"
     [ "$dep" = "imagemagick" ] && dep_cmd="magick"
+
+    # 对 ImageMagick 先做一次深度检测，避免“快速检测误判”导致重复下载/安装。
+    if [ "$dep" = "imagemagick" ] && check_dep_quick "magick"; then
+      set +e
+      if verify_imagemagick_health; then
+        echo -e "   ${GREEN}✅ $dep 已可用（深度检测通过）${NC}"
+        set -e
+        continue
+      fi
+      set -e
+    fi
+
     if ! check_dep_quick "$dep_cmd"; then
       echo "   ↪️  本地安装 $dep ..."
       set +e
