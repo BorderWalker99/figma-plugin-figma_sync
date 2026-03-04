@@ -202,6 +202,73 @@ function resolveNodeBinaryForUpdate() {
   return null;
 }
 
+function resolveNpmBinaryForUpdate() {
+  addLocalDepsToPath();
+  const candidates = [
+    path.join(os.homedir(), '.screensync', 'deps', 'node', 'bin', 'npm'),
+    '/usr/local/bin/npm',
+    '/opt/homebrew/bin/npm'
+  ];
+  for (const candidate of candidates) {
+    if (!candidate || !fs.existsSync(candidate)) continue;
+    try {
+      execFileSync(candidate, ['--version'], { stdio: 'ignore' });
+      return candidate;
+    } catch (_) {}
+  }
+  return null;
+}
+
+function isLegacyBrewSkippedUser() {
+  if (process.platform !== 'darwin') return false;
+  const darwinVersion = parseInt(os.release().split('.')[0], 10);
+  return Number.isFinite(darwinVersion) && darwinVersion < 23; // macOS 13 and below
+}
+
+async function ensureHomebrewInstalledForUpdate(sendProgress) {
+  if (await commandExists('brew')) return true;
+
+  sendProgress('installing', '正在安装 Homebrew（用于补齐运行依赖）...');
+  const installCmd = [
+    'set -e',
+    'SCRIPT_PATH="$(mktemp /tmp/screensync-brew-install.XXXXXX.sh)"',
+    'cleanup(){ rm -f "$SCRIPT_PATH" 2>/dev/null || true; }',
+    'trap cleanup EXIT',
+    'SOURCES=(',
+    '"https://mirrors.tuna.tsinghua.edu.cn/git/homebrew/install/raw/HEAD/install.sh"',
+    '"https://mirrors.ustc.edu.cn/homebrew/install/raw/HEAD/install.sh"',
+    '"https://cdn.jsdelivr.net/gh/Homebrew/install@HEAD/install.sh"',
+    '"https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh"',
+    ')',
+    'OK=0',
+    'for src in "${SOURCES[@]}"; do',
+    '  if curl -fL --connect-timeout 12 --max-time 45 --retry 2 --retry-all-errors "$src" -o "$SCRIPT_PATH" >/dev/null 2>&1; then',
+    '    chmod +x "$SCRIPT_PATH" 2>/dev/null || true',
+    '    OK=1',
+    '    break',
+    '  fi',
+    'done',
+    'if [ "$OK" -ne 1 ]; then',
+    '  echo "download-homebrew-script-failed"',
+    '  exit 1',
+    'fi',
+    'NONINTERACTIVE=1 /bin/bash "$SCRIPT_PATH"'
+  ].join(' && ');
+
+  await runWithAdminIfNeeded(installCmd, 25 * 60 * 1000);
+
+  // Load brew env when installed to default path.
+  try {
+    if (fs.existsSync('/opt/homebrew/bin/brew')) {
+      process.env.PATH = `/opt/homebrew/bin:${process.env.PATH}`;
+    } else if (fs.existsSync('/usr/local/bin/brew')) {
+      process.env.PATH = `/usr/local/bin:${process.env.PATH}`;
+    }
+  } catch (_) {}
+
+  return await commandExists('brew');
+}
+
 function triggerAutostartRepairAfterUpdate() {
   const setupScript = path.join(__dirname, 'setup-autostart.js');
   if (!fs.existsSync(setupScript)) {
@@ -249,7 +316,21 @@ async function ensureUpdateDependencies(targetGroup) {
 
   if (missingNodeDeps.length > 0) {
     sendProgress('installing', `正在安装 Node 依赖（${missingNodeDeps.length} 项）...`);
-    await runWithAdminIfNeeded('npm install --production --omit=dev --legacy-peer-deps --registry=https://registry.npmmirror.com', 10 * 60 * 1000);
+    const npmBin = resolveNpmBinaryForUpdate();
+    if (npmBin) {
+      await runWithAdminIfNeeded(`"${npmBin}" install --production --omit=dev --legacy-peer-deps --registry=https://registry.npmmirror.com`, 10 * 60 * 1000);
+    } else {
+      const nodeBin = resolveNodeBinaryForUpdate();
+      const npmCliCandidates = [
+        path.join(os.homedir(), '.screensync', 'deps', 'node', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+        path.join(os.homedir(), '.screensync', 'deps', 'node', 'node_modules', 'npm', 'bin', 'npm-cli.js')
+      ];
+      const npmCli = npmCliCandidates.find(p => fs.existsSync(p));
+      if (!nodeBin || !npmCli) {
+        throw new Error('未找到可用 npm，无法安装 Node 依赖。请先运行安装器补齐 Node 环境。');
+      }
+      await runWithAdminIfNeeded(`"${nodeBin}" "${npmCli}" install --production --omit=dev --legacy-peer-deps --registry=https://registry.npmmirror.com`, 10 * 60 * 1000);
+    }
     const stillMissing = requiredNodeDeps.filter(dep => !fs.existsSync(path.join(nodeModulesPath, dep)));
     if (stillMissing.length > 0) {
       throw new Error(`依赖安装不完整，缺少: ${stillMissing.join(', ')}`);
@@ -266,12 +347,22 @@ async function ensureUpdateDependencies(targetGroup) {
   if (!(await commandExists('gifsicle'))) missingBinaries.push('gifsicle');
 
   if (missingBinaries.length > 0) {
-    const hasBrew = await commandExists('brew');
+    const isLegacyMode = isLegacyBrewSkippedUser();
+    if (isLegacyMode) {
+      // Legacy users intentionally skip Homebrew; keep update flow consistent with installer strategy.
+      throw new Error(`检测到缺少运行依赖：${missingBinaries.join(', ')}。当前为 legacy 模式（跳过 Homebrew），请先通过安装器/应急脚本补齐本地依赖后再执行一键更新。`);
+    }
+
+    let hasBrew = await commandExists('brew');
     if (!hasBrew) {
-      throw new Error(`检测到缺少运行依赖：${missingBinaries.join(', ')}。请先通过安装器补齐环境后再更新。`);
+      sendProgress('installing', '检测到缺少 Homebrew，正在自动安装...');
+      hasBrew = await ensureHomebrewInstalledForUpdate(sendProgress);
+    }
+    if (!hasBrew) {
+      throw new Error(`自动安装 Homebrew 失败，无法补齐运行依赖：${missingBinaries.join(', ')}。请先手动安装 Homebrew 后重试更新。`);
     }
     sendProgress('installing', `正在安装运行依赖（${missingBinaries.join(', ')}）...`);
-    await runWithAdminIfNeeded(`brew install ${missingBinaries.join(' ')}`, 20 * 60 * 1000);
+    await runWithAdminIfNeeded(`HOMEBREW_NO_AUTO_UPDATE=1 brew install ${missingBinaries.join(' ')}`, 20 * 60 * 1000);
     addLocalDepsToPath();
 
     const verifyConvert = await commandExists('convert');

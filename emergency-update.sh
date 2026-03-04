@@ -331,14 +331,19 @@ install_imagemagick_fallback() {
     fi
   fi
 
-  echo "   ↪️  尝试源码编译 ImageMagick（最后兜底）..."
-  if install_imagemagick_from_source "$tmp_dir" "$im_dir" "$local_bin"; then
-    ensure_local_bins_path
-    if verify_imagemagick_health; then
-      rm -rf "$tmp_dir"
-      return 0
+  if [ "${ENABLE_IMAGEMAGICK_SOURCE_BUILD:-0}" = "1" ]; then
+    echo "   ↪️  尝试源码编译 ImageMagick（最后兜底）..."
+    if install_imagemagick_from_source "$tmp_dir" "$im_dir" "$local_bin"; then
+      ensure_local_bins_path
+      if verify_imagemagick_health; then
+        rm -rf "$tmp_dir"
+        return 0
+      fi
+      echo "   ⚠️  源码编译完成但健康检查失败"
     fi
-    echo "   ⚠️  源码编译完成但健康检查失败"
+  else
+    echo "   ⏭️  已跳过源码编译兜底（默认快速模式）"
+    echo "      如需启用，可用: ENABLE_IMAGEMAGICK_SOURCE_BUILD=1 bash $0"
   fi
 
   rm -rf "$tmp_dir"
@@ -357,20 +362,20 @@ install_imagemagick_from_dmg() {
   rm -f "$dmg_path" 2>/dev/null || true
   rm -rf "$mount_point" 2>/dev/null || true
 
-  curl -fL --connect-timeout 20 --max-time 180 "$dmg_url" -o "$dmg_path" >/dev/null 2>&1 || return 1
+  curl -fL --connect-timeout 10 --max-time 60 --progress-bar "$dmg_url" -o "$dmg_path" 2>&1 || return 1
   mkdir -p "$mount_point"
-  hdiutil attach "$dmg_path" -nobrowse -readonly -mountpoint "$mount_point" >/dev/null 2>&1 || return 1
+  timeout_cmd 15 hdiutil attach "$dmg_path" -nobrowse -readonly -mountpoint "$mount_point" >/dev/null 2>&1 || return 1
 
   app_name="$(python3 -c "import os,re; p='$mount_point'; apps=[n for n in os.listdir(p) if n.lower().endswith('.app') and re.search(r'magick', n, re.I)]; print(apps[0] if apps else '')" 2>/dev/null)"
   if [ -z "$app_name" ]; then
-    hdiutil detach "$mount_point" -force >/dev/null 2>&1 || true
+    timeout_cmd 10 hdiutil detach "$mount_point" -force >/dev/null 2>&1 || true
     return 1
   fi
 
   rm -rf "$im_dir" 2>/dev/null || true
   mkdir -p "$im_dir"
-  cp -R "$mount_point/$app_name" "$im_dir/" >/dev/null 2>&1 || { hdiutil detach "$mount_point" -force >/dev/null 2>&1 || true; return 1; }
-  hdiutil detach "$mount_point" -force >/dev/null 2>&1 || true
+  cp -R "$mount_point/$app_name" "$im_dir/" >/dev/null 2>&1 || { timeout_cmd 10 hdiutil detach "$mount_point" -force >/dev/null 2>&1 || true; return 1; }
+  timeout_cmd 10 hdiutil detach "$mount_point" -force >/dev/null 2>&1 || true
 
   magick_bin="$im_dir/$app_name/Contents/MacOS/magick"
   [ -x "$magick_bin" ] || return 1
@@ -394,8 +399,8 @@ install_imagemagick_from_tarball() {
   rm -rf "$extract_dir" 2>/dev/null || true
   mkdir -p "$extract_dir"
 
-  curl -fL --connect-timeout 20 --max-time 240 "$tar_url" -o "$tar_path" >/dev/null 2>&1 || return 1
-  tar xzf "$tar_path" -C "$extract_dir" >/dev/null 2>&1 || return 1
+  curl -fL --connect-timeout 10 --max-time 90 --progress-bar "$tar_url" -o "$tar_path" 2>&1 || return 1
+  timeout_cmd 30 tar xzf "$tar_path" -C "$extract_dir" >/dev/null 2>&1 || return 1
   magick_bin="$(python3 -c "import os; p='$extract_dir'; out='';\
 for r,_,fs in os.walk(p):\
   if 'magick' in fs: out=os.path.join(r,'magick'); break;\
@@ -423,7 +428,7 @@ install_imagemagick_from_source() {
   local tmp_dir="$1"
   local im_dir="$2"
   local local_bin="$3"
-  local src_dir magick_bin
+  local src_dir magick_bin build_threads configure_log make_log install_log
 
   command -v cc >/dev/null 2>&1 || return 1
   command -v make >/dev/null 2>&1 || return 1
@@ -437,9 +442,31 @@ install_imagemagick_from_source() {
 
   rm -rf "$im_dir" 2>/dev/null || true
   mkdir -p "$im_dir"
-  (cd "$src_dir" && ./configure --prefix="$im_dir" --disable-docs --without-modules --without-perl --disable-openmp --with-quantum-depth=16 CFLAGS="-O2" >/dev/null 2>&1) || return 1
-  (cd "$src_dir" && make -j"$(sysctl -n hw.ncpu 2>/dev/null || echo 4)" >/dev/null 2>&1) || return 1
-  (cd "$src_dir" && make install >/dev/null 2>&1) || return 1
+  build_threads="$(sysctl -n hw.ncpu 2>/dev/null || echo 4)"
+  configure_log="$tmp_dir/im_configure.log"
+  make_log="$tmp_dir/im_make.log"
+  install_log="$tmp_dir/im_install.log"
+
+  echo "      - 配置编译参数（最多 3 分钟）..."
+  if ! run_with_timeout 180 "cd \"$src_dir\" && ./configure --prefix=\"$im_dir\" --disable-docs --without-modules --without-perl --disable-openmp --with-quantum-depth=16 CFLAGS='-O2' >\"$configure_log\" 2>&1"; then
+    echo "      ❌ configure 失败或超时，最近日志:"
+    python3 -c "from pathlib import Path; p=Path('$configure_log'); print(''.join(p.read_text(errors='ignore').splitlines(True)[-40:]) if p.exists() else '(无日志)')"
+    return 1
+  fi
+
+  echo "      - 开始编译（最多 12 分钟，期间会持续输出心跳）..."
+  if ! run_with_timeout 720 "cd \"$src_dir\" && make -j\"$build_threads\" >\"$make_log\" 2>&1"; then
+    echo "      ❌ make 失败或超时，最近日志:"
+    python3 -c "from pathlib import Path; p=Path('$make_log'); print(''.join(p.read_text(errors='ignore').splitlines(True)[-40:]) if p.exists() else '(无日志)')"
+    return 1
+  fi
+
+  echo "      - 安装编译产物（最多 3 分钟）..."
+  if ! run_with_timeout 180 "cd \"$src_dir\" && make install >\"$install_log\" 2>&1"; then
+    echo "      ❌ make install 失败或超时，最近日志:"
+    python3 -c "from pathlib import Path; p=Path('$install_log'); print(''.join(p.read_text(errors='ignore').splitlines(True)[-40:]) if p.exists() else '(无日志)')"
+    return 1
+  fi
 
   magick_bin="$im_dir/bin/magick"
   [ -x "$magick_bin" ] || return 1
@@ -449,32 +476,73 @@ install_imagemagick_from_source() {
   return 0
 }
 
+run_with_timeout() {
+  local timeout_sec="$1"
+  shift
+  local cmd="$*"
+  local pid start now elapsed last_beat
+
+  bash -lc "$cmd" &
+  pid=$!
+  start="$(date +%s)"
+  last_beat=0
+
+  while kill -0 "$pid" 2>/dev/null; do
+    sleep 2
+    now="$(date +%s)"
+    elapsed=$((now - start))
+    if [ $((elapsed - last_beat)) -ge 20 ]; then
+      echo "        ...仍在执行（${elapsed}s）"
+      last_beat="$elapsed"
+    fi
+    if [ "$elapsed" -ge "$timeout_sec" ]; then
+      echo "        ⏱️ 命令超时（>${timeout_sec}s），正在终止..."
+      kill -TERM "$pid" 2>/dev/null || true
+      sleep 2
+      kill -KILL "$pid" 2>/dev/null || true
+      wait "$pid" 2>/dev/null || true
+      return 124
+    fi
+  done
+
+  wait "$pid"
+  return $?
+}
+
 verify_imagemagick_health() {
-  local tmp_dir probe_in probe_out
-  command -v magick >/dev/null 2>&1 || return 1
+  local tmp_dir probe_in probe_out magick_path
+  magick_path="$(command -v magick 2>/dev/null || true)"
+  [ -n "$magick_path" ] && [ -x "$magick_path" ] || return 1
   tmp_dir="$(mktemp -d)"
   probe_in="$tmp_dir/probe.png"
   probe_out="$tmp_dir/probe_out.png"
 
-  if ! magick -version >/dev/null 2>&1; then
-    rm -rf "$tmp_dir"
-    return 1
+  if ! timeout_cmd 8 magick -version >/dev/null 2>&1; then
+    rm -rf "$tmp_dir"; return 1
   fi
-  if ! magick -size 2x2 xc:none "$probe_in" >/dev/null 2>&1; then
-    rm -rf "$tmp_dir"
-    return 1
+  if ! timeout_cmd 8 magick -size 2x2 xc:none "$probe_in" >/dev/null 2>&1; then
+    rm -rf "$tmp_dir"; return 1
   fi
-  if ! magick "$probe_in" -resize 1x1 "$probe_out" >/dev/null 2>&1; then
-    rm -rf "$tmp_dir"
-    return 1
+  if ! timeout_cmd 8 magick "$probe_in" -resize 1x1 "$probe_out" >/dev/null 2>&1; then
+    rm -rf "$tmp_dir"; return 1
   fi
-  if ! magick identify "$probe_out" >/dev/null 2>&1; then
-    rm -rf "$tmp_dir"
-    return 1
+  if ! timeout_cmd 8 magick identify "$probe_out" >/dev/null 2>&1; then
+    rm -rf "$tmp_dir"; return 1
   fi
 
   rm -rf "$tmp_dir"
   return 0
+}
+
+timeout_cmd() {
+  local secs="$1"; shift
+  if command -v gtimeout >/dev/null 2>&1; then
+    gtimeout "$secs" "$@"
+  elif command -v timeout >/dev/null 2>&1; then
+    timeout "$secs" "$@"
+  else
+    perl -e 'alarm shift; exec @ARGV' "$secs" "$@"
+  fi
 }
 
 cleanup() {
@@ -978,20 +1046,36 @@ else
   fi
 fi
 
-# ─── 12. 检查系统依赖 ────────────────────────────────────────────────────────
+# ─── 12. 检查系统依赖（快速模式，绝不阻塞更新）──────────────────────────────
 echo ""
 echo -e "${YELLOW}🔍 正在检查系统依赖...${NC}"
 ensure_local_bins_path
 
+check_dep_quick() {
+  local cmd="$1"
+  if [ "$cmd" = "magick" ]; then
+    verify_imagemagick_health 2>/dev/null
+  else
+    command -v "$cmd" &>/dev/null
+  fi
+}
+
+try_install_dep() {
+  local dep="$1"
+  case "$dep" in
+    ffmpeg)      install_ffmpeg_fallback ;;
+    gifsicle)    install_gifsicle_fallback ;;
+    imagemagick) install_imagemagick_fallback ;;
+  esac
+}
+
 MISSING_DEPS=""
 for cmd in ffmpeg gifsicle magick; do
-  if [ "$cmd" = "magick" ]; then
-    if ! verify_imagemagick_health; then
-      MISSING_DEPS="$MISSING_DEPS imagemagick"
-    fi
-    continue
-  fi
-  if ! command -v "$cmd" &>/dev/null; then
+  printf "   检查 %-12s " "$cmd"
+  if check_dep_quick "$cmd"; then
+    echo -e "${GREEN}✅${NC}"
+  else
+    echo -e "${YELLOW}缺失${NC}"
     case "$cmd" in
       magick) MISSING_DEPS="$MISSING_DEPS imagemagick" ;;
       *)      MISSING_DEPS="$MISSING_DEPS $cmd" ;;
@@ -1000,119 +1084,46 @@ for cmd in ffmpeg gifsicle magick; do
 done
 
 if [ -n "$MISSING_DEPS" ]; then
-  echo -e "${YELLOW}⚠️  缺少系统依赖:${MISSING_DEPS}${NC}"
+  echo -e "${YELLOW}⚠️  缺少:${MISSING_DEPS}${NC}"
+
+  # 尝试 Homebrew（带 5 分钟总超时）
   if command -v brew &>/dev/null; then
-    echo -e "${YELLOW}📦 正在通过 Homebrew 安装（失败不会中断更新）...${NC}"
-    # Homebrew 在非 Tier 1 环境可能失败。这里改为“尽力安装”，不阻塞主更新流程。
+    echo -e "${YELLOW}📦 Homebrew 安装（最多 5 分钟）...${NC}"
     set +e
-    BREW_OUTPUT="$(brew install $MISSING_DEPS 2>&1)"
-    BREW_EXIT_CODE=$?
+    timeout_cmd 300 brew install $MISSING_DEPS 2>&1 | tail -10
     set -e
-
-    echo "$BREW_OUTPUT" | tail -20
-
-    STILL_MISSING=""
-    for cmd in ffmpeg gifsicle magick; do
-      if [ "$cmd" = "magick" ]; then
-        if ! verify_imagemagick_health; then
-          STILL_MISSING="$STILL_MISSING imagemagick"
-        fi
-        continue
-      fi
-      if ! command -v "$cmd" &>/dev/null; then
-        case "$cmd" in
-          magick) STILL_MISSING="$STILL_MISSING imagemagick" ;;
-          *)      STILL_MISSING="$STILL_MISSING $cmd" ;;
-        esac
-      fi
-    done
-
-    if [ -z "$STILL_MISSING" ]; then
-      echo -e "${GREEN}✅ 系统依赖安装完成${NC}"
-    else
-      echo -e "${YELLOW}⚠️  Homebrew 安装未完全成功（exit=${BREW_EXIT_CODE}），但更新将继续${NC}"
-      echo -e "${YELLOW}⚠️  仍缺少依赖:${STILL_MISSING}${NC}"
-      echo "   正在尝试本地兜底安装（~/.screensync/bin）..."
-      if echo "$STILL_MISSING" | grep -q "ffmpeg"; then
-        install_ffmpeg_fallback && echo "   ✅ FFmpeg 本地安装成功" || echo "   ❌ FFmpeg 本地安装失败"
-      fi
-      if echo "$STILL_MISSING" | grep -q "gifsicle"; then
-        install_gifsicle_fallback && echo "   ✅ Gifsicle 本地安装成功" || echo "   ❌ Gifsicle 本地安装失败"
-      fi
-      if echo "$STILL_MISSING" | grep -q "imagemagick"; then
-        install_imagemagick_fallback && echo "   ✅ ImageMagick 本地安装成功" || echo "   ❌ ImageMagick 本地安装失败"
-      fi
-
-      ensure_local_bins_path
-      FINAL_MISSING=""
-      for cmd in ffmpeg gifsicle magick; do
-        if [ "$cmd" = "magick" ]; then
-          if ! verify_imagemagick_health; then
-            FINAL_MISSING="$FINAL_MISSING imagemagick"
-          fi
-          continue
-        fi
-        if ! command -v "$cmd" &>/dev/null; then
-          case "$cmd" in
-            magick) FINAL_MISSING="$FINAL_MISSING imagemagick" ;;
-            *)      FINAL_MISSING="$FINAL_MISSING $cmd" ;;
-          esac
-        fi
-      done
-
-      if [ -z "$FINAL_MISSING" ]; then
-        echo -e "${GREEN}✅ 系统依赖已通过本地兜底安装补齐${NC}"
-      else
-        echo -e "${YELLOW}⚠️  仍缺少依赖:${FINAL_MISSING}${NC}"
-        echo "   不影响脚本更新/重启服务器，但以下功能会受限："
-        echo "   - 缺少 ffmpeg: 视频转 GIF / 视频压缩不可用"
-        echo "   - 缺少 gifsicle: GIF 压缩优化不可用"
-        echo "   - 缺少 imagemagick: 时间线部分导出能力受限"
-        echo ""
-        echo "   可稍后手动安装（任选可用方式）："
-        echo "   1) brew install$FINAL_MISSING"
-        echo "   2) 从官方二进制手动安装并确保在 PATH 中可执行"
-      fi
-    fi
-  else
-    echo -e "${YELLOW}⚠️  未找到 Homebrew，部分功能可能受限${NC}"
-    echo "   可运行以下命令安装 Homebrew:"
-    echo '   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
-    echo "   安装后运行: brew install$MISSING_DEPS"
-    echo "   同时尝试本地兜底安装..."
-    if echo "$MISSING_DEPS" | grep -q "ffmpeg"; then
-      install_ffmpeg_fallback && echo "   ✅ FFmpeg 本地安装成功" || echo "   ❌ FFmpeg 本地安装失败"
-    fi
-    if echo "$MISSING_DEPS" | grep -q "gifsicle"; then
-      install_gifsicle_fallback && echo "   ✅ Gifsicle 本地安装成功" || echo "   ❌ Gifsicle 本地安装失败"
-    fi
-    if echo "$MISSING_DEPS" | grep -q "imagemagick"; then
-      install_imagemagick_fallback && echo "   ✅ ImageMagick 本地安装成功" || echo "   ❌ ImageMagick 本地安装失败"
-    fi
-
     ensure_local_bins_path
-    FINAL_MISSING=""
-    for cmd in ffmpeg gifsicle magick; do
-      if [ "$cmd" = "magick" ]; then
-        if ! verify_imagemagick_health; then
-          FINAL_MISSING="$FINAL_MISSING imagemagick"
-        fi
-        continue
-      fi
-      if ! command -v "$cmd" &>/dev/null; then
-        case "$cmd" in
-          magick) FINAL_MISSING="$FINAL_MISSING imagemagick" ;;
-          *)      FINAL_MISSING="$FINAL_MISSING $cmd" ;;
-        esac
-      fi
-    done
+  fi
 
-    if [ -z "$FINAL_MISSING" ]; then
-      echo -e "${GREEN}✅ 系统依赖已通过本地兜底安装补齐${NC}"
+  # 复检 + 本地兜底（每个依赖独立处理）
+  STILL_MISSING=""
+  for dep in $MISSING_DEPS; do
+    dep_cmd="$dep"
+    [ "$dep" = "imagemagick" ] && dep_cmd="magick"
+    if ! check_dep_quick "$dep_cmd"; then
+      echo "   ↪️  本地安装 $dep ..."
+      set +e
+      if try_install_dep "$dep"; then
+        ensure_local_bins_path
+        if check_dep_quick "$dep_cmd"; then
+          echo -e "   ${GREEN}✅ $dep 安装成功${NC}"
+        else
+          STILL_MISSING="$STILL_MISSING $dep"
+        fi
+      else
+        STILL_MISSING="$STILL_MISSING $dep"
+      fi
+      set -e
     else
-      echo -e "${YELLOW}⚠️  仍缺少或异常依赖:${FINAL_MISSING}${NC}"
-      echo "   其中 ImageMagick 需要通过 PNG 读写健康检查才视为可用。"
+      echo -e "   ${GREEN}✅ $dep 已可用${NC}"
     fi
+  done
+
+  if [ -z "$STILL_MISSING" ]; then
+    echo -e "${GREEN}✅ 系统依赖已补齐${NC}"
+  else
+    echo -e "${YELLOW}⚠️  以下依赖安装失败（不阻塞更新，运行时有兜底）:${STILL_MISSING}${NC}"
+    echo "   GIF 导出会自动回退 FFmpeg，功能基本不受影响。"
   fi
 else
   echo -e "${GREEN}✅ 系统依赖完整${NC}"
