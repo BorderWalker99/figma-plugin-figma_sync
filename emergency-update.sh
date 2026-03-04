@@ -368,6 +368,46 @@ fi
 
 echo -e "${GREEN}✅ 已同步 ${UPDATED} 个代码文件${NC}"
 
+# 关键文件兜底校验：确保最新必需代码一定落地（防止旧包/异常同步导致缺失）
+echo ""
+echo -e "${YELLOW}🧩 正在校验关键必需文件...${NC}"
+REQUIRED_FILES=(
+  "server.js"
+  "start.js"
+  "setup-autostart.js"
+  "drive-watcher.js"
+  "icloud-watcher.js"
+  "gif-composer.js"
+  "media-processing-tuning.js"
+  "figma-plugin/manifest.json"
+  "update-manifest.json"
+  "README.md"
+)
+
+MISSING_REQUIRED=0
+for req in "${REQUIRED_FILES[@]}"; do
+  src="$SOURCE_DIR/$req"
+  dest="$SCRIPT_DIR/$req"
+  if [ ! -f "$dest" ]; then
+    if [ -f "$src" ]; then
+      mkdir -p "$(dirname "$dest")"
+      cp "$src" "$dest"
+      echo "   ♻️  已补齐: $req"
+    fi
+  fi
+  if [ ! -f "$dest" ]; then
+    echo "   ❌ 缺失必需文件: $req"
+    MISSING_REQUIRED=1
+  fi
+done
+
+if [ "$MISSING_REQUIRED" -ne 0 ]; then
+  echo -e "${RED}❌ 更新包不完整或同步异常：关键必需文件缺失，已中止更新${NC}"
+  echo "   请重新下载最新安装包后重试，或联系开发者。"
+  exit 1
+fi
+echo -e "${GREEN}✅ 关键必需文件校验通过${NC}"
+
 # ─── 10. 安装包目录重命名 ────────────────────────────────────────────────────
 echo ""
 echo -e "${YELLOW}📁 检查安装包目录名称...${NC}"
