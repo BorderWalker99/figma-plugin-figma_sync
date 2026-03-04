@@ -200,6 +200,30 @@ module.exports = {
     fpsCapXLarge: envNumber('COMPOSER_FPS_CAP_XLARGE', 15)
   },
 
+  // B3. 时间线编辑器预览帧提取参数（server.js extract-preview-frames 使用）
+  // 目标：更激进提升长视频预览帧还原，同时通过分辨率分层保护加载速度
+  composerPreview: {
+    minFrames: envNumber('COMPOSER_PREVIEW_MIN_FRAMES', 160),
+    maxFrames: envNumber('COMPOSER_PREVIEW_MAX_FRAMES', 640),
+    shortDurationSec: envNumber('COMPOSER_PREVIEW_SHORT_SEC', 20),
+    mediumDurationSec: envNumber('COMPOSER_PREVIEW_MEDIUM_SEC', 60),
+    longDurationSec: envNumber('COMPOSER_PREVIEW_LONG_SEC', 180),
+    targetFpsShort: envNumber('COMPOSER_PREVIEW_TARGET_FPS_SHORT', 18),
+    targetFpsMedium: envNumber('COMPOSER_PREVIEW_TARGET_FPS_MEDIUM', 14),
+    targetFpsLong: envNumber('COMPOSER_PREVIEW_TARGET_FPS_LONG', 12),
+    targetFpsXL: envNumber('COMPOSER_PREVIEW_TARGET_FPS_XL', 10),
+    denseFrameThreshold: envNumber('COMPOSER_PREVIEW_DENSE_FRAME_THRESHOLD', 300),
+    ultraDenseFrameThreshold: envNumber('COMPOSER_PREVIEW_ULTRA_DENSE_FRAME_THRESHOLD', 480),
+    scaleHeightNormal: envNumber('COMPOSER_PREVIEW_SCALE_HEIGHT_NORMAL', 560),
+    scaleHeightDense: envNumber('COMPOSER_PREVIEW_SCALE_HEIGHT_DENSE', 460),
+    scaleHeightUltraDense: envNumber('COMPOSER_PREVIEW_SCALE_HEIGHT_ULTRA_DENSE', 380),
+    // 分辨率分层保护：高分辨率视频自动降低 maxFrames，避免内存/解码压力失控
+    hiResPixels: envNumber('COMPOSER_PREVIEW_HIRES_PIXELS', 3500000),          // ~2K
+    ultraResPixels: envNumber('COMPOSER_PREVIEW_ULTRARES_PIXELS', 7000000),    // ~4K
+    maxFramesHiRes: envNumber('COMPOSER_PREVIEW_MAX_FRAMES_HIRES', 520),
+    maxFramesUltraRes: envNumber('COMPOSER_PREVIEW_MAX_FRAMES_ULTRARES', 380)
+  },
+
   // C. server 侧上传压缩参数
   serverUpload: {
     // 普通分层（50~80 / 80+）

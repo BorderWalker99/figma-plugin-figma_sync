@@ -517,7 +517,7 @@ ipcMain.handle('check-ffmpeg', async () => {
     const ffmpegPath = findExecutable('ffmpeg');
     
     if (ffmpegPath) {
-      exec('ffmpeg -version', (error, output) => {
+      exec(`"${ffmpegPath}" -version`, (error, output) => {
         if (!error && output.includes('ffmpeg version')) {
           // 提取版本号
           const versionMatch = output.match(/ffmpeg version ([\d.]+)/);
@@ -538,7 +538,7 @@ ipcMain.handle('check-gifsicle', async () => {
     const gifsiclePath = findExecutable('gifsicle');
     
     if (gifsiclePath) {
-      exec('gifsicle --version', (error, output) => {
+      exec(`"${gifsiclePath}" --version`, (error, output) => {
         if (!error && output.includes('Gifsicle')) {
           // 提取版本号
           const versionMatch = output.match(/Gifsicle ([\d.]+)/);
@@ -1109,36 +1109,66 @@ async function installLegacyGifsicle(sendProgress, sendLog) {
   fs.mkdirSync(tmpDir, { recursive: true });
 
   try {
-    // Check if C compiler is available
-    try { await execPromise('cc --version', { timeout: 5000 }); } catch (e) {
-      sendLog('   ⚠️ 未找到 C 编译器，跳过 Gifsicle（不影响基本功能）\n');
-      sendProgress('gifsicle', 'done', '已跳过（可选组件）');
-      return;
+    // Strategy 1: npm prebuilt binary (no compiler required)
+    let installed = false;
+    const npmPath = findExecutable('npm')
+      || path.join(LEGACY_BIN_DIR, 'npm')
+      || path.join(LEGACY_DEPS_DIR, 'node', 'bin', 'npm');
+    const npmProj = path.join(tmpDir, 'npm-gifsicle');
+    const dest = path.join(LEGACY_BIN_DIR, 'gifsicle');
+
+    if (npmPath && fs.existsSync(npmPath)) {
+      try {
+        sendLog('   尝试通过 npm 预编译包安装...\n');
+        fs.mkdirSync(npmProj, { recursive: true });
+        fs.writeFileSync(path.join(npmProj, 'package.json'), JSON.stringify({
+          name: 'screensync-gifsicle-fallback',
+          private: true
+        }, null, 2));
+        await execPromise(`cd "${npmProj}" && "${npmPath}" install gifsicle --omit=dev --no-audit --no-fund --silent`, { timeout: 180000 });
+
+        const candidates = [
+          path.join(npmProj, 'node_modules', 'gifsicle', 'vendor', 'gifsicle'),
+          path.join(npmProj, 'node_modules', '.bin', 'gifsicle')
+        ];
+        const prebuilt = candidates.find(p => fs.existsSync(p));
+        if (prebuilt) {
+          try { fs.unlinkSync(dest); } catch (_) {}
+          fs.copyFileSync(prebuilt, dest);
+          fs.chmodSync(dest, 0o755);
+          const { stdout } = await execPromise(`"${dest}" --version`, { timeout: 10000 });
+          sendLog(`   ✅ ${stdout.split('\n')[0]}\n`);
+          sendProgress('gifsicle', 'done', '安装完成');
+          installed = true;
+        }
+      } catch (e) {
+        sendLog(`   ⚠️ npm 预编译安装失败: ${e.message}\n`);
+      }
     }
 
-    sendLog('   正在下载源码...\n');
-    await execPromise(`curl -L "https://www.lcdf.org/gifsicle/gifsicle-1.96.tar.gz" | tar xz -C "${tmpDir}" --strip-components=1`, { timeout: 60000 });
+    // Strategy 2: source build fallback
+    if (!installed) {
+      sendLog('   预编译方式失败，尝试源码编译...\n');
+      await execPromise('cc --version', { timeout: 5000 });
+      await execPromise(`curl -L "https://www.lcdf.org/gifsicle/gifsicle-1.96.tar.gz" | tar xz -C "${tmpDir}" --strip-components=1`, { timeout: 60000 });
+      await execPromise(`cd "${tmpDir}" && ./configure --disable-gifview --prefix="${LEGACY_DEPS_DIR}/gifsicle" 2>&1`, { timeout: 60000 });
+      await execPromise(`cd "${tmpDir}" && make -j${os.cpus().length} 2>&1`, { timeout: 120000 });
 
-    sendLog('   正在编译...\n');
-    await execPromise(`cd "${tmpDir}" && ./configure --disable-gifview --prefix="${LEGACY_DEPS_DIR}/gifsicle" 2>&1`, { timeout: 60000 });
-    await execPromise(`cd "${tmpDir}" && make -j${os.cpus().length} 2>&1`, { timeout: 120000 });
-
-    const srcBin = path.join(tmpDir, 'src', 'gifsicle');
-    if (fs.existsSync(srcBin)) {
-      const dest = path.join(LEGACY_BIN_DIR, 'gifsicle');
-      try { fs.unlinkSync(dest); } catch (e) {}
+      const srcBin = path.join(tmpDir, 'src', 'gifsicle');
+      if (!fs.existsSync(srcBin)) {
+        throw new Error('编译产物未找到');
+      }
+      try { fs.unlinkSync(dest); } catch (_) {}
       fs.copyFileSync(srcBin, dest);
       fs.chmodSync(dest, 0o755);
-
       const { stdout } = await execPromise(`"${dest}" --version`);
       sendLog(`   ✅ ${stdout.split('\n')[0]}\n`);
       sendProgress('gifsicle', 'done', '安装完成');
-    } else {
-      throw new Error('编译产物未找到');
     }
   } catch (e) {
-    sendLog(`   ⚠️ Gifsicle 安装失败: ${e.message}（不影响基本功能）\n`);
-    sendProgress('gifsicle', 'done', '已跳过（可选组件）');
+    sendLog(`   ❌ Gifsicle 安装失败: ${e.message}\n`);
+    sendProgress('gifsicle', 'error', '安装失败');
+    throw new Error(`Gifsicle 安装失败：${e.message}`);
   } finally {
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (e) {}
   }
@@ -1229,7 +1259,8 @@ ipcMain.handle('install-all-dependencies', async (event, dependencyStatus, optio
     return depOrder.indexOf(dep) >= restartIndex;
   };
 
-  const needsHomebrew = shouldInstall('homebrew');
+  // 非 Tier1 机器上 Homebrew 可能不可用/不可构建，不将其作为硬前置依赖
+  const needsHomebrew = false;
   const brewPackages = [];
   if (shouldInstall('node')) brewPackages.push('node');
   if (shouldInstall('imagemagick')) brewPackages.push('imagemagick');
@@ -1246,6 +1277,21 @@ ipcMain.handle('install-all-dependencies', async (event, dependencyStatus, optio
   };
   const sendLog = (data) => {
     try { event.sender.send('dep-install-log', { data }); } catch (e) {}
+  };
+
+  const displayNames = { node: 'Node.js', imagemagick: 'ImageMagick', ffmpeg: 'FFmpeg', gifsicle: 'Gifsicle' };
+  const fallbackInstallers = {
+    node: installLegacyNode,
+    imagemagick: installLegacyImageMagick,
+    ffmpeg: installLegacyFFmpeg,
+    gifsicle: installLegacyGifsicle
+  };
+  const installViaFallback = async (pkg, reason = '') => {
+    const installer = fallbackInstallers[pkg];
+    const name = displayNames[pkg] || pkg;
+    if (!installer) throw new Error(`${name} 无可用 fallback 安装器`);
+    sendLog(`   ⚠️ ${name} Homebrew 安装失败${reason ? `: ${reason}` : ''}，切换到本地安装模式...\n`);
+    await installer(sendProgress, sendLog);
   };
 
   let failedDep = null;
@@ -1408,59 +1454,64 @@ ipcMain.handle('install-all-dependencies', async (event, dependencyStatus, optio
       const brewPath = findExecutable('brew')
         || (process.arch === 'arm64' ? '/opt/homebrew/bin/brew' : '/usr/local/bin/brew');
 
+      // 如果 brew 不可用，直接走 fallback 本地安装（~/.screensync）
       if (!brewPath || !fs.existsSync(brewPath)) {
-        return { success: false, error: '未找到 Homebrew，无法安装依赖包' };
+        sendLog('⚠️ 未找到可用 Homebrew，改用本地安装模式...\n');
+        for (const pkg of brewPackages) {
+          failedDep = pkg;
+          await installViaFallback(pkg, '未检测到 brew');
+        }
+        return { success: true, message: '依赖已通过本地安装完成' };
       }
-
-      const displayNames = { node: 'Node.js', imagemagick: 'ImageMagick', ffmpeg: 'FFmpeg', gifsicle: 'Gifsicle' };
-
       for (const pkg of brewPackages) {
         failedDep = pkg;
         const name = displayNames[pkg] || pkg;
         sendProgress(pkg, 'installing', '正在安装...');
         sendLog(`\n📦 正在安装 ${name}...\n`);
+        try {
+          await new Promise((resolve, reject) => {
+            const child = spawn(brewPath, ['install', pkg], {
+              env: {
+                ...process.env,
+                HOMEBREW_API_DOMAIN: 'https://mirrors.tuna.tsinghua.edu.cn/homebrew-bottles/api',
+                HOMEBREW_BOTTLE_DOMAIN: 'https://mirrors.tuna.tsinghua.edu.cn/homebrew-bottles'
+              }
+            });
 
-        await new Promise((resolve, reject) => {
-          const child = spawn(brewPath, ['install', pkg], {
-            env: {
-              ...process.env,
-              HOMEBREW_API_DOMAIN: 'https://mirrors.tuna.tsinghua.edu.cn/homebrew-bottles/api',
-              HOMEBREW_BOTTLE_DOMAIN: 'https://mirrors.tuna.tsinghua.edu.cn/homebrew-bottles'
-            }
+            const timeout = setTimeout(() => {
+              try { child.kill('SIGTERM'); } catch (e) {}
+              reject(new Error(`${name} 安装超时（10分钟）`));
+            }, 10 * 60 * 1000);
+
+            child.stdout.on('data', (data) => {
+              const text = data.toString();
+              if (text.trim()) sendLog(text);
+            });
+
+            child.stderr.on('data', (data) => {
+              const text = data.toString();
+              if (text.trim()) sendLog(text);
+            });
+
+            child.on('close', (code) => {
+              clearTimeout(timeout);
+              if (code === 0) {
+                sendProgress(pkg, 'done', '安装完成');
+                sendLog(`✅ ${name} 安装完成\n`);
+                resolve();
+              } else {
+                reject(new Error(`${name} 安装失败 (brew exit ${code})`));
+              }
+            });
+
+            child.on('error', (err) => {
+              clearTimeout(timeout);
+              reject(err);
+            });
           });
-
-          const timeout = setTimeout(() => {
-            try { child.kill('SIGTERM'); } catch (e) {}
-            reject(new Error(`${name} 安装超时（10分钟）`));
-          }, 10 * 60 * 1000);
-
-          child.stdout.on('data', (data) => {
-            const text = data.toString();
-            if (text.trim()) sendLog(text);
-          });
-
-          child.stderr.on('data', (data) => {
-            const text = data.toString();
-            if (text.trim()) sendLog(text);
-          });
-
-          child.on('close', (code) => {
-            clearTimeout(timeout);
-            if (code === 0) {
-              sendProgress(pkg, 'done', '安装完成');
-              sendLog(`✅ ${name} 安装完成\n`);
-              resolve();
-            } else {
-              sendProgress(pkg, 'error', '安装失败');
-              reject(new Error(`${name} 安装失败`));
-            }
-          });
-
-          child.on('error', (err) => {
-            clearTimeout(timeout);
-            reject(err);
-          });
-        });
+        } catch (brewErr) {
+          await installViaFallback(pkg, brewErr.message);
+        }
       }
     }
 

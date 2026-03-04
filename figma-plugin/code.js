@@ -1,6 +1,6 @@
 // code.js - 智能布局版本
 
-const PLUGIN_VERSION = '1.0.1'; // 插件版本号
+const PLUGIN_VERSION = '1.0.2'; // 插件版本号
 
 
 // 🛡️ 全局错误处理，防止切换文件时崩溃
@@ -15,6 +15,27 @@ figma.showUI(__html__, {
 });
 
 figma.on('close', () => {
+  try {
+    if (serverCheckTimer) {
+      clearTimeout(serverCheckTimer);
+      serverCheckTimer = null;
+    }
+    if (focusNodeTimer) {
+      clearTimeout(focusNodeTimer);
+      focusNodeTimer = null;
+    }
+    if (structuralRefreshTimer) {
+      clearTimeout(structuralRefreshTimer);
+      structuralRefreshTimer = null;
+    }
+    if (timelineFrameId) {
+      clearTimelineThumbnailRetryTimers(timelineFrameId);
+    } else {
+      for (const [fid] of timelineThumbnailRetryTimers) {
+        clearTimelineThumbnailRetryTimers(fid);
+      }
+    }
+  } catch (_) {}
   figma.ui.postMessage({ type: 'plugin-closing' });
 });
 
@@ -427,6 +448,80 @@ function ensureFrame() {
   } catch (error) {
     return false;
   }
+}
+
+const LOOSE_FIRST_NODE_ID_KEY = 'screensyncLooseFirstNodeId';
+
+function findLooseFirstScreenshotNode() {
+  try {
+    const trackedId = figma.currentPage.getPluginData(LOOSE_FIRST_NODE_ID_KEY);
+    if (trackedId) {
+      const trackedNode = figma.getNodeById(trackedId);
+      if (trackedNode && trackedNode.getPluginData && trackedNode.getPluginData('screensyncLooseFirst') === '1') {
+        return trackedNode;
+      }
+      // 清理失效引用（例如用户删除了首图层）
+      figma.currentPage.setPluginData(LOOSE_FIRST_NODE_ID_KEY, '');
+    }
+  } catch (_) {}
+
+  let latestNode = null;
+  let latestTs = -1;
+  const walk = (nodes) => {
+    for (const node of nodes || []) {
+      try {
+        if (!node || !node.getPluginData) continue;
+        if (node.getPluginData('screensyncLooseFirst') === '1') {
+          const ts = Number(node.getPluginData('screensyncLooseFirstAt') || '0');
+          if (latestNode === null || ts > latestTs) {
+            latestNode = node;
+            latestTs = ts;
+          }
+        }
+        if ('children' in node && Array.isArray(node.children) && node.children.length > 0) {
+          walk(node.children);
+        }
+      } catch (_) {}
+    }
+  };
+  const children = figma.currentPage && figma.currentPage.children ? figma.currentPage.children : [];
+  walk(children);
+
+  if (latestNode) {
+    try {
+      figma.currentPage.setPluginData(LOOSE_FIRST_NODE_ID_KEY, latestNode.id);
+    } catch (_) {}
+  }
+
+  return latestNode;
+}
+
+function markLooseFirstScreenshotNode(node) {
+  try {
+    if (!node || !node.setPluginData) return;
+    node.setPluginData('screensyncLooseFirst', '1');
+    node.setPluginData('screensyncLooseFirstAt', String(Date.now()));
+    figma.currentPage.setPluginData(LOOSE_FIRST_NODE_ID_KEY, node.id);
+  } catch (_) {}
+}
+
+function clearLooseFirstScreenshotRef(nodeId) {
+  try {
+    const trackedId = figma.currentPage.getPluginData(LOOSE_FIRST_NODE_ID_KEY);
+    if (!trackedId) return;
+    if (!nodeId || trackedId === nodeId) {
+      figma.currentPage.setPluginData(LOOSE_FIRST_NODE_ID_KEY, '');
+    }
+  } catch (_) {}
+}
+
+function clearLooseFirstScreenshotMark(node) {
+  try {
+    if (!node || !node.setPluginData) return;
+    node.setPluginData('screensyncLooseFirst', '');
+    node.setPluginData('screensyncLooseFirstAt', '');
+    clearLooseFirstScreenshotRef(node.id);
+  } catch (_) {}
 }
 
 function scheduleFocusOnNode(node) {
@@ -1796,7 +1891,7 @@ figma.ui.onmessage = async (msg) => {
   
   if (msg.type === 'add-screenshot') {
     try {
-      const { bytes, gifUrl, imageWidth, imageHeight, timestamp, filename, driveFileId, ossFileId, gifCacheId } = msg;
+      const { bytes, gifUrl, imageWidth, imageHeight, timestamp, filename, driveFileId, ossFileId, gifCacheId, taskId } = msg;
       
       // ✅ 缓存文件信息（即使后续创建失败，也要保留信息以便手动拖入后关联）
       if (filename) {
@@ -1974,69 +2069,72 @@ figma.ui.onmessage = async (msg) => {
         rect.setPluginData('gifCacheId', msg.gifCacheId);
       }
       
-      const frameCreated = ensureFrame();
-      
-      if (isFrameValid()) {
-        const wasFrameEmpty = currentFrame.children.length === 0;
-        const viewportCenterAtInsert = { x: figma.viewport.center.x, y: figma.viewport.center.y };
+      const looseFirstNode = findLooseFirstScreenshotNode();
+      const shouldUseAutoLayout = isFrameValid() || !!looseFirstNode;
 
-        if (currentFrame.layoutMode === 'NONE') {
-          currentFrame.layoutMode = 'HORIZONTAL';
-          currentFrame.itemSpacing = 10;
-          currentFrame.paddingLeft = 0;
-          currentFrame.paddingRight = 0;
-          currentFrame.paddingTop = 0;
-          currentFrame.paddingBottom = 0;
-        }
-        
-        // 先添加到画板，然后才能设置 layoutSizingHorizontal
-        currentFrame.appendChild(rect);
-        
-        // 只有在 frame 有 auto-layout 时，才能设置子元素的 layoutSizing 属性
-        if (currentFrame.layoutMode !== 'NONE') {
-          try {
-            // 如果设置了列数，需要设置子元素的宽度以实现换行
-            if (customSizeSettings.columns && customSizeSettings.columns > 0) {
-              // 设置子元素的宽度为固定值，这样 Auto Layout 的 WRAP 模式会根据宽度自动换行
-              rect.layoutSizingHorizontal = 'FIXED';
-              rect.layoutSizingVertical = 'HUG';
-              // 宽度已经在上面设置了 finalWidth，不需要再设置
-              
-              // 根据第一张图片的实际宽度计算画板宽度
-              // 如果是第一张图片（画板只有这一张），根据这张图片的宽度设置画板宽度
-              const itemSpacing = currentFrame.itemSpacing || 10;
-              const frameWidth = (finalWidth * customSizeSettings.columns) + (itemSpacing * (customSizeSettings.columns - 1));
-              
-              // 只有当这是第一张图片时，才设置画板宽度
-              // 或者如果画板当前是 HUG 模式，也需要设置
-              if (currentFrame.children.length === 1 || currentFrame.layoutSizingHorizontal === 'HUG') {
-                currentFrame.layoutSizingHorizontal = 'FIXED';
-                currentFrame.resize(frameWidth, currentFrame.height || 800);
-              }
-            } else {
-              // 不换行，子元素可以自由扩展，画板宽度自动 hug 内容
-              rect.layoutSizingHorizontal = 'HUG';
-              rect.layoutSizingVertical = 'HUG';
-              // 确保画板也是 HUG 模式
-              if (currentFrame.layoutSizingHorizontal !== 'HUG') {
-                currentFrame.layoutSizingHorizontal = 'HUG';
-              }
-            }
-          } catch (layoutError) {
-            // 如果设置 layoutSizing 失败，不抛出错误，让图片正常添加
-          }
-        }
-
-        // 首次添加图片时，强制把 Frame 放到当前视窗中心，避免视窗跳动
-        if (wasFrameEmpty) {
-          currentFrame.x = viewportCenterAtInsert.x - (currentFrame.width / 2);
-          currentFrame.y = viewportCenterAtInsert.y - (currentFrame.height / 2);
-        }
-        
-      } else {
-        rect.x = figma.viewport.center.x;
-        rect.y = figma.viewport.center.y;
+      // 第一个图层不进自动布局：直接散放在画布
+      if (!shouldUseAutoLayout) {
+        markLooseFirstScreenshotNode(rect);
+        rect.x = figma.viewport.center.x - (finalWidth / 2);
+        rect.y = figma.viewport.center.y - (finalHeight / 2);
         figma.currentPage.appendChild(rect);
+      } else {
+        ensureFrame();
+        if (isFrameValid()) {
+          const wasFrameEmpty = currentFrame.children.length === 0;
+          const viewportCenterAtInsert = { x: figma.viewport.center.x, y: figma.viewport.center.y };
+
+          if (currentFrame.layoutMode === 'NONE') {
+            currentFrame.layoutMode = 'HORIZONTAL';
+            currentFrame.itemSpacing = 10;
+            currentFrame.paddingLeft = 0;
+            currentFrame.paddingRight = 0;
+            currentFrame.paddingTop = 0;
+            currentFrame.paddingBottom = 0;
+          }
+
+          const applyChildLayout = (node, nodeWidth) => {
+            if (currentFrame.layoutMode === 'NONE') return;
+            try {
+              if (customSizeSettings.columns && customSizeSettings.columns > 0) {
+                node.layoutSizingHorizontal = 'FIXED';
+                node.layoutSizingVertical = 'HUG';
+                const itemSpacing = currentFrame.itemSpacing || 10;
+                const frameWidth = (nodeWidth * customSizeSettings.columns) + (itemSpacing * (customSizeSettings.columns - 1));
+                if (currentFrame.children.length === 1 || currentFrame.layoutSizingHorizontal === 'HUG') {
+                  currentFrame.layoutSizingHorizontal = 'FIXED';
+                  currentFrame.resize(frameWidth, currentFrame.height || 800);
+                }
+              } else {
+                node.layoutSizingHorizontal = 'HUG';
+                node.layoutSizingVertical = 'HUG';
+                if (currentFrame.layoutSizingHorizontal !== 'HUG') {
+                  currentFrame.layoutSizingHorizontal = 'HUG';
+                }
+              }
+            } catch (_) {}
+          };
+
+          // 第二张开始：先把散放的第一张图层精确收拢进自动布局
+          if (looseFirstNode && looseFirstNode.parent !== currentFrame) {
+            clearLooseFirstScreenshotMark(looseFirstNode);
+            currentFrame.appendChild(looseFirstNode);
+            applyChildLayout(looseFirstNode, looseFirstNode.width || finalWidth);
+          }
+
+          currentFrame.appendChild(rect);
+          applyChildLayout(rect, finalWidth);
+
+          // 首次向 Frame 放入内容时，保持 Frame 视口居中
+          if (wasFrameEmpty) {
+            currentFrame.x = viewportCenterAtInsert.x - (currentFrame.width / 2);
+            currentFrame.y = viewportCenterAtInsert.y - (currentFrame.height / 2);
+          }
+        } else {
+          rect.x = figma.viewport.center.x - (finalWidth / 2);
+          rect.y = figma.viewport.center.y - (finalHeight / 2);
+          figma.currentPage.appendChild(rect);
+        }
       }
       
       screenshotCount++;
@@ -2048,6 +2146,7 @@ figma.ui.onmessage = async (msg) => {
         success: true,
         count: screenshotCount,
         filename: filename || '未命名文件',
+        taskId: taskId || null,
         driveFileId: driveFileId,
         ossFileId: ossFileId
       });
@@ -2069,6 +2168,7 @@ figma.ui.onmessage = async (msg) => {
         figma.ui.postMessage({
           type: 'screenshot-import-timeout',
           filename: msg.filename || '未命名文件',
+          taskId: msg.taskId || null,
           gifCacheId: msg.gifCacheId || null,
           driveFileId: msg.driveFileId,
           ossFileId: msg.ossFileId,
@@ -2083,6 +2183,7 @@ figma.ui.onmessage = async (msg) => {
         figma.ui.postMessage({
           type: 'file-needs-manual-drag',
           filename: msg.filename || '未命名文件',
+          taskId: msg.taskId || null,
           reason: 'undefined-error',
           error: errorText,
           driveFileId: msg.driveFileId,
@@ -2093,6 +2194,7 @@ figma.ui.onmessage = async (msg) => {
         figma.ui.postMessage({
           type: 'screenshot-added',
           success: false,
+          taskId: msg.taskId || null,
           error: errorMessage,
           driveFileId: msg.driveFileId,
           ossFileId: msg.ossFileId

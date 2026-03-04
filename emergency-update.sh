@@ -85,6 +85,136 @@ print_startup_logs() {
   echo "--------------------------------------------------"
 }
 
+ensure_local_bins_path() {
+  local local_bin="$HOME/.screensync/bin"
+  local local_node_bin="$HOME/.screensync/deps/node/bin"
+  mkdir -p "$local_bin" "$HOME/.screensync/deps" 2>/dev/null || true
+  export PATH="$local_bin:$local_node_bin:$PATH"
+}
+
+install_ffmpeg_fallback() {
+  local local_bin="$HOME/.screensync/bin"
+  local tmp_dir
+  tmp_dir="$(mktemp -d)"
+  local arch
+  arch="$(uname -m)"
+  local ff_arch="amd64"
+  if [ "$arch" = "arm64" ]; then ff_arch="arm64"; fi
+  local ffmpeg_zip="$tmp_dir/ffmpeg.zip"
+  local ffprobe_zip="$tmp_dir/ffprobe.zip"
+
+  echo "   ↪️  尝试本地安装 FFmpeg（非 Homebrew）..."
+  if ! curl -fL --connect-timeout 20 --max-time 120 \
+    "https://ffmpeg.martin-riedl.de/redirect/latest/macos/${ff_arch}/release/ffmpeg.zip" \
+    -o "$ffmpeg_zip"; then
+    echo "   ⚠️  主下载源失败，尝试备用源..."
+    curl -fL --connect-timeout 20 --max-time 120 \
+      "https://evermeet.cx/ffmpeg/getrelease/zip" \
+      -o "$ffmpeg_zip" || { rm -rf "$tmp_dir"; return 1; }
+  fi
+
+  if ! curl -fL --connect-timeout 20 --max-time 120 \
+    "https://ffmpeg.martin-riedl.de/redirect/latest/macos/${ff_arch}/release/ffprobe.zip" \
+    -o "$ffprobe_zip"; then
+    echo "   ⚠️  FFprobe 主下载源失败，尝试备用源..."
+    curl -fL --connect-timeout 20 --max-time 120 \
+      "https://evermeet.cx/ffmpeg/getrelease/ffprobe/zip" \
+      -o "$ffprobe_zip" || { rm -rf "$tmp_dir"; return 1; }
+  fi
+
+  unzip -o "$ffmpeg_zip" -d "$local_bin" >/dev/null 2>&1 || { rm -rf "$tmp_dir"; return 1; }
+  unzip -o "$ffprobe_zip" -d "$local_bin" >/dev/null 2>&1 || { rm -rf "$tmp_dir"; return 1; }
+  chmod +x "$local_bin/ffmpeg" "$local_bin/ffprobe" 2>/dev/null || true
+  rm -rf "$tmp_dir"
+  command -v ffmpeg >/dev/null 2>&1
+}
+
+install_gifsicle_fallback() {
+  local local_bin="$HOME/.screensync/bin"
+  local tmp_dir
+  tmp_dir="$(mktemp -d)"
+  local npm_bin=""
+  local npm_proj="$tmp_dir/npm-gifsicle"
+  local npm_candidate=""
+
+  echo "   ↪️  尝试本地安装 Gifsicle（预编译二进制）..."
+  npm_bin="$(resolve_npm_bin || true)"
+  if [ -n "$npm_bin" ]; then
+    mkdir -p "$npm_proj"
+    printf '{\n  "name": "screensync-gifsicle-fallback",\n  "private": true\n}\n' > "$npm_proj/package.json"
+    if (cd "$npm_proj" && "$npm_bin" install gifsicle --omit=dev --no-audit --no-fund --silent >/dev/null 2>&1); then
+      for candidate in \
+        "$npm_proj/node_modules/gifsicle/vendor/gifsicle" \
+        "$npm_proj/node_modules/.bin/gifsicle"; do
+        if [ -x "$candidate" ]; then
+          npm_candidate="$candidate"
+          break
+        fi
+      done
+      if [ -n "$npm_candidate" ]; then
+        cp "$npm_candidate" "$local_bin/gifsicle" 2>/dev/null || true
+        chmod +x "$local_bin/gifsicle" 2>/dev/null || true
+      fi
+    fi
+  fi
+
+  if ! command -v gifsicle >/dev/null 2>&1; then
+    echo "   ⚠️  预编译二进制安装失败，尝试源码编译..."
+    command -v cc >/dev/null 2>&1 || { rm -rf "$tmp_dir"; return 1; }
+    command -v make >/dev/null 2>&1 || { rm -rf "$tmp_dir"; return 1; }
+    curl -fL --connect-timeout 20 --max-time 180 \
+      "https://www.lcdf.org/gifsicle/gifsicle-1.96.tar.gz" | tar xz -C "$tmp_dir" --strip-components=1 || { rm -rf "$tmp_dir"; return 1; }
+    (cd "$tmp_dir" && ./configure --disable-gifview >/dev/null 2>&1 && make -j"$(sysctl -n hw.ncpu 2>/dev/null || echo 4)" >/dev/null 2>&1) || { rm -rf "$tmp_dir"; return 1; }
+    [ -f "$tmp_dir/src/gifsicle" ] || { rm -rf "$tmp_dir"; return 1; }
+    cp "$tmp_dir/src/gifsicle" "$local_bin/gifsicle" || { rm -rf "$tmp_dir"; return 1; }
+    chmod +x "$local_bin/gifsicle" 2>/dev/null || true
+  fi
+
+  rm -rf "$tmp_dir"
+  command -v gifsicle >/dev/null 2>&1
+}
+
+install_imagemagick_fallback() {
+  local local_bin="$HOME/.screensync/bin"
+  local im_dir="$HOME/.screensync/deps/imagemagick"
+  local tmp_dir dmg_path mount_point app_name magick_bin
+  tmp_dir="$(mktemp -d)"
+  dmg_path="$tmp_dir/imagemagick.dmg"
+  mount_point="$tmp_dir/im_mount"
+  mkdir -p "$im_dir" "$local_bin"
+
+  echo "   ↪️  尝试本地安装 ImageMagick（便携 DMG）..."
+  if ! curl -fL --connect-timeout 20 --max-time 180 \
+    "https://mendelson.org/imagemagick.dmg" \
+    -o "$dmg_path"; then
+    curl -fL --connect-timeout 20 --max-time 180 \
+      "https://mendelson.org/PortableImageMagickInstaller.dmg" \
+      -o "$dmg_path" || { rm -rf "$tmp_dir"; return 1; }
+  fi
+
+  mkdir -p "$mount_point"
+  hdiutil attach "$dmg_path" -nobrowse -readonly -mountpoint "$mount_point" >/dev/null 2>&1 || { rm -rf "$tmp_dir"; return 1; }
+  app_name="$(ls "$mount_point" 2>/dev/null | grep -Ei "magick.*\\.app$" | head -n 1 || true)"
+  if [ -z "$app_name" ]; then
+    hdiutil detach "$mount_point" -force >/dev/null 2>&1 || true
+    rm -rf "$tmp_dir"
+    return 1
+  fi
+
+  rm -rf "$im_dir" 2>/dev/null || true
+  mkdir -p "$im_dir"
+  cp -R "$mount_point/$app_name" "$im_dir/" || { hdiutil detach "$mount_point" -force >/dev/null 2>&1 || true; rm -rf "$tmp_dir"; return 1; }
+  hdiutil detach "$mount_point" -force >/dev/null 2>&1 || true
+
+  magick_bin="$im_dir/$app_name/Contents/MacOS/magick"
+  [ -x "$magick_bin" ] || { rm -rf "$tmp_dir"; return 1; }
+  printf '#!/bin/bash\nexec "%s" "$@"\n' "$magick_bin" > "$local_bin/magick"
+  printf '#!/bin/bash\nexec "%s" convert "$@"\n' "$magick_bin" > "$local_bin/convert"
+  chmod +x "$local_bin/magick" "$local_bin/convert" 2>/dev/null || true
+  rm -rf "$tmp_dir"
+  command -v magick >/dev/null 2>&1
+}
+
 cleanup() {
   rm -rf "$TEMP_DIR" 2>/dev/null || true
 }
@@ -533,6 +663,7 @@ fi
 # ─── 12. 检查系统依赖 ────────────────────────────────────────────────────────
 echo ""
 echo -e "${YELLOW}🔍 正在检查系统依赖...${NC}"
+ensure_local_bins_path
 
 MISSING_DEPS=""
 for cmd in ffmpeg gifsicle magick; do
@@ -547,14 +678,81 @@ done
 if [ -n "$MISSING_DEPS" ]; then
   echo -e "${YELLOW}⚠️  缺少系统依赖:${MISSING_DEPS}${NC}"
   if command -v brew &>/dev/null; then
-    echo -e "${YELLOW}📦 正在通过 Homebrew 安装...${NC}"
-    brew install $MISSING_DEPS 2>&1 | tail -5
-    echo -e "${GREEN}✅ 系统依赖安装完成${NC}"
+    echo -e "${YELLOW}📦 正在通过 Homebrew 安装（失败不会中断更新）...${NC}"
+    # Homebrew 在非 Tier 1 环境可能失败。这里改为“尽力安装”，不阻塞主更新流程。
+    set +e
+    BREW_OUTPUT="$(brew install $MISSING_DEPS 2>&1)"
+    BREW_EXIT_CODE=$?
+    set -e
+
+    echo "$BREW_OUTPUT" | tail -20
+
+    STILL_MISSING=""
+    for cmd in ffmpeg gifsicle magick; do
+      if ! command -v "$cmd" &>/dev/null; then
+        case "$cmd" in
+          magick) STILL_MISSING="$STILL_MISSING imagemagick" ;;
+          *)      STILL_MISSING="$STILL_MISSING $cmd" ;;
+        esac
+      fi
+    done
+
+    if [ -z "$STILL_MISSING" ]; then
+      echo -e "${GREEN}✅ 系统依赖安装完成${NC}"
+    else
+      echo -e "${YELLOW}⚠️  Homebrew 安装未完全成功（exit=${BREW_EXIT_CODE}），但更新将继续${NC}"
+      echo -e "${YELLOW}⚠️  仍缺少依赖:${STILL_MISSING}${NC}"
+      echo "   正在尝试本地兜底安装（~/.screensync/bin）..."
+      if echo "$STILL_MISSING" | grep -q "ffmpeg"; then
+        install_ffmpeg_fallback && echo "   ✅ FFmpeg 本地安装成功" || echo "   ❌ FFmpeg 本地安装失败"
+      fi
+      if echo "$STILL_MISSING" | grep -q "gifsicle"; then
+        install_gifsicle_fallback && echo "   ✅ Gifsicle 本地安装成功" || echo "   ❌ Gifsicle 本地安装失败"
+      fi
+      if echo "$STILL_MISSING" | grep -q "imagemagick"; then
+        install_imagemagick_fallback && echo "   ✅ ImageMagick 本地安装成功" || echo "   ❌ ImageMagick 本地安装失败"
+      fi
+
+      ensure_local_bins_path
+      FINAL_MISSING=""
+      for cmd in ffmpeg gifsicle magick; do
+        if ! command -v "$cmd" &>/dev/null; then
+          case "$cmd" in
+            magick) FINAL_MISSING="$FINAL_MISSING imagemagick" ;;
+            *)      FINAL_MISSING="$FINAL_MISSING $cmd" ;;
+          esac
+        fi
+      done
+
+      if [ -z "$FINAL_MISSING" ]; then
+        echo -e "${GREEN}✅ 系统依赖已通过本地兜底安装补齐${NC}"
+      else
+        echo -e "${YELLOW}⚠️  仍缺少依赖:${FINAL_MISSING}${NC}"
+        echo "   不影响脚本更新/重启服务器，但以下功能会受限："
+        echo "   - 缺少 ffmpeg: 视频转 GIF / 视频压缩不可用"
+        echo "   - 缺少 gifsicle: GIF 压缩优化不可用"
+        echo "   - 缺少 imagemagick: 时间线部分导出能力受限"
+        echo ""
+        echo "   可稍后手动安装（任选可用方式）："
+        echo "   1) brew install$FINAL_MISSING"
+        echo "   2) 从官方二进制手动安装并确保在 PATH 中可执行"
+      fi
+    fi
   else
     echo -e "${YELLOW}⚠️  未找到 Homebrew，部分功能可能受限${NC}"
     echo "   可运行以下命令安装 Homebrew:"
     echo '   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
     echo "   安装后运行: brew install$MISSING_DEPS"
+    echo "   同时尝试本地兜底安装..."
+    if echo "$MISSING_DEPS" | grep -q "ffmpeg"; then
+      install_ffmpeg_fallback && echo "   ✅ FFmpeg 本地安装成功" || echo "   ❌ FFmpeg 本地安装失败"
+    fi
+    if echo "$MISSING_DEPS" | grep -q "gifsicle"; then
+      install_gifsicle_fallback && echo "   ✅ Gifsicle 本地安装成功" || echo "   ❌ Gifsicle 本地安装失败"
+    fi
+    if echo "$MISSING_DEPS" | grep -q "imagemagick"; then
+      install_imagemagick_fallback && echo "   ✅ ImageMagick 本地安装成功" || echo "   ❌ ImageMagick 本地安装失败"
+    fi
   fi
 else
   echo -e "${GREEN}✅ 系统依赖完整${NC}"

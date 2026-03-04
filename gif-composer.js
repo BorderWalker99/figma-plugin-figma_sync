@@ -62,6 +62,104 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
     }
   };
 
+  // 导出前视频预处理：先等比缩小到 1/2（偶数尺寸）再进入 GIF 转换
+  const buildHalfScaleVideo = async (sourcePath, tag) => {
+    const halfPath = path.join(tempDir, `half_${tag}.mp4`);
+    const cmd = `ffmpeg -threads 0 -i "${sourcePath}" -vf "scale='trunc(iw/2)*2':'trunc(ih/2)*2':flags=lanczos" -c:v libx264 -preset veryfast -crf 18 -pix_fmt yuv420p -an -movflags +faststart -y "${halfPath}"`;
+    try {
+      await execAsync(cmd, { timeout: 240000, maxBuffer: 120 * 1024 * 1024 });
+      if (fs.existsSync(halfPath) && fs.statSync(halfPath).size > 0) {
+        return halfPath;
+      }
+    } catch (e) {
+      console.warn(`   ⚠️  预缩放失败，回退原视频: ${path.basename(sourcePath)} - ${e.message}`);
+    }
+    return sourcePath;
+  };
+
+  // 导出安全阀：确保结果不是“仅首帧静图”
+  const getGifFrameCount = async (gifPath) => {
+    try {
+      const result = await execAsync(`identify "${gifPath}"`, { timeout: 15000, maxBuffer: 20 * 1024 * 1024 });
+      return String(result.stdout || '').split('\n').filter(Boolean).length;
+    } catch (_) {
+      return 0;
+    }
+  };
+
+  const isMagickCacheExhausted = (err) => {
+    const msg = String((err && err.message) || '');
+    const stderr = String((err && err.stderr) || '');
+    const combined = `${msg}\n${stderr}`.toLowerCase();
+    return combined.includes('cache resources exhausted') || combined.includes('openpixelcache');
+  };
+
+  const parseImageTransform = (imageTransform) => {
+    if (!imageTransform) return null;
+    if (Array.isArray(imageTransform)) return imageTransform;
+    if (typeof imageTransform === 'string') {
+      try { return JSON.parse(imageTransform); } catch (_) { return null; }
+    }
+    return null;
+  };
+
+  const buildResizeVfForImageFill = ({ imageFillInfo, originalW, originalH, gifW, gifH }) => {
+    const fillInfo = imageFillInfo || { scaleMode: 'FILL' };
+    const transform = parseImageTransform(fillInfo.imageTransform);
+
+    if (fillInfo.scaleMode === 'FIT') {
+      return `scale=${gifW}:${gifH}:force_original_aspect_ratio=decrease:flags=lanczos,pad=${gifW}:${gifH}:(ow-iw)/2:(oh-ih)/2:color=black@0`;
+    }
+
+    if (fillInfo.scaleMode === 'CROP') {
+      if (transform && Array.isArray(transform)) {
+        const a = transform[0][0] || 1;
+        const d = transform[1][1] || 1;
+        const tx = transform[0][2] || 0;
+        const ty = transform[1][2] || 0;
+        const scaledW = Math.round(gifW / a);
+        const scaledH = Math.round(gifH / d);
+        const cropOffsetX = Math.max(0, Math.round(tx * scaledW));
+        const cropOffsetY = Math.max(0, Math.round(ty * scaledH));
+        return `scale=${scaledW}:${scaledH}:flags=lanczos,crop=${gifW}:${gifH}:${cropOffsetX}:${cropOffsetY}`;
+      }
+      const cropW = Math.min(originalW, gifW);
+      const cropH = Math.min(originalH, gifH);
+      const cropX = Math.max(0, Math.round((originalW - cropW) / 2));
+      const cropY = Math.max(0, Math.round((originalH - cropH) / 2));
+      const padX = Math.max(0, Math.round((gifW - cropW) / 2));
+      const padY = Math.max(0, Math.round((gifH - cropH) / 2));
+      return `crop=${cropW}:${cropH}:${cropX}:${cropY},pad=${gifW}:${gifH}:${padX}:${padY}:color=black@0`;
+    }
+
+    // FILL 模式：Cover 缩放填满容器
+    const scaleX = gifW / originalW;
+    const scaleY = gifH / originalH;
+    const scale = Math.max(scaleX, scaleY);
+    let scaledW = Math.round(originalW * scale);
+    let scaledH = Math.round(originalH * scale);
+    let cropOffsetX = 0;
+    let cropOffsetY = 0;
+
+    if (transform && Array.isArray(transform)) {
+      const a = transform[0][0] || 1;
+      const d = transform[1][1] || 1;
+      const tx = transform[0][2] || 0;
+      const ty = transform[1][2] || 0;
+      scaledW = Math.round(originalW * scale * (1 / a));
+      scaledH = Math.round(originalH * scale * (1 / d));
+      cropOffsetX = Math.round(tx * scaledW);
+      cropOffsetY = Math.round(ty * scaledH);
+    } else {
+      cropOffsetX = Math.round((scaledW - gifW) / 2);
+      cropOffsetY = Math.round((scaledH - gifH) / 2);
+    }
+
+    cropOffsetX = Math.max(0, Math.min(cropOffsetX, Math.max(0, scaledW - gifW)));
+    cropOffsetY = Math.max(0, Math.min(cropOffsetY, Math.max(0, scaledH - gifH)));
+    return `scale=${scaledW}:${scaledH}:flags=lanczos,crop=${gifW}:${gifH}:${cropOffsetX}:${cropOffsetY}`;
+  };
+
   // 自适应导出参数：在速度/体积/观感之间动态取平衡
   const getAdaptiveProfile = ({ preSizeMB = 0, frameCount = 0, hasVideoLayers = false } = {}) => {
     const fw = Math.max(1, Math.round((frameBounds && frameBounds.width) || 1));
@@ -591,11 +689,12 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
       
       const targetW = Math.round(item.bounds.width);
       const targetH = Math.round(item.bounds.height);
+      const videoSourceForGif = await buildHalfScaleVideo(item.path, `pre_${i}`);
       
       // 🚀 缓存：源视频→GIF 的转换结果（包含目标尺寸+抖动算法+当前帧率上限配置）
       // 这个缓存是安全的，因为它只缓存源视频/GIF 文件本身的转换，
       // 不影响后续的帧合成步骤（帧合成每次都会重新读取所有图层）
-      const fileStats = fs.statSync(item.path);
+      const fileStats = fs.statSync(videoSourceForGif);
       const adaptive = getAdaptiveProfile({
         preSizeMB: fileStats.size / (1024 * 1024),
         hasVideoLayers: true
@@ -604,7 +703,7 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
       const composerSig = `fc${composerCfg.fpsCap || 24}_${composerCfg.fpsCapMedium || 22}_${composerCfg.fpsCapLarge || 20}_${composerCfg.fpsCapXLarge || 16}`;
       // v6: 加入 composer 帧率参数签名，调参后自动失效旧缓存
       const cacheKey = crypto.createHash('md5')
-        .update(`v6_${item.path}_${fileStats.size}_${fileStats.mtime.getTime()}_${targetW}x${targetH}_dither_${ditherMode}_vf${adaptive.videoFpsCap}_${composerSig}_full_l80`)
+        .update(`v7_half_${videoSourceForGif}_${fileStats.size}_${fileStats.mtime.getTime()}_${targetW}x${targetH}_dither_${ditherMode}_vf${adaptive.videoFpsCap}_${composerSig}_full_l80`)
         .digest('hex');
       
       const localFolder = userConfig.getLocalDownloadFolder();
@@ -631,7 +730,7 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
       if (isVideo) {
         // 视频文件：检测帧率
         try {
-          const probeCmd = `ffprobe -v error -select_streams v:0 -show_entries stream=r_frame_rate -of default=noprint_wrappers=1:nokey=1 "${item.path}"`;
+          const probeCmd = `ffprobe -v error -select_streams v:0 -show_entries stream=r_frame_rate -of default=noprint_wrappers=1:nokey=1 "${videoSourceForGif}"`;
           const probeResult = await execAsync(probeCmd, { timeout: 10000 });
           const fpsStr = probeResult.stdout.trim();
           if (fpsStr) {
@@ -658,13 +757,13 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
         : `scale=${targetW}:${targetH}:flags=lanczos`;
       
       // 阶段 1：生成全局最优调色板（轻量级，只输出一张 PNG）
-      const paletteGenCmd = `ffmpeg -threads 0 -i "${item.path}" -vf "${scaleFilter},palettegen=max_colors=256:stats_mode=full" -y "${palettePath}"`;
+      const paletteGenCmd = `ffmpeg -threads 0 -i "${videoSourceForGif}" -vf "${scaleFilter},palettegen=max_colors=256:stats_mode=full" -y "${palettePath}"`;
       await execAsync(paletteGenCmd, { maxBuffer: 50 * 1024 * 1024, timeout: 120000 });
       
       // 阶段 2：用调色板渲染 GIF（尝试硬件加速解码）
       const paletteUseFilter = `${scaleFilter}[v];[v][1:v]paletteuse=dither=${ditherMode}:diff_mode=rectangle`;
-      const ffmpegCmdHwAccel = `ffmpeg -hwaccel videotoolbox -threads 0 -i "${item.path}" -i "${palettePath}" -lavfi "${paletteUseFilter}" -threads 0 "${processedGifPath}" -y`;
-      const ffmpegCmdSoftware = `ffmpeg -threads 0 -i "${item.path}" -i "${palettePath}" -lavfi "${paletteUseFilter}" -threads 0 "${processedGifPath}" -y`;
+      const ffmpegCmdHwAccel = `ffmpeg -hwaccel videotoolbox -vsync 0 -threads 0 -i "${videoSourceForGif}" -i "${palettePath}" -lavfi "${paletteUseFilter}" -threads 0 "${processedGifPath}" -y`;
+      const ffmpegCmdSoftware = `ffmpeg -vsync 0 -threads 0 -i "${videoSourceForGif}" -i "${palettePath}" -lavfi "${paletteUseFilter}" -threads 0 "${processedGifPath}" -y`;
       
       let ffmpegCmd = ffmpegCmdHwAccel;
       const conversionStartTime = Date.now();
@@ -674,6 +773,12 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
       } catch (hwAccelError) {
         ffmpegCmd = ffmpegCmdSoftware;
         await execAsync(ffmpegCmd, { maxBuffer: 200 * 1024 * 1024, timeout: 600000 });
+      }
+
+      // 若出现仅首帧，自动使用软件编码重试一次（兼容部分硬件解码时间戳异常）
+      const frameCount = await getGifFrameCount(processedGifPath);
+      if (frameCount <= 1) {
+        await execAsync(ffmpegCmdSoftware, { maxBuffer: 200 * 1024 * 1024, timeout: 600000 });
       }
       
       const conversionTime = ((Date.now() - conversionStartTime) / 1000).toFixed(1);
@@ -853,7 +958,8 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
       if (!alreadyProcessedSingle && (ext === '.mov' || ext === '.mp4')) {
           const tempProcessedGif = path.join(tempDir, `processed_single.gif`);
           const tempPaletteSingle = path.join(tempDir, `palette_single.png`);
-          const videoStatsSingle = fs.statSync(gifInfo.path);
+          const singleVideoSource = await buildHalfScaleVideo(gifInfo.path, 'single');
+          const videoStatsSingle = fs.statSync(singleVideoSource);
           const adaptiveSingle = getAdaptiveProfile({
             preSizeMB: videoStatsSingle.size / (1024 * 1024),
             hasVideoLayers: true
@@ -863,10 +969,14 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
           try {
               const vfBase = `fps=${adaptiveSingle.videoFpsCap},`;
               // 阶段 1：生成调色板
-              await execAsync(`ffmpeg -threads 0 -i "${gifInfo.path}" -vf "${vfBase}palettegen=max_colors=256:stats_mode=full" -y "${tempPaletteSingle}"`, { timeout: 60000 });
+              await execAsync(`ffmpeg -threads 0 -i "${singleVideoSource}" -vf "${vfBase}palettegen=max_colors=256:stats_mode=full" -y "${tempPaletteSingle}"`, { timeout: 60000 });
               // 阶段 2：渲染 GIF
               const lavfi = `fps=${adaptiveSingle.videoFpsCap}[v];[v][1:v]paletteuse=dither=${ditherMode}:diff_mode=rectangle`;
-              await execAsync(`ffmpeg -threads 0 -i "${gifInfo.path}" -i "${tempPaletteSingle}" -lavfi "${lavfi}" -threads 0 "${tempProcessedGif}" -y`, { timeout: 180000 });
+              await execAsync(`ffmpeg -vsync 0 -threads 0 -i "${singleVideoSource}" -i "${tempPaletteSingle}" -lavfi "${lavfi}" -threads 0 "${tempProcessedGif}" -y`, { timeout: 180000 });
+              const singleFrames = await getGifFrameCount(tempProcessedGif);
+              if (singleFrames <= 1) {
+                await execAsync(`ffmpeg -vsync 0 -threads 0 -i "${singleVideoSource}" -i "${tempPaletteSingle}" -lavfi "${lavfi}" -threads 0 "${tempProcessedGif}" -y`, { timeout: 180000 });
+              }
               if (fs.existsSync(tempPaletteSingle)) fs.unlinkSync(tempPaletteSingle);
               gifInfo.path = tempProcessedGif;
           } catch (e) {
@@ -1452,7 +1562,44 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
           console.error(`   ❌ 步骤1失败: 调整尺寸错误`);
           console.error(`   命令: ${resizeCmd}`);
           if (e.stderr) console.error(`   STDERR: ${e.stderr}`);
-          
+
+          // 关键降级：ImageMagick 在超大 GIF 上可能触发 cache resources exhausted。
+          // 此时自动回退到 FFmpeg 两阶段调色板 resize，避免直接失败。
+          if (isMagickCacheExhausted(e)) {
+            console.warn('   ⚠️  检测到 ImageMagick 缓存耗尽，自动切换 FFmpeg 降级处理...');
+            const fallbackVf = buildResizeVfForImageFill({
+              imageFillInfo,
+              originalW,
+              originalH,
+              gifW,
+              gifH
+            });
+            const fallbackPalette = path.join(tempDir, `resize_fallback_palette_${Date.now()}.png`);
+            try {
+              await execAsync(
+                `ffmpeg -threads 0 -i "${gifInfo.path}" -vf "${fallbackVf},palettegen=max_colors=256:stats_mode=full" -y "${fallbackPalette}"`,
+                { maxBuffer: 80 * 1024 * 1024, timeout: timeout }
+              );
+              await execAsync(
+                `ffmpeg -vsync 0 -threads 0 -i "${gifInfo.path}" -i "${fallbackPalette}" -lavfi "${fallbackVf}[v];[v][1:v]paletteuse=dither=${ditherMode}:diff_mode=rectangle" -y "${tempResizedGif}"`,
+                { maxBuffer: 220 * 1024 * 1024, timeout: timeout }
+              );
+              try { if (fs.existsSync(fallbackPalette)) fs.unlinkSync(fallbackPalette); } catch (_) {}
+              console.log('   ✅ FFmpeg 降级 resize 成功，已绕过 ImageMagick 缓存瓶颈');
+              // 降级成功，不再抛错
+              e = null;
+            } catch (fallbackErr) {
+              try { if (fs.existsSync(fallbackPalette)) fs.unlinkSync(fallbackPalette); } catch (_) {}
+              if (fallbackErr.stderr) {
+                fallbackErr.message += `\nFFmpeg STDERR: ${fallbackErr.stderr}`;
+              }
+              throw fallbackErr;
+            }
+          }
+
+          if (!e) {
+            // 已通过 FFmpeg 降级成功
+          } else {
           // 关键修复: 如果是文件头错误，说明缓存文件损坏，删除它以便下次重新下载
           if (e.stderr && (e.stderr.includes('improper image header') || e.stderr.includes('no decode delegate'))) {
             console.warn(`   ⚠️  检测到损坏的 GIF 缓存，正在删除: ${gifInfo.path}`);
@@ -1466,6 +1613,7 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
           
           if (e.stderr) e.message += `\nSTDERR: ${e.stderr}`;
           throw e;
+          }
         }
       }
       
@@ -1725,7 +1873,8 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
         const ext = path.extname(gifInfo.path).toLowerCase();
         if (!alreadyProcessed && (ext === '.mov' || ext === '.mp4')) {
             const tempProcessedGif = path.join(tempDir, `processed_multi_${i}.gif`);
-            const videoStatsMulti = fs.statSync(gifInfo.path);
+            const multiVideoSource = await buildHalfScaleVideo(gifInfo.path, `multi_${i}`);
+            const videoStatsMulti = fs.statSync(multiVideoSource);
             const adaptiveMulti = getAdaptiveProfile({
               preSizeMB: videoStatsMulti.size / (1024 * 1024),
               hasVideoLayers: true
@@ -1735,9 +1884,9 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
             const tempPaletteMulti = path.join(tempDir, `palette_multi_${i}.png`);
             try {
                 const vfBase = `fps=${adaptiveMulti.videoFpsCap},`;
-                await execAsync(`ffmpeg -threads 0 -i "${gifInfo.path}" -vf "${vfBase}palettegen=max_colors=256:stats_mode=full" -y "${tempPaletteMulti}"`, { timeout: 60000 });
+                await execAsync(`ffmpeg -threads 0 -i "${multiVideoSource}" -vf "${vfBase}palettegen=max_colors=256:stats_mode=full" -y "${tempPaletteMulti}"`, { timeout: 60000 });
                 const lavfi = `fps=${adaptiveMulti.videoFpsCap}[v];[v][1:v]paletteuse=dither=${ditherMode}:diff_mode=rectangle`;
-                await execAsync(`ffmpeg -threads 0 -i "${gifInfo.path}" -i "${tempPaletteMulti}" -lavfi "${lavfi}" -threads 0 "${tempProcessedGif}" -y`, { timeout: 180000 });
+                await execAsync(`ffmpeg -vsync 0 -threads 0 -i "${multiVideoSource}" -i "${tempPaletteMulti}" -lavfi "${lavfi}" -threads 0 "${tempProcessedGif}" -y`, { timeout: 180000 });
                 if (fs.existsSync(tempPaletteMulti)) fs.unlinkSync(tempPaletteMulti);
                 gifInfo.path = tempProcessedGif;
             } catch (e) {
@@ -1945,7 +2094,7 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
           try {
             await execAsync(`ffmpeg -threads 0 -i "${gifInfo.path}" -vf "${resizeVf},palettegen=max_colors=256:stats_mode=full" -y "${rpPath}"`,
               { maxBuffer: 50 * 1024 * 1024, timeout: 60000 });
-            await execAsync(`ffmpeg -threads 0 -i "${gifInfo.path}" -i "${rpPath}" -lavfi "${resizeVf}[v];[v][1:v]paletteuse=dither=${ditherMode}:diff_mode=rectangle" -y "${tempResizedGif}"`,
+            await execAsync(`ffmpeg -vsync 0 -threads 0 -i "${gifInfo.path}" -i "${rpPath}" -lavfi "${resizeVf}[v];[v][1:v]paletteuse=dither=${ditherMode}:diff_mode=rectangle" -y "${tempResizedGif}"`,
               { maxBuffer: 200 * 1024 * 1024, timeout: execOptions.timeout });
             if (fs.existsSync(rpPath)) try { fs.unlinkSync(rpPath); } catch(e){}
             console.log(`      ✅ GIF ${i+1} resize 两阶段调色板完成`);
