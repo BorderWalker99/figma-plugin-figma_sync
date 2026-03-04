@@ -94,6 +94,20 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
     return combined.includes('cache resources exhausted') || combined.includes('openpixelcache');
   };
 
+  const isMagickDecodeDelegateMissing = (err) => {
+    const msg = String((err && err.message) || '');
+    const stderr = String((err && err.stderr) || '');
+    const combined = `${msg}\n${stderr}`.toLowerCase();
+    return combined.includes('no decode delegate for this image format') || combined.includes('no decode delegate');
+  };
+
+  const composeGifWithOverlayViaFfmpeg = async ({ baseGifPath, overlayPath, outputGifPath }) => {
+    const filter = `[0:v][1:v]overlay=0:0:format=auto,split[o1][o2];[o1]palettegen=reserve_transparent=0:stats_mode=full[p];[o2][p]paletteuse=dither=sierra2_4a:diff_mode=rectangle`;
+    const cmd = `ffmpeg -v warning -i "${baseGifPath}" -i "${overlayPath}" -filter_complex "${filter}" -loop 0 -y "${outputGifPath}"`;
+    await execAsync(cmd, { timeout: 300000, maxBuffer: 200 * 1024 * 1024 });
+    return outputGifPath;
+  };
+
   const parseImageTransform = (imageTransform) => {
     if (!imageTransform) return null;
     if (Array.isArray(imageTransform)) return imageTransform;
@@ -1799,7 +1813,20 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
           await execAsync(mergeCmd, { maxBuffer: 50 * 1024 * 1024, timeout: 60000 });
         }
         const compositeCmd = `magick "${baseLayer}" -coalesce null: \\( "${topPng}" \\) -layers composite -loop 0 "${outputPath}"`;
-        await execAsync(compositeCmd, { maxBuffer: 200 * 1024 * 1024, timeout: 300000 });
+        try {
+          await execAsync(compositeCmd, { maxBuffer: 200 * 1024 * 1024, timeout: 300000 });
+        } catch (e) {
+          if (isMagickDecodeDelegateMissing(e)) {
+            console.warn(`   ⚠️  ImageMagick 缺少解码 delegate，回退 FFmpeg 叠层合成: ${e.message}`);
+            await composeGifWithOverlayViaFfmpeg({
+              baseGifPath: baseLayer,
+              overlayPath: topPng,
+              outputGifPath: outputPath
+            });
+          } else {
+            throw e;
+          }
+        }
       } else {
         // 没有上层，直接设置循环并输出
         const outputCmd = `magick "${baseLayer}" -loop 0 "${outputPath}"`;

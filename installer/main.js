@@ -431,6 +431,72 @@ function resolveNodeBinary() {
   return null;
 }
 
+function isUsableNpmBinary(npmPath) {
+  if (!npmPath || typeof npmPath !== 'string') return false;
+  try {
+    if (!path.isAbsolute(npmPath) || !fs.existsSync(npmPath)) return false;
+    require('child_process').execSync(`"${npmPath}" --version`, { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'pipe'] });
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function resolveNpmBinary() {
+  const candidates = [];
+  const found = findExecutable('npm');
+  if (found) candidates.push(found);
+
+  candidates.push(
+    path.join(os.homedir(), '.screensync', 'bin', 'npm'),
+    path.join(os.homedir(), '.screensync', 'deps', 'node', 'bin', 'npm'),
+    '/usr/local/bin/npm',
+    '/opt/homebrew/bin/npm'
+  );
+
+  const seen = new Set();
+  for (const candidate of candidates) {
+    if (!candidate || seen.has(candidate)) continue;
+    seen.add(candidate);
+    if (isUsableNpmBinary(candidate)) return candidate;
+  }
+  return null;
+}
+
+function ensureNpmShimFromNode(nodePath) {
+  if (!isUsableNodeBinary(nodePath)) return false;
+  try {
+    const nodeRoot = path.resolve(path.dirname(nodePath), '..');
+    const candidates = [
+      path.join(nodeRoot, 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+      path.join(nodeRoot, 'node_modules', 'npm', 'bin', 'npm-cli.js')
+    ];
+    const npxCandidates = [
+      path.join(nodeRoot, 'lib', 'node_modules', 'npm', 'bin', 'npx-cli.js'),
+      path.join(nodeRoot, 'node_modules', 'npm', 'bin', 'npx-cli.js')
+    ];
+    const npmCli = candidates.find((p) => fs.existsSync(p));
+    const npxCli = npxCandidates.find((p) => fs.existsSync(p));
+    if (!npmCli) return false;
+
+    fs.mkdirSync(LEGACY_BIN_DIR, { recursive: true });
+    const npmShim = path.join(LEGACY_BIN_DIR, 'npm');
+    fs.writeFileSync(npmShim, `#!/bin/bash\nexec "${nodePath}" "${npmCli}" "$@"\n`, { mode: 0o755 });
+
+    if (npxCli) {
+      const npxShim = path.join(LEGACY_BIN_DIR, 'npx');
+      fs.writeFileSync(npxShim, `#!/bin/bash\nexec "${nodePath}" "${npxCli}" "$@"\n`, { mode: 0o755 });
+    }
+
+    if (!process.env.PATH.includes(LEGACY_BIN_DIR)) {
+      process.env.PATH = `${LEGACY_BIN_DIR}:${process.env.PATH}`;
+    }
+    return isUsableNpmBinary(npmShim);
+  } catch (_) {
+    return false;
+  }
+}
+
 ipcMain.handle('check-homebrew', async () => {
   const darwinVersion = parseInt(os.release().split('.')[0], 10);
   const isLegacyMacOS = darwinVersion < 23;
@@ -472,44 +538,51 @@ ipcMain.handle('check-node', async () => {
   });
 });
 
-ipcMain.handle('check-imagemagick', async () => {
-  return new Promise((resolve) => {
-    // ImageMagick 7 uses 'magick' as the primary binary; 'convert' is legacy/deprecated.
-    const magickPath = findExecutable('magick');
-    if (magickPath) {
-      exec(`"${magickPath}" -version`, (error, stdout, stderr) => {
-        const combined = (stdout || '') + (stderr || '');
-        if (!error && combined.includes('ImageMagick')) {
-          const versionMatch = combined.match(/Version: ImageMagick ([\d.]+)/);
-          const version = versionMatch ? versionMatch[1] : 'unknown';
-          resolve({ installed: true, version: version });
-        } else {
-          // magick found but -version failed, try convert as fallback
-          tryConvertFallback(resolve);
-        }
-      });
-    } else {
-      tryConvertFallback(resolve);
-    }
+async function verifyImageMagickPngHealth(magickPath) {
+  if (!magickPath || !fs.existsSync(magickPath)) {
+    return { ok: false, reason: 'magick-not-found' };
+  }
+  const tmpDir = path.join(os.tmpdir(), `screensync_magick_health_${Date.now()}`);
+  const pngPath = path.join(tmpDir, 'probe.png');
+  const outPath = path.join(tmpDir, 'probe_out.png');
+  fs.mkdirSync(tmpDir, { recursive: true });
 
-    function tryConvertFallback(res) {
-      const convertPath = findExecutable('convert');
-      if (convertPath) {
-        exec(`"${convertPath}" -version`, (error, stdout, stderr) => {
-          const combined = (stdout || '') + (stderr || '');
-          if (!error && combined.includes('ImageMagick')) {
-            const versionMatch = combined.match(/Version: ImageMagick ([\d.]+)/);
-            const version = versionMatch ? versionMatch[1] : 'unknown';
-            res({ installed: true, version: version });
-          } else {
-            res({ installed: false });
-          }
-        });
-      } else {
-        res({ installed: false });
-      }
+  try {
+    await execPromise(`"${magickPath}" -version`, { timeout: 10000 });
+    // 先写后读：同时校验 encode/decode delegate 可用性
+    await execPromise(`"${magickPath}" -size 2x2 xc:none "${pngPath}"`, { timeout: 15000 });
+    await execPromise(`"${magickPath}" "${pngPath}" -resize 1x1 "${outPath}"`, { timeout: 15000 });
+    await execPromise(`"${magickPath}" identify "${outPath}"`, { timeout: 10000 });
+    return { ok: true };
+  } catch (e) {
+    const msg = String(e?.stderr || e?.message || '');
+    if (msg.toLowerCase().includes('no decode delegate')) {
+      return { ok: false, reason: 'png-decode-delegate-missing', details: msg };
     }
-  });
+    return { ok: false, reason: 'magick-runtime-error', details: msg };
+  } finally {
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
+  }
+}
+
+ipcMain.handle('check-imagemagick', async () => {
+  const magickPath = findExecutable('magick') || findExecutable('convert');
+  if (!magickPath) return { installed: false };
+
+  const health = await verifyImageMagickPngHealth(magickPath);
+  if (!health.ok) {
+    return { installed: false, reason: health.reason };
+  }
+
+  try {
+    const { stdout, stderr } = await execPromise(`"${magickPath}" -version`, { timeout: 10000 });
+    const combined = `${stdout || ''}${stderr || ''}`;
+    const versionMatch = combined.match(/Version: ImageMagick ([\d.]+)/);
+    const version = versionMatch ? versionMatch[1] : 'unknown';
+    return { installed: true, version: version };
+  } catch (_) {
+    return { installed: true, version: 'unknown' };
+  }
 });
 
 ipcMain.handle('check-ffmpeg', async () => {
@@ -1065,25 +1138,31 @@ async function installLegacyImageMagick(sendProgress, sendLog) {
     }
 
     if (installed) {
-      try {
-        const { stdout } = await execPromise(`"${path.join(LEGACY_BIN_DIR, 'magick')}" -version`);
-        const ver = stdout.split('\n')[0];
-        sendLog(`   ✅ ${ver}\n`);
-        sendProgress('imagemagick', 'done', '安装完成');
-      } catch (e) {
-        sendLog(`   ⚠️ ImageMagick 二进制文件已安装但无法执行: ${e.message}\n`);
-        sendLog('   可能需要移除 macOS 隔离属性，正在尝试...\n');
+      const legacyMagick = path.join(LEGACY_BIN_DIR, 'magick');
+      let health = await verifyImageMagickPngHealth(legacyMagick);
+      if (!health.ok) {
+        sendLog(`   ⚠️ ImageMagick 健康检查失败: ${health.reason || 'unknown'}\n`);
+        sendLog('   正在尝试移除隔离属性并重新校验...\n');
         try {
           await execPromise(`xattr -rd com.apple.quarantine "${path.join(LEGACY_DEPS_DIR, 'imagemagick')}" 2>/dev/null || true`);
           await execPromise(`xattr -rd com.apple.quarantine "${LEGACY_BIN_DIR}/magick" 2>/dev/null || true`);
           await execPromise(`xattr -rd com.apple.quarantine "${LEGACY_BIN_DIR}/convert" 2>/dev/null || true`);
-          const { stdout: retryOut } = await execPromise(`"${path.join(LEGACY_BIN_DIR, 'magick')}" -version`);
-          sendLog(`   ✅ ${retryOut.split('\n')[0]}\n`);
-          sendProgress('imagemagick', 'done', '安装完成');
-        } catch (e2) {
-          sendLog(`   ❌ ImageMagick 安装后仍无法运行: ${e2.message}\n`);
-          installed = false;
+          health = await verifyImageMagickPngHealth(legacyMagick);
+        } catch (_) {}
+      }
+
+      if (health.ok) {
+        try {
+          const { stdout } = await execPromise(`"${legacyMagick}" -version`);
+          const ver = stdout.split('\n')[0];
+          sendLog(`   ✅ ${ver}\n`);
+        } catch (_) {
+          sendLog('   ✅ ImageMagick 健康检查通过\n');
         }
+        sendProgress('imagemagick', 'done', '安装完成');
+      } else {
+        sendLog(`   ❌ ImageMagick 安装后健康检查仍失败: ${health.reason || 'unknown'}\n`);
+        installed = false;
       }
     }
     
@@ -1591,9 +1670,39 @@ ipcMain.handle('install-dependencies', async (event, installPath) => {
       }
     }
     
-    const npmPath = findExecutable('npm')
+    const darwinVersion = parseInt(os.release().split('.')[0], 10);
+    const isLegacyMacOS = darwinVersion < 23; // Homebrew skipped mode
+    let npmPath = resolveNpmBinary()
       || (process.arch === 'arm64' ? '/opt/homebrew/bin/npm' : '/usr/local/bin/npm');
-    
+
+    if (isLegacyMacOS && !isUsableNpmBinary(npmPath)) {
+      const legacyNode = resolveNodeBinary();
+      if (legacyNode && ensureNpmShimFromNode(legacyNode)) {
+        npmPath = resolveNpmBinary() || npmPath;
+        event.sender.send('install-output', { type: 'stdout', data: '🔧 已从本地 Node 自动修复 npm\n' });
+      }
+    }
+
+    if (isLegacyMacOS && !isUsableNpmBinary(npmPath)) {
+      const sendProgress = (dep, status, message) => {
+        try { event.sender.send('dep-install-progress', { dep, status, message }); } catch (_) {}
+      };
+      const sendLog = (data) => {
+        try { event.sender.send('dep-install-log', { data }); } catch (_) {}
+      };
+      sendLog('⚠️ Legacy 模式下未检测到可用 npm，正在补装本地 Node 运行时...\n');
+      installLegacyNode(sendProgress, sendLog).then(() => {
+        npmPath = resolveNpmBinary() || npmPath;
+      }).catch((e) => {
+        event.sender.send('install-output', { type: 'stderr', data: `❌ 自动补装 Node 失败: ${e.message}\n` });
+      }).finally(() => {
+        proceedWithNpmInstall();
+      });
+      return;
+    }
+    proceedWithNpmInstall();
+
+    function proceedWithNpmInstall() {
     console.log('📦 npm 路径:', npmPath);
 
     // 调试：打印详细的路径信息
@@ -1750,6 +1859,7 @@ ipcMain.handle('install-dependencies', async (event, installPath) => {
         error: `无法启动 npm: ${error.message}\n请确保 Node.js 和 npm 已正确安装。` 
       });
     });
+    }
   });
 });
 

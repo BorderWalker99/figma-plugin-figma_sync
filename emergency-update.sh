@@ -9,7 +9,13 @@
 #   3. 运行: chmod +x emergency-update.sh && ./emergency-update.sh
 # ═══════════════════════════════════════════════════════════════════════════════
 
-set -euo pipefail
+# macOS 默认 Bash 3.2 在 set -u + 数组展开下兼容性较差，容易出现 unbound variable。
+# 为避免用户环境反复报错：Bash 4+ 使用严格模式；Bash 3.x 关闭 -u 但保留关键失败策略。
+if [ "${BASH_VERSINFO:-0}" -ge 4 ] 2>/dev/null; then
+  set -euo pipefail
+else
+  set -eo pipefail
+fi
 
 REPO="BorderWalker99/figma-plugin-figma_sync"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -69,6 +75,125 @@ resolve_npm_bin() {
     fi
   fi
   return 1
+}
+
+ensure_npm_from_node() {
+  local node_bin="$1"
+  if [ -z "${node_bin:-}" ] || [ ! -x "$node_bin" ]; then
+    return 1
+  fi
+
+  local node_root
+  node_root="$(cd "$(dirname "$node_bin")/.." && pwd 2>/dev/null || true)"
+  if [ -z "$node_root" ]; then
+    return 1
+  fi
+
+  local npm_cli=""
+  local npx_cli=""
+  if [ -f "$node_root/lib/node_modules/npm/bin/npm-cli.js" ]; then
+    npm_cli="$node_root/lib/node_modules/npm/bin/npm-cli.js"
+  elif [ -f "$node_root/node_modules/npm/bin/npm-cli.js" ]; then
+    npm_cli="$node_root/node_modules/npm/bin/npm-cli.js"
+  fi
+
+  if [ -f "$node_root/lib/node_modules/npm/bin/npx-cli.js" ]; then
+    npx_cli="$node_root/lib/node_modules/npm/bin/npx-cli.js"
+  elif [ -f "$node_root/node_modules/npm/bin/npx-cli.js" ]; then
+    npx_cli="$node_root/node_modules/npm/bin/npx-cli.js"
+  fi
+
+  if [ -z "$npm_cli" ]; then
+    return 1
+  fi
+
+  mkdir -p "$node_root/bin" 2>/dev/null || true
+  cat > "$node_root/bin/npm" <<EOF
+#!/bin/bash
+exec "$node_bin" "$npm_cli" "\$@"
+EOF
+  chmod +x "$node_root/bin/npm" 2>/dev/null || true
+
+  if [ -n "$npx_cli" ]; then
+    cat > "$node_root/bin/npx" <<EOF
+#!/bin/bash
+exec "$node_bin" "$npx_cli" "\$@"
+EOF
+    chmod +x "$node_root/bin/npx" 2>/dev/null || true
+  fi
+
+  if [ -x "$node_root/bin/npm" ] && "$node_root/bin/npm" --version >/dev/null 2>&1; then
+    return 0
+  fi
+  return 1
+}
+
+install_local_node_with_npm_fallback() {
+  local arch node_arch tmp_dir install_root latest_html tar_name version node_url alt_url
+  arch="$(uname -m)"
+  node_arch="x64"
+  if [ "$arch" = "arm64" ]; then
+    node_arch="arm64"
+  fi
+
+  tmp_dir="$(mktemp -d)"
+  install_root="$HOME/.screensync/deps/node"
+  latest_html="$(curl -fsSL --connect-timeout 15 --max-time 30 "https://nodejs.org/dist/latest-v20.x/" 2>/dev/null || true)"
+  tar_name="$(echo "$latest_html" | grep -oE "node-v[0-9]+\\.[0-9]+\\.[0-9]+-darwin-${node_arch}\\.tar\\.gz" | head -1)"
+  if [ -z "$tar_name" ]; then
+    tar_name="node-v20.19.0-darwin-${node_arch}.tar.gz"
+  fi
+
+  version="$(echo "$tar_name" | sed -E 's/^node-v([0-9]+\.[0-9]+\.[0-9]+)-.*/\1/')"
+  node_url="https://nodejs.org/dist/latest-v20.x/$tar_name"
+  alt_url="https://nodejs.org/dist/v${version}/$tar_name"
+
+  if ! curl -fL --connect-timeout 20 --max-time 180 -o "$tmp_dir/node.tar.gz" "$node_url"; then
+    if ! curl -fL --connect-timeout 20 --max-time 180 -o "$tmp_dir/node.tar.gz" "$alt_url"; then
+      rm -rf "$tmp_dir"
+      return 1
+    fi
+  fi
+
+  rm -rf "${install_root}.tmp" 2>/dev/null || true
+  mkdir -p "${install_root}.tmp"
+  if ! tar -xzf "$tmp_dir/node.tar.gz" -C "${install_root}.tmp" --strip-components=1; then
+    rm -rf "$tmp_dir" "${install_root}.tmp"
+    return 1
+  fi
+
+  rm -rf "$install_root" 2>/dev/null || true
+  mv "${install_root}.tmp" "$install_root"
+  chmod +x "$install_root/bin/node" "$install_root/bin/npm" 2>/dev/null || true
+  rm -rf "$tmp_dir"
+  ensure_local_bins_path
+
+  if [ -x "$install_root/bin/node" ] && [ -x "$install_root/bin/npm" ] && "$install_root/bin/npm" --version >/dev/null 2>&1; then
+    return 0
+  fi
+  return 1
+}
+
+has_required_node_modules() {
+  local node_bin="$1"
+  local project_dir="$2"
+  if [ -z "${node_bin:-}" ] || [ ! -x "$node_bin" ]; then
+    return 1
+  fi
+  if [ ! -f "$project_dir/package.json" ]; then
+    return 1
+  fi
+
+  "$node_bin" -e '
+const fs = require("fs");
+const path = require("path");
+const root = process.argv[1];
+const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
+const deps = Object.keys(pkg.dependencies || {});
+for (const dep of deps) {
+  require.resolve(dep, { paths: [root] });
+}
+' "$project_dir" >/dev/null 2>&1
 }
 
 print_startup_logs() {
@@ -212,7 +337,35 @@ install_imagemagick_fallback() {
   printf '#!/bin/bash\nexec "%s" convert "$@"\n' "$magick_bin" > "$local_bin/convert"
   chmod +x "$local_bin/magick" "$local_bin/convert" 2>/dev/null || true
   rm -rf "$tmp_dir"
-  command -v magick >/dev/null 2>&1
+  verify_imagemagick_health
+}
+
+verify_imagemagick_health() {
+  local tmp_dir probe_in probe_out
+  command -v magick >/dev/null 2>&1 || return 1
+  tmp_dir="$(mktemp -d)"
+  probe_in="$tmp_dir/probe.png"
+  probe_out="$tmp_dir/probe_out.png"
+
+  if ! magick -version >/dev/null 2>&1; then
+    rm -rf "$tmp_dir"
+    return 1
+  fi
+  if ! magick -size 2x2 xc:none "$probe_in" >/dev/null 2>&1; then
+    rm -rf "$tmp_dir"
+    return 1
+  fi
+  if ! magick "$probe_in" -resize 1x1 "$probe_out" >/dev/null 2>&1; then
+    rm -rf "$tmp_dir"
+    return 1
+  fi
+  if ! magick identify "$probe_out" >/dev/null 2>&1; then
+    rm -rf "$tmp_dir"
+    return 1
+  fi
+
+  rm -rf "$tmp_dir"
+  return 0
 }
 
 cleanup() {
@@ -276,35 +429,70 @@ echo ""
 echo -e "${YELLOW}🔍 正在获取最新版本信息...${NC}"
 
 RELEASE_JSON="$TEMP_DIR/release.json"
-HTTP_CODE=$(curl -sL -w "%{http_code}" \
-  -H "Accept: application/vnd.github.v3+json" \
-  -H "User-Agent: ScreenSync-EmergencyUpdate" \
-  --connect-timeout 15 --max-time 30 \
-  "https://api.github.com/repos/$REPO/releases/latest" \
-  -o "$RELEASE_JSON")
+LATEST_TAG=""
+DOWNLOAD_URL=""
 
-if [ "$HTTP_CODE" != "200" ]; then
-  echo -e "${RED}❌ 无法获取版本信息 (HTTP $HTTP_CODE)${NC}"
-  echo "   请检查网络连接，或尝试使用代理"
-  exit 1
+if [ -n "${GITHUB_TOKEN:-}" ]; then
+  HTTP_CODE=$(curl -sL -w "%{http_code}" \
+    -H "Accept: application/vnd.github.v3+json" \
+    -H "User-Agent: ScreenSync-EmergencyUpdate" \
+    -H "Authorization: token ${GITHUB_TOKEN}" \
+    --connect-timeout 15 --max-time 30 \
+    "https://api.github.com/repos/$REPO/releases/latest" \
+    -o "$RELEASE_JSON")
+else
+  HTTP_CODE=$(curl -sL -w "%{http_code}" \
+    -H "Accept: application/vnd.github.v3+json" \
+    -H "User-Agent: ScreenSync-EmergencyUpdate" \
+    --connect-timeout 15 --max-time 30 \
+    "https://api.github.com/repos/$REPO/releases/latest" \
+    -o "$RELEASE_JSON")
 fi
 
-LATEST_TAG=$(python3 -c "import json; d=json.load(open('$RELEASE_JSON')); print(d['tag_name'])")
-echo -e "${GREEN}✅ 最新版本: ${LATEST_TAG}${NC}"
-
-# 查找对应架构的下载链接
-DOWNLOAD_URL=$(python3 -c "
+if [ "$HTTP_CODE" = "200" ]; then
+  LATEST_TAG=$(python3 -c "import json; d=json.load(open('$RELEASE_JSON')); print(d['tag_name'])" 2>/dev/null)
+  DOWNLOAD_URL=$(python3 -c "
 import json
 d = json.load(open('$RELEASE_JSON'))
 for a in d.get('assets', []):
     if '$ASSET_NAME' in a['name']:
         print(a['browser_download_url'])
         break
-")
+" 2>/dev/null)
+fi
+
+if [ -z "$LATEST_TAG" ] || [ -z "$DOWNLOAD_URL" ]; then
+  echo -e "${YELLOW}⚠️  GitHub API 受限 (HTTP $HTTP_CODE)，正在使用备用方式获取版本信息...${NC}"
+  REDIRECT_URL=$(curl -sI -o /dev/null -w "%{redirect_url}" \
+    -H "User-Agent: ScreenSync-EmergencyUpdate" \
+    --connect-timeout 15 --max-time 15 \
+    "https://github.com/$REPO/releases/latest" 2>/dev/null)
+
+  if [ -n "$REDIRECT_URL" ]; then
+    LATEST_TAG=$(echo "$REDIRECT_URL" | grep -oE '[^/]+$')
+  fi
+
+  if [ -z "$LATEST_TAG" ]; then
+    LATEST_TAG=$(curl -sL --max-time 15 \
+      -H "User-Agent: ScreenSync-EmergencyUpdate" \
+      "https://github.com/$REPO/releases/latest" 2>/dev/null \
+      | grep -oE '/releases/tag/[^"]+' | head -1 | grep -oE '[^/]+$')
+  fi
+
+  if [ -z "$LATEST_TAG" ]; then
+    echo -e "${RED}❌ 无法获取版本信息${NC}"
+    echo "   GitHub API 限流或网络异常，请稍后重试"
+    echo "   也可设置环境变量后重试: GITHUB_TOKEN=your_token bash $0"
+    exit 1
+  fi
+
+  DOWNLOAD_URL="https://github.com/$REPO/releases/download/$LATEST_TAG/$ASSET_NAME"
+fi
+
+echo -e "${GREEN}✅ 最新版本: ${LATEST_TAG}${NC}"
 
 if [ -z "$DOWNLOAD_URL" ]; then
-  echo -e "${RED}❌ 未找到 ${ASSET_NAME}，可用的 Assets:${NC}"
-  python3 -c "import json; d=json.load(open('$RELEASE_JSON')); [print('   •', a['name']) for a in d.get('assets', [])]"
+  echo -e "${RED}❌ 未找到 ${ASSET_NAME} 的下载地址${NC}"
   exit 1
 fi
 
@@ -644,6 +832,21 @@ echo -e "${YELLOW}📦 正在安装 Node.js 依赖...${NC}"
 NODE_BIN="$(resolve_node_bin || true)"
 NPM_BIN="$(resolve_npm_bin || true)"
 
+if [ -n "$NODE_BIN" ] && [ -z "$NPM_BIN" ]; then
+  echo -e "${YELLOW}   ⚠️  检测到 Node 但未检测到 npm，正在尝试自动修复...${NC}"
+  if ensure_npm_from_node "$NODE_BIN"; then
+    NPM_BIN="$(resolve_npm_bin || true)"
+  fi
+fi
+
+if [ -n "$NODE_BIN" ] && [ -z "$NPM_BIN" ]; then
+  echo -e "${YELLOW}   ↪️  本地 Node 缺少 npm，正在下载完整 Node 运行时（含 npm）...${NC}"
+  if install_local_node_with_npm_fallback; then
+    NODE_BIN="$(resolve_node_bin || true)"
+    NPM_BIN="$(resolve_npm_bin || true)"
+  fi
+fi
+
 if [ -n "$NODE_BIN" ]; then
   echo "   Node: $NODE_BIN"
 fi
@@ -656,8 +859,14 @@ if [ -n "$NPM_BIN" ]; then
   "$NPM_BIN" install --production --omit=dev --legacy-peer-deps
   echo -e "${GREEN}✅ Node.js 依赖安装完成${NC}"
 else
-  echo -e "${RED}❌ 未找到 npm，请先安装 Node.js（包含 npm）后重试${NC}"
-  exit 1
+  if [ -n "$NODE_BIN" ] && has_required_node_modules "$NODE_BIN" "$SCRIPT_DIR"; then
+    echo -e "${YELLOW}⚠️  未找到 npm，但检测到依赖已就绪，跳过安装步骤${NC}"
+  else
+    echo -e "${RED}❌ 未找到 npm，且依赖不完整，无法继续${NC}"
+    echo "   已尝试本地自动修复（含下载完整 Node+npm）仍失败。"
+    echo "   请检查网络后重试，或手动安装 Node LTS（建议 20.x）后重试。"
+    exit 1
+  fi
 fi
 
 # ─── 12. 检查系统依赖 ────────────────────────────────────────────────────────
@@ -667,6 +876,12 @@ ensure_local_bins_path
 
 MISSING_DEPS=""
 for cmd in ffmpeg gifsicle magick; do
+  if [ "$cmd" = "magick" ]; then
+    if ! verify_imagemagick_health; then
+      MISSING_DEPS="$MISSING_DEPS imagemagick"
+    fi
+    continue
+  fi
   if ! command -v "$cmd" &>/dev/null; then
     case "$cmd" in
       magick) MISSING_DEPS="$MISSING_DEPS imagemagick" ;;
@@ -689,6 +904,12 @@ if [ -n "$MISSING_DEPS" ]; then
 
     STILL_MISSING=""
     for cmd in ffmpeg gifsicle magick; do
+      if [ "$cmd" = "magick" ]; then
+        if ! verify_imagemagick_health; then
+          STILL_MISSING="$STILL_MISSING imagemagick"
+        fi
+        continue
+      fi
       if ! command -v "$cmd" &>/dev/null; then
         case "$cmd" in
           magick) STILL_MISSING="$STILL_MISSING imagemagick" ;;
@@ -716,6 +937,12 @@ if [ -n "$MISSING_DEPS" ]; then
       ensure_local_bins_path
       FINAL_MISSING=""
       for cmd in ffmpeg gifsicle magick; do
+        if [ "$cmd" = "magick" ]; then
+          if ! verify_imagemagick_health; then
+            FINAL_MISSING="$FINAL_MISSING imagemagick"
+          fi
+          continue
+        fi
         if ! command -v "$cmd" &>/dev/null; then
           case "$cmd" in
             magick) FINAL_MISSING="$FINAL_MISSING imagemagick" ;;
@@ -752,6 +979,30 @@ if [ -n "$MISSING_DEPS" ]; then
     fi
     if echo "$MISSING_DEPS" | grep -q "imagemagick"; then
       install_imagemagick_fallback && echo "   ✅ ImageMagick 本地安装成功" || echo "   ❌ ImageMagick 本地安装失败"
+    fi
+
+    ensure_local_bins_path
+    FINAL_MISSING=""
+    for cmd in ffmpeg gifsicle magick; do
+      if [ "$cmd" = "magick" ]; then
+        if ! verify_imagemagick_health; then
+          FINAL_MISSING="$FINAL_MISSING imagemagick"
+        fi
+        continue
+      fi
+      if ! command -v "$cmd" &>/dev/null; then
+        case "$cmd" in
+          magick) FINAL_MISSING="$FINAL_MISSING imagemagick" ;;
+          *)      FINAL_MISSING="$FINAL_MISSING $cmd" ;;
+        esac
+      fi
+    done
+
+    if [ -z "$FINAL_MISSING" ]; then
+      echo -e "${GREEN}✅ 系统依赖已通过本地兜底安装补齐${NC}"
+    else
+      echo -e "${YELLOW}⚠️  仍缺少或异常依赖:${FINAL_MISSING}${NC}"
+      echo "   其中 ImageMagick 需要通过 PNG 读写健康检查才视为可用。"
     fi
   fi
 else
