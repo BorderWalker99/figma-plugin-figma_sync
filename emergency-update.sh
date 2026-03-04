@@ -21,6 +21,70 @@ RED='\033[0;31m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
+resolve_node_bin() {
+  local candidates=(
+    "$HOME/.screensync/deps/node/bin/node"
+    "/usr/local/bin/node"
+    "/opt/homebrew/bin/node"
+  )
+  local c
+  for c in "${candidates[@]}"; do
+    if [ -x "$c" ] && "$c" -v >/dev/null 2>&1; then
+      echo "$c"
+      return 0
+    fi
+  done
+
+  if command -v node >/dev/null 2>&1; then
+    local cmd_node
+    cmd_node="$(command -v node)"
+    if [ -x "$cmd_node" ] && "$cmd_node" -v >/dev/null 2>&1; then
+      echo "$cmd_node"
+      return 0
+    fi
+  fi
+  return 1
+}
+
+resolve_npm_bin() {
+  local candidates=(
+    "$HOME/.screensync/deps/node/bin/npm"
+    "/usr/local/bin/npm"
+    "/opt/homebrew/bin/npm"
+  )
+  local c
+  for c in "${candidates[@]}"; do
+    if [ -x "$c" ] && "$c" --version >/dev/null 2>&1; then
+      echo "$c"
+      return 0
+    fi
+  done
+
+  if command -v npm >/dev/null 2>&1; then
+    local cmd_npm
+    cmd_npm="$(command -v npm)"
+    if [ -x "$cmd_npm" ] && "$cmd_npm" --version >/dev/null 2>&1; then
+      echo "$cmd_npm"
+      return 0
+    fi
+  fi
+  return 1
+}
+
+print_startup_logs() {
+  echo ""
+  echo -e "${YELLOW}📄 启动失败诊断（最近日志）${NC}"
+  if [ -f "$SCRIPT_DIR/server-error.log" ]; then
+    echo "---- $SCRIPT_DIR/server-error.log (tail -40) ----"
+    tail -40 "$SCRIPT_DIR/server-error.log" 2>/dev/null || true
+  fi
+  if [ -f "/tmp/screensync-server-error.log" ]; then
+    echo "---- /tmp/screensync-server-error.log (tail -40) ----"
+    tail -40 /tmp/screensync-server-error.log 2>/dev/null || true
+  fi
+  echo "--------------------------------------------------"
+}
+
 cleanup() {
   rm -rf "$TEMP_DIR" 2>/dev/null || true
 }
@@ -447,9 +511,19 @@ fi
 echo ""
 echo -e "${YELLOW}📦 正在安装 Node.js 依赖...${NC}"
 
-if command -v npm &>/dev/null; then
+NODE_BIN="$(resolve_node_bin || true)"
+NPM_BIN="$(resolve_npm_bin || true)"
+
+if [ -n "$NODE_BIN" ]; then
+  echo "   Node: $NODE_BIN"
+fi
+if [ -n "$NPM_BIN" ]; then
+  echo "   npm : $NPM_BIN"
+fi
+
+if [ -n "$NPM_BIN" ]; then
   cd "$SCRIPT_DIR"
-  npm install --production --omit=dev --legacy-peer-deps
+  "$NPM_BIN" install --production --omit=dev --legacy-peer-deps
   echo -e "${GREEN}✅ Node.js 依赖安装完成${NC}"
 else
   echo -e "${RED}❌ 未找到 npm，请先安装 Node.js（包含 npm）后重试${NC}"
@@ -513,13 +587,13 @@ if [ -f "$PLIST_PATH" ] && [ "$RENAMED" = true ]; then
   " 2>/dev/null || echo "   ⚠️  plist 更新失败，将重新生成"
 fi
 
-# 如果安装了 node 并且有 setup-autostart.js，重新注册 launchd 以确保路径正确
-if command -v node &>/dev/null && [ -f "$SCRIPT_DIR/setup-autostart.js" ]; then
+# 如果可用 node 且有 setup-autostart.js，重新注册 launchd 以确保路径正确
+if [ -n "$NODE_BIN" ] && [ -f "$SCRIPT_DIR/setup-autostart.js" ]; then
   echo "   重新注册 launchd 服务..."
-  node "$SCRIPT_DIR/setup-autostart.js" "$SCRIPT_DIR" 2>/dev/null || true
+  "$NODE_BIN" "$SCRIPT_DIR/setup-autostart.js" "$SCRIPT_DIR" 2>/dev/null || true
   echo -e "${GREEN}✅ 开机自启动已更新${NC}"
 else
-  echo -e "${GREEN}✅ launchd 配置无需更新${NC}"
+  echo -e "${YELLOW}⚠️  未找到可用 Node，跳过 setup-autostart 重新注册${NC}"
 fi
 
 # ─── 13.5 确认启动入口 ───────────────────────────────────────────────────────
@@ -558,6 +632,14 @@ echo ""
 # ─── 15. 重启服务器 ──────────────────────────────────────────────────────────
 echo -e "${YELLOW}🔄 正在启动服务器...${NC}"
 
+if [ -z "${NODE_BIN:-}" ]; then
+  NODE_BIN="$(resolve_node_bin || true)"
+fi
+if [ -z "${NODE_BIN:-}" ]; then
+  echo -e "${RED}❌ 未找到可用 Node.js，无法启动服务器${NC}"
+  exit 1
+fi
+
 PLIST_PATH="$HOME/Library/LaunchAgents/com.screensync.server.plist"
 if [ -f "$PLIST_PATH" ]; then
   launchctl unload "$PLIST_PATH" 2>/dev/null || true
@@ -569,40 +651,51 @@ if [ -f "$PLIST_PATH" ]; then
     else
       echo -e "${YELLOW}⚠️  launchd 已加载但服务未出现，改用直接启动${NC}"
       cd "$SCRIPT_DIR"
-      nohup node "$START_ENTRY" > /dev/null 2>&1 &
+      nohup "$NODE_BIN" "$START_ENTRY" > /tmp/screensync-server.log 2>/tmp/screensync-server-error.log &
       SERVER_PID="$!"
       sleep 2
       if kill -0 "$SERVER_PID" 2>/dev/null; then
         echo -e "${GREEN}✅ 服务器已启动 (PID: $SERVER_PID, 入口: $START_ENTRY)${NC}"
       else
         echo -e "${RED}❌ 服务器启动失败，请检查日志或手动运行: node $START_ENTRY${NC}"
+        print_startup_logs
         exit 1
       fi
     fi
   else
     echo -e "${YELLOW}⚠️  launchd 重启失败，改用直接启动${NC}"
     cd "$SCRIPT_DIR"
-    nohup node "$START_ENTRY" > /dev/null 2>&1 &
+    nohup "$NODE_BIN" "$START_ENTRY" > /tmp/screensync-server.log 2>/tmp/screensync-server-error.log &
     SERVER_PID="$!"
     sleep 2
     if kill -0 "$SERVER_PID" 2>/dev/null; then
       echo -e "${GREEN}✅ 服务器已启动 (PID: $SERVER_PID, 入口: $START_ENTRY)${NC}"
     else
       echo -e "${RED}❌ 服务器启动失败，请检查日志或手动运行: node $START_ENTRY${NC}"
+      print_startup_logs
       exit 1
     fi
   fi
 else
   cd "$SCRIPT_DIR"
-  nohup node "$START_ENTRY" > /dev/null 2>&1 &
+  nohup "$NODE_BIN" "$START_ENTRY" > /tmp/screensync-server.log 2>/tmp/screensync-server-error.log &
   SERVER_PID="$!"
   sleep 2
   if kill -0 "$SERVER_PID" 2>/dev/null; then
     echo -e "${GREEN}✅ 服务器已启动 (PID: $SERVER_PID, 入口: $START_ENTRY)${NC}"
   else
     echo -e "${RED}❌ 服务器启动失败，请检查日志或手动运行: node $START_ENTRY${NC}"
+    print_startup_logs
     exit 1
   fi
+fi
+
+# 最终端口兜底校验，避免“进程存在但 8888 未监听”
+sleep 1
+if ! lsof -i :8888 -sTCP:LISTEN >/dev/null 2>&1; then
+  echo -e "${RED}❌ 服务器进程已启动但 8888 端口未监听${NC}"
+  print_startup_logs
+  exit 1
 fi
 
 echo ""

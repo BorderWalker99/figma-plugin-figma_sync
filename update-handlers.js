@@ -4,7 +4,7 @@
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
-const { exec, spawn } = require('child_process');
+const { exec, spawn, execFileSync } = require('child_process');
 const os = require('os');
 const util = require('util');
 const execPromise = util.promisify(exec);
@@ -171,6 +171,56 @@ async function runWithAdminIfNeeded(command, timeout = 600000) {
     const escaped = escapeAppleScriptString(command);
     return await execPromise(`osascript -e "do shell script \\"${escaped}\\" with administrator privileges"`, { timeout });
   }
+}
+
+function resolveNodeBinaryForUpdate() {
+  addLocalDepsToPath();
+  const candidates = [
+    process.execPath,
+    path.join(os.homedir(), '.screensync', 'deps', 'node', 'bin', 'node'),
+    '/usr/local/bin/node',
+    '/opt/homebrew/bin/node'
+  ];
+
+  for (const candidate of candidates) {
+    if (!candidate || !fs.existsSync(candidate)) continue;
+    try {
+      execFileSync(candidate, ['-v'], { stdio: 'ignore' });
+      return candidate;
+    } catch (_) {}
+  }
+  return null;
+}
+
+function triggerAutostartRepairAfterUpdate() {
+  const setupScript = path.join(__dirname, 'setup-autostart.js');
+  if (!fs.existsSync(setupScript)) {
+    return false;
+  }
+
+  const nodeBin = resolveNodeBinaryForUpdate();
+  if (!nodeBin) {
+    return false;
+  }
+
+  const logFile = path.join(__dirname, '.update-autostart.log');
+  let logFd = null;
+  try {
+    logFd = fs.openSync(logFile, 'a');
+  } catch (_) {}
+
+  const child = spawn(nodeBin, [setupScript, __dirname], {
+    cwd: __dirname,
+    detached: true,
+    stdio: logFd != null ? ['ignore', logFd, logFd] : 'ignore',
+    env: { ...process.env, SCREENSYNC_UPDATE_TRIGGER: '1' }
+  });
+  child.unref();
+
+  if (logFd != null) {
+    try { fs.closeSync(logFd); } catch (_) {}
+  }
+  return true;
 }
 
 async function ensureUpdateDependencies(targetGroup) {
@@ -869,6 +919,7 @@ async function handleFullUpdate(targetGroup, connectionId) {
       allFiles = [
         'server.js',
         'start.js',
+        'media-processing-tuning.js',
         'gif-composer.js',
         'googleDrive.js',
         'drive-watcher.js',
@@ -981,7 +1032,7 @@ async function handleFullUpdate(targetGroup, connectionId) {
       sendToFigma(targetGroup, {
         type: 'update-progress',
         status: 'completed',
-        message: `更新完成！服务器将自动重启...`,
+        message: `正在重连服务器(3-8秒)`,
         updatedCount: updatedCount,
         latestVersion: releaseInfo.tag_name // 发送最新版本号
       });
@@ -990,22 +1041,27 @@ async function handleFullUpdate(targetGroup, connectionId) {
     // 延迟 2 秒后自动重启服务器（让前端收到消息）
     setTimeout(() => {
       console.log(`\n🔄 [Full Update] 正在重启服务器以应用更新...`);
-      
-      // 如果是通过 launchd 运行的，直接退出进程，launchd 会自动重启
-      if (process.env.LAUNCHED_BY_LAUNCHD || fs.existsSync(path.join(os.homedir(), 'Library/LaunchAgents/com.screensync.server.plist'))) {
-        console.log('   ✅ 检测到 launchd 服务，进程退出后将自动重启');
-        process.exit(0); // 正常退出，launchd 会自动重启
-      } else {
-        // 手动运行的情况，使用 spawn 重启
-        console.log('   ✅ 手动重启服务器进程');
-        const { spawn } = require('child_process');
-        const child = spawn(process.argv[0], process.argv.slice(1), {
-          detached: true,
-          stdio: 'ignore'
-        });
-        child.unref();
+
+      // 优先走 setup-autostart 自修复：重建 launchd + 校验 8888 + 失败时直接拉起兜底
+      const autostartTriggered = triggerAutostartRepairAfterUpdate();
+      if (autostartTriggered) {
+        console.log('   ✅ 已触发 setup-autostart 自修复任务（后台执行）');
         process.exit(0);
       }
+
+      // 兜底：setup-autostart 不可用时，按原逻辑重启
+      if (process.env.LAUNCHED_BY_LAUNCHD || fs.existsSync(path.join(os.homedir(), 'Library/LaunchAgents/com.screensync.server.plist'))) {
+        console.log('   ✅ 检测到 launchd 服务，进程退出后将自动重启');
+        process.exit(0);
+      }
+
+      console.log('   ✅ 手动重启服务器进程（兜底）');
+      const child = spawn(process.argv[0], process.argv.slice(1), {
+        detached: true,
+        stdio: 'ignore'
+      });
+      child.unref();
+      process.exit(0);
     }, 2000);
     
     console.log(`   ⏱️  总耗时: ${((Date.now() - updateStartTime) / 1000).toFixed(2)}秒`);
