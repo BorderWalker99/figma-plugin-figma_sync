@@ -1588,6 +1588,14 @@ ipcMain.handle('install-all-dependencies', async (event, dependencyStatus, optio
               reject(err);
             });
           });
+          if (pkg === 'imagemagick') {
+            const magickPath = findExecutable('magick') || findExecutable('convert');
+            const health = await verifyImageMagickPngHealth(magickPath);
+            if (!health.ok) {
+              sendLog(`   ⚠️ Homebrew 安装的 ImageMagick 健康检查失败: ${health.reason || 'unknown'}，改用本地安装模式...\n`);
+              await installViaFallback(pkg, `health-check-failed:${health.reason || 'unknown'}`);
+            }
+          }
         } catch (brewErr) {
           await installViaFallback(pkg, brewErr.message);
         }

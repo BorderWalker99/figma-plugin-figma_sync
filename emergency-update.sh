@@ -302,42 +302,151 @@ install_gifsicle_fallback() {
 install_imagemagick_fallback() {
   local local_bin="$HOME/.screensync/bin"
   local im_dir="$HOME/.screensync/deps/imagemagick"
-  local tmp_dir dmg_path mount_point app_name magick_bin
+  local tmp_dir
   tmp_dir="$(mktemp -d)"
-  dmg_path="$tmp_dir/imagemagick.dmg"
-  mount_point="$tmp_dir/im_mount"
   mkdir -p "$im_dir" "$local_bin"
 
   echo "   ↪️  尝试本地安装 ImageMagick（便携 DMG）..."
-  if ! curl -fL --connect-timeout 20 --max-time 180 \
-    "https://mendelson.org/imagemagick.dmg" \
-    -o "$dmg_path"; then
-    curl -fL --connect-timeout 20 --max-time 180 \
-      "https://mendelson.org/PortableImageMagickInstaller.dmg" \
-      -o "$dmg_path" || { rm -rf "$tmp_dir"; return 1; }
+  if install_imagemagick_from_dmg "https://mendelson.org/imagemagick.dmg" "$tmp_dir" "$im_dir" "$local_bin" || \
+     install_imagemagick_from_dmg "https://mendelson.org/PortableImageMagickInstaller.dmg" "$tmp_dir" "$im_dir" "$local_bin"; then
+    ensure_local_bins_path
+    if verify_imagemagick_health; then
+      rm -rf "$tmp_dir"
+      return 0
+    fi
+    echo "   ⚠️  DMG 安装成功但健康检查失败，继续尝试其他方案..."
   fi
 
+  if [ "$(uname -m)" = "x86_64" ]; then
+    echo "   ↪️  尝试 Intel 预编译包安装 ImageMagick..."
+    if install_imagemagick_from_tarball \
+      "https://download.imagemagick.org/archive/binaries/ImageMagick-x86_64-apple-darwin20.1.0.tar.gz" \
+      "$tmp_dir" "$im_dir" "$local_bin"; then
+      ensure_local_bins_path
+      if verify_imagemagick_health; then
+        rm -rf "$tmp_dir"
+        return 0
+      fi
+      echo "   ⚠️  预编译包安装后健康检查失败，继续尝试源码编译..."
+    fi
+  fi
+
+  echo "   ↪️  尝试源码编译 ImageMagick（最后兜底）..."
+  if install_imagemagick_from_source "$tmp_dir" "$im_dir" "$local_bin"; then
+    ensure_local_bins_path
+    if verify_imagemagick_health; then
+      rm -rf "$tmp_dir"
+      return 0
+    fi
+    echo "   ⚠️  源码编译完成但健康检查失败"
+  fi
+
+  rm -rf "$tmp_dir"
+  return 1
+}
+
+install_imagemagick_from_dmg() {
+  local dmg_url="$1"
+  local tmp_dir="$2"
+  local im_dir="$3"
+  local local_bin="$4"
+  local dmg_path mount_point app_name magick_bin
+
+  dmg_path="$tmp_dir/imagemagick.dmg"
+  mount_point="$tmp_dir/im_mount"
+  rm -f "$dmg_path" 2>/dev/null || true
+  rm -rf "$mount_point" 2>/dev/null || true
+
+  curl -fL --connect-timeout 20 --max-time 180 "$dmg_url" -o "$dmg_path" >/dev/null 2>&1 || return 1
   mkdir -p "$mount_point"
-  hdiutil attach "$dmg_path" -nobrowse -readonly -mountpoint "$mount_point" >/dev/null 2>&1 || { rm -rf "$tmp_dir"; return 1; }
-  app_name="$(ls "$mount_point" 2>/dev/null | grep -Ei "magick.*\\.app$" | head -n 1 || true)"
+  hdiutil attach "$dmg_path" -nobrowse -readonly -mountpoint "$mount_point" >/dev/null 2>&1 || return 1
+
+  app_name="$(python3 -c "import os,re; p='$mount_point'; apps=[n for n in os.listdir(p) if n.lower().endswith('.app') and re.search(r'magick', n, re.I)]; print(apps[0] if apps else '')" 2>/dev/null)"
   if [ -z "$app_name" ]; then
     hdiutil detach "$mount_point" -force >/dev/null 2>&1 || true
-    rm -rf "$tmp_dir"
     return 1
   fi
 
   rm -rf "$im_dir" 2>/dev/null || true
   mkdir -p "$im_dir"
-  cp -R "$mount_point/$app_name" "$im_dir/" || { hdiutil detach "$mount_point" -force >/dev/null 2>&1 || true; rm -rf "$tmp_dir"; return 1; }
+  cp -R "$mount_point/$app_name" "$im_dir/" >/dev/null 2>&1 || { hdiutil detach "$mount_point" -force >/dev/null 2>&1 || true; return 1; }
   hdiutil detach "$mount_point" -force >/dev/null 2>&1 || true
 
   magick_bin="$im_dir/$app_name/Contents/MacOS/magick"
-  [ -x "$magick_bin" ] || { rm -rf "$tmp_dir"; return 1; }
+  [ -x "$magick_bin" ] || return 1
+  xattr -rd com.apple.quarantine "$im_dir/$app_name" >/dev/null 2>&1 || true
   printf '#!/bin/bash\nexec "%s" "$@"\n' "$magick_bin" > "$local_bin/magick"
   printf '#!/bin/bash\nexec "%s" convert "$@"\n' "$magick_bin" > "$local_bin/convert"
   chmod +x "$local_bin/magick" "$local_bin/convert" 2>/dev/null || true
-  rm -rf "$tmp_dir"
-  verify_imagemagick_health
+  return 0
+}
+
+install_imagemagick_from_tarball() {
+  local tar_url="$1"
+  local tmp_dir="$2"
+  local im_dir="$3"
+  local local_bin="$4"
+  local tar_path extract_dir magick_bin
+
+  tar_path="$tmp_dir/imagemagick.tar.gz"
+  extract_dir="$tmp_dir/im_extract"
+  rm -f "$tar_path" 2>/dev/null || true
+  rm -rf "$extract_dir" 2>/dev/null || true
+  mkdir -p "$extract_dir"
+
+  curl -fL --connect-timeout 20 --max-time 240 "$tar_url" -o "$tar_path" >/dev/null 2>&1 || return 1
+  tar xzf "$tar_path" -C "$extract_dir" >/dev/null 2>&1 || return 1
+  magick_bin="$(python3 -c "import os; p='$extract_dir'; out='';\
+for r,_,fs in os.walk(p):\
+  if 'magick' in fs: out=os.path.join(r,'magick'); break;\
+print(out)" 2>/dev/null)"
+  [ -n "$magick_bin" ] && [ -f "$magick_bin" ] || return 1
+
+  rm -rf "$im_dir" 2>/dev/null || true
+  mkdir -p "$im_dir"
+  cp -R "$extract_dir/." "$im_dir/" >/dev/null 2>&1 || return 1
+  magick_bin="$(python3 -c "import os; p='$im_dir'; out='';\
+for r,_,fs in os.walk(p):\
+  if 'magick' in fs: out=os.path.join(r,'magick'); break;\
+print(out)" 2>/dev/null)"
+  [ -n "$magick_bin" ] && [ -f "$magick_bin" ] || return 1
+
+  chmod +x "$magick_bin" >/dev/null 2>&1 || true
+  xattr -rd com.apple.quarantine "$im_dir" >/dev/null 2>&1 || true
+  printf '#!/bin/bash\nexec "%s" "$@"\n' "$magick_bin" > "$local_bin/magick"
+  printf '#!/bin/bash\nexec "%s" convert "$@"\n' "$magick_bin" > "$local_bin/convert"
+  chmod +x "$local_bin/magick" "$local_bin/convert" 2>/dev/null || true
+  return 0
+}
+
+install_imagemagick_from_source() {
+  local tmp_dir="$1"
+  local im_dir="$2"
+  local local_bin="$3"
+  local src_dir magick_bin
+
+  command -v cc >/dev/null 2>&1 || return 1
+  command -v make >/dev/null 2>&1 || return 1
+  xcode-select -p >/dev/null 2>&1 || return 1
+
+  src_dir="$tmp_dir/im_src"
+  rm -rf "$src_dir" 2>/dev/null || true
+  mkdir -p "$src_dir"
+  curl -fL --connect-timeout 20 --max-time 300 \
+    "https://imagemagick.org/archive/ImageMagick.tar.gz" | tar xz -C "$src_dir" --strip-components=1 >/dev/null 2>&1 || return 1
+
+  rm -rf "$im_dir" 2>/dev/null || true
+  mkdir -p "$im_dir"
+  (cd "$src_dir" && ./configure --prefix="$im_dir" --disable-docs --without-modules --without-perl --disable-openmp --with-quantum-depth=16 CFLAGS="-O2" >/dev/null 2>&1) || return 1
+  (cd "$src_dir" && make -j"$(sysctl -n hw.ncpu 2>/dev/null || echo 4)" >/dev/null 2>&1) || return 1
+  (cd "$src_dir" && make install >/dev/null 2>&1) || return 1
+
+  magick_bin="$im_dir/bin/magick"
+  [ -x "$magick_bin" ] || return 1
+  printf '#!/bin/bash\nexec "%s" "$@"\n' "$magick_bin" > "$local_bin/magick"
+  printf '#!/bin/bash\nexec "%s" convert "$@"\n' "$magick_bin" > "$local_bin/convert"
+  chmod +x "$local_bin/magick" "$local_bin/convert" 2>/dev/null || true
+  return 0
 }
 
 verify_imagemagick_health() {
