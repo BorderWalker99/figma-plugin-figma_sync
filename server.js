@@ -66,18 +66,35 @@ const mediaTuning = require('./media-processing-tuning');
   ];
   for (const d of dirs.reverse()) prependPathOnce(d);
 
-  // Set MAGICK_HOME for compiled-from-source ImageMagick
+  // Set MAGICK_HOME / DYLD_LIBRARY_PATH / module paths for bundled ImageMagick
   if (!process.env.MAGICK_HOME) {
-    const runtimeImHome = path.join(__dirname, 'runtime', 'imagemagick');
-    const localImHome = path.join(os.homedir(), '.screensync', 'deps', 'imagemagick');
-    const imHome = fs.existsSync(path.join(runtimeImHome, 'bin', 'magick'))
-      ? runtimeImHome
-      : localImHome;
-    if (fs.existsSync(path.join(imHome, 'bin', 'magick'))) {
-      process.env.MAGICK_HOME = imHome;
-      const imLib = path.join(imHome, 'lib');
-      if (fs.existsSync(imLib)) {
-        process.env.DYLD_LIBRARY_PATH = imLib + (process.env.DYLD_LIBRARY_PATH ? ':' + process.env.DYLD_LIBRARY_PATH : '');
+    const candidates = [
+      path.join(__dirname, 'runtime', archKey),
+      path.join(__dirname, 'runtime', 'imagemagick'),
+      path.join(os.homedir(), '.screensync', 'deps', 'imagemagick')
+    ];
+    for (const imHome of candidates) {
+      if (fs.existsSync(path.join(imHome, 'bin', 'magick'))) {
+        process.env.MAGICK_HOME = imHome;
+        const imLib = path.join(imHome, 'lib');
+        if (fs.existsSync(imLib)) {
+          process.env.DYLD_LIBRARY_PATH = imLib + (process.env.DYLD_LIBRARY_PATH ? ':' + process.env.DYLD_LIBRARY_PATH : '');
+        }
+        const coderDir = path.join(imHome, 'lib', 'ImageMagick', 'modules-Q16HDRI', 'coders');
+        if (fs.existsSync(coderDir)) {
+          process.env.MAGICK_CODER_MODULE_PATH = coderDir;
+        }
+        const filterDir = path.join(imHome, 'lib', 'ImageMagick', 'modules-Q16HDRI', 'filters');
+        if (fs.existsSync(filterDir)) {
+          process.env.MAGICK_CODER_FILTER_PATH = filterDir;
+        }
+        const etcDir = path.join(imHome, 'etc', 'ImageMagick-7');
+        const cfgDir = path.join(imHome, 'lib', 'ImageMagick', 'config-Q16HDRI');
+        const cfgParts = [etcDir, cfgDir].filter(d => fs.existsSync(d));
+        if (cfgParts.length) {
+          process.env.MAGICK_CONFIGURE_PATH = cfgParts.join(':');
+        }
+        break;
       }
     }
   }
@@ -3779,14 +3796,18 @@ wss.on('connection', (ws, req) => {
           connectionId: connectionId,
           shouldCancel: () => cancelFlags.get(connectionId) === true,
           onProgress: (percent, message) => {
-            sendToFigma(targetGroup, {
-              type: 'gif-compose-progress',
-              progress: percent,
-              message: message,
-              exportTraceId,
-              batchIndex: data.batchIndex,
-              batchTotal: data.batchTotal
-            });
+            try {
+              sendToFigma(targetGroup, {
+                type: 'gif-compose-progress',
+                progress: percent,
+                message: message,
+                exportTraceId,
+                batchIndex: data.batchIndex,
+                batchTotal: data.batchTotal
+              });
+            } catch (progressSendErr) {
+              console.warn(`   ⚠️  进度推送失败 (${percent}%): ${progressSendErr.message}`);
+            }
           }
         });
         
@@ -3928,6 +3949,8 @@ wss.on('connection', (ws, req) => {
         console.error('\n❌❌❌ GIF 合成失败 ❌❌❌');
         console.error('   错误类型:', error.name);
         console.error('   错误消息:', error.message);
+        console.error('   arch:', process.arch);
+        console.error('   exportModeLog:', error.exportModeLog || 'N/A');
         console.error('   错误堆栈:', error.stack);
         console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
         

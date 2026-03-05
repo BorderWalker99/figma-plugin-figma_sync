@@ -344,6 +344,7 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
   };
   
   console.log('🎬 开始合成 GIF...');
+  reportProgress(0, '正在初始化导出环境...');
   
   // 1. 定义查找路径和命令
   const archKey = process.arch === 'arm64' ? 'apple' : 'intel';
@@ -354,11 +355,11 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
     path.join(__dirname, 'runtime', 'node', 'bin'),
     path.join(__dirname, 'runtime', archKey, 'node', 'bin'),
     path.join(__dirname, 'runtime', process.arch, 'node', 'bin'),
-    path.join(os.homedir(), '.screensync', 'bin'), // ScreenSync 本地安装 (legacy macOS)
+    path.join(os.homedir(), '.screensync', 'bin'),
     path.join(os.homedir(), '.screensync', 'deps', 'imagemagick', 'bin'),
-    '/opt/homebrew/bin',  // Apple Silicon
-    '/usr/local/bin',     // Intel Mac
-    '/opt/local/bin',     // MacPorts
+    '/opt/homebrew/bin',
+    '/usr/local/bin',
+    '/opt/local/bin',
     '/usr/bin',
     '/bin'
   ];
@@ -371,74 +372,120 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
   }
 
   if (!process.env.MAGICK_HOME) {
-    const runtimeImHome = path.join(__dirname, 'runtime', 'imagemagick');
-    const localImHome = path.join(os.homedir(), '.screensync', 'deps', 'imagemagick');
-    const imHome = fs.existsSync(path.join(runtimeImHome, 'bin', 'magick')) ? runtimeImHome : localImHome;
-    if (fs.existsSync(path.join(imHome, 'bin', 'magick'))) {
-      process.env.MAGICK_HOME = imHome;
+    const candidates = [
+      path.join(__dirname, 'runtime', archKey),
+      path.join(__dirname, 'runtime', 'imagemagick'),
+      path.join(os.homedir(), '.screensync', 'deps', 'imagemagick')
+    ];
+    for (const imHome of candidates) {
+      if (fs.existsSync(path.join(imHome, 'bin', 'magick'))) {
+        process.env.MAGICK_HOME = imHome;
+        const imLib = path.join(imHome, 'lib');
+        if (fs.existsSync(imLib)) {
+          process.env.DYLD_LIBRARY_PATH = imLib + (process.env.DYLD_LIBRARY_PATH ? ':' + process.env.DYLD_LIBRARY_PATH : '');
+        }
+        const coderDir = path.join(imHome, 'lib', 'ImageMagick', 'modules-Q16HDRI', 'coders');
+        if (fs.existsSync(coderDir)) {
+          process.env.MAGICK_CODER_MODULE_PATH = coderDir;
+        }
+        const filterDir = path.join(imHome, 'lib', 'ImageMagick', 'modules-Q16HDRI', 'filters');
+        if (fs.existsSync(filterDir)) {
+          process.env.MAGICK_CODER_FILTER_PATH = filterDir;
+        }
+        const etcDir = path.join(imHome, 'etc', 'ImageMagick-7');
+        const cfgDir = path.join(imHome, 'lib', 'ImageMagick', 'config-Q16HDRI');
+        const cfgParts = [etcDir, cfgDir].filter(d => fs.existsSync(d));
+        if (cfgParts.length) {
+          process.env.MAGICK_CONFIGURE_PATH = cfgParts.join(':');
+        }
+        break;
+      }
     }
   }
 
+  const TOOL_CHECK_TIMEOUT = 10000;
 
+  reportProgress(0, '正在检查 ImageMagick...');
   try {
-    // 3. 直接验证 convert 命令可用性 (绕过 which)
     let convertPath = 'convert';
     let versionOutput = '';
     let found = false;
 
-    // 先尝试直接运行 convert
     try {
-      const result = await execAsync('convert --version');
+      const result = await execAsync('convert --version', { timeout: TOOL_CHECK_TIMEOUT });
       versionOutput = result.stdout;
       found = true;
     } catch (e) {
-      // 如果直接运行失败，尝试绝对路径
       for (const searchPath of searchPaths) {
         const fullPath = path.join(searchPath, 'convert');
         if (fs.existsSync(fullPath)) {
           try {
-            const result = await execAsync(`"${fullPath}" --version`);
+            const result = await execAsync(`"${fullPath}" --version`, { timeout: TOOL_CHECK_TIMEOUT });
             versionOutput = result.stdout;
-            convertPath = fullPath; // 记录找到的完整路径
-            // 确保这个路径在 PATH 中 (再次确认)
+            convertPath = fullPath;
             if (!process.env.PATH.includes(searchPath)) {
                process.env.PATH = `${searchPath}:${process.env.PATH}`;
             }
             found = true;
             break;
           } catch (err) {
-            // 忽略执行错误
+            console.warn(`   ⚠️  ${fullPath} 检查失败: ${err.message}`);
           }
         }
       }
     }
 
     if (!found) {
-      throw new Error('无法执行 convert 命令');
-    }
-    
-    // 4. 检查是否真的是 ImageMagick
-    const versionLine = versionOutput.split('\n')[0].trim();
-    if (!versionLine.toLowerCase().includes('imagemagick')) {
-      console.warn('⚠️ convert 可能不是 ImageMagick');
+      // 尝试 magick 命令（ImageMagick 7+）
+      try {
+        const magickResult = await execAsync('magick --version', { timeout: TOOL_CHECK_TIMEOUT });
+        versionOutput = magickResult.stdout;
+        found = true;
+        console.log('   ✅ 找到 magick 命令（ImageMagick 7+）');
+      } catch (_) {
+        for (const searchPath of searchPaths) {
+          const fullPath = path.join(searchPath, 'magick');
+          if (fs.existsSync(fullPath)) {
+            try {
+              const result = await execAsync(`"${fullPath}" --version`, { timeout: TOOL_CHECK_TIMEOUT });
+              versionOutput = result.stdout;
+              if (!process.env.PATH.includes(searchPath)) {
+                process.env.PATH = `${searchPath}:${process.env.PATH}`;
+              }
+              found = true;
+              console.log(`   ✅ 找到 magick: ${fullPath}`);
+              break;
+            } catch (err) {
+              console.warn(`   ⚠️  ${fullPath} 检查失败: ${err.message}`);
+            }
+          }
+        }
+      }
     }
 
-    // 5. 验证 identify 命令
+    if (!found) {
+      throw new Error('无法找到 ImageMagick (convert 或 magick)，请确保已安装');
+    }
+    
+    const versionLine = versionOutput.split('\n')[0].trim();
+    if (!versionLine.toLowerCase().includes('imagemagick')) {
+      console.warn('⚠️ convert/magick 可能不是 ImageMagick:', versionLine);
+    } else {
+      console.log(`   ✅ ImageMagick: ${versionLine}`);
+    }
+
     try {
-      await execAsync('identify -version');
+      await execAsync('identify -version', { timeout: TOOL_CHECK_TIMEOUT });
     } catch (e) {
-      // 静默处理
+      // identify 非致命，静默处理
     }
   } catch (e) {
     console.error('\n❌ ImageMagick 未找到！');
     console.error('   错误:', e.message);
-    console.error('');
-    console.error('📋 快速解决方案：');
-    console.error('   1. 重启服务器试试（Ctrl+C 然后 npm start）');
-    console.error('   2. 或运行: brew install imagemagick');
-    console.error('   3. 或运行: brew link imagemagick --force');
-    console.error('');
-    throw new Error('未找到 ImageMagick');
+    console.error('   PATH:', process.env.PATH);
+    console.error('   arch:', process.arch, '→ archKey:', archKey);
+    reportProgress(0, `导出失败: ImageMagick 未找到 (${e.message})`);
+    throw new Error(`未找到 ImageMagick: ${e.message}\n请运行安装器或 emergency-update.sh 重装依赖`);
   }
   
   // 1. 获取必要的配置 (userConfig injected via factory)

@@ -34,16 +34,34 @@ const { checkUpdateAsync } = require('./update-manager');
   for (const p of [localBin, localNodeBin, localImBin].reverse()) prependPathOnce(p);
 
   if (!process.env.MAGICK_HOME) {
-    const runtimeImHome = path.join(__dirname, 'runtime', 'imagemagick');
-    const localImHome = path.join(os.homedir(), '.screensync', 'deps', 'imagemagick');
-    const imHome = fs.existsSync(path.join(runtimeImHome, 'bin', 'magick'))
-      ? runtimeImHome
-      : localImHome;
-    if (fs.existsSync(path.join(imHome, 'bin', 'magick'))) {
-      process.env.MAGICK_HOME = imHome;
-      const imLib = path.join(imHome, 'lib');
-      if (fs.existsSync(imLib)) {
-        process.env.DYLD_LIBRARY_PATH = imLib + (process.env.DYLD_LIBRARY_PATH ? ':' + process.env.DYLD_LIBRARY_PATH : '');
+    const archKeyLocal = process.arch === 'arm64' ? 'apple' : 'intel';
+    const candidates = [
+      path.join(__dirname, 'runtime', archKeyLocal),
+      path.join(__dirname, 'runtime', 'imagemagick'),
+      path.join(os.homedir(), '.screensync', 'deps', 'imagemagick')
+    ];
+    for (const imHome of candidates) {
+      if (fs.existsSync(path.join(imHome, 'bin', 'magick'))) {
+        process.env.MAGICK_HOME = imHome;
+        const imLib = path.join(imHome, 'lib');
+        if (fs.existsSync(imLib)) {
+          process.env.DYLD_LIBRARY_PATH = imLib + (process.env.DYLD_LIBRARY_PATH ? ':' + process.env.DYLD_LIBRARY_PATH : '');
+        }
+        const coderDir = path.join(imHome, 'lib', 'ImageMagick', 'modules-Q16HDRI', 'coders');
+        if (fs.existsSync(coderDir)) {
+          process.env.MAGICK_CODER_MODULE_PATH = coderDir;
+        }
+        const filterDir = path.join(imHome, 'lib', 'ImageMagick', 'modules-Q16HDRI', 'filters');
+        if (fs.existsSync(filterDir)) {
+          process.env.MAGICK_CODER_FILTER_PATH = filterDir;
+        }
+        const etcDir = path.join(imHome, 'etc', 'ImageMagick-7');
+        const cfgDir = path.join(imHome, 'lib', 'ImageMagick', 'config-Q16HDRI');
+        const cfgParts = [etcDir, cfgDir].filter(d => fs.existsSync(d));
+        if (cfgParts.length) {
+          process.env.MAGICK_CONFIGURE_PATH = cfgParts.join(':');
+        }
+        break;
       }
     }
   }
