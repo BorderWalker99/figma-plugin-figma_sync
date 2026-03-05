@@ -1,6 +1,6 @@
 // code.js - 智能布局版本
 
-const PLUGIN_VERSION = '1.0.1'; // 插件版本号
+const PLUGIN_VERSION = '1.0.3'; // 插件版本号
 
 
 // 🛡️ 全局错误处理，防止切换文件时崩溃
@@ -920,6 +920,13 @@ figma.ui.onmessage = async (msg) => {
     return;
   }
 
+  if (msg.type === 'export-mode-log') {
+    if (msg.message) {
+      console.log(`⚙️ ${msg.message}`);
+    }
+    return;
+  }
+
   // 处理取消GIF导出
   if (msg.type === 'cancel-gif-export') {
     cancelGifExport = true;
@@ -1708,6 +1715,7 @@ figma.ui.onmessage = async (msg) => {
           frameBackground: frameBackground, // Frame的背景色
           gifInfos: gifInfos, // 所有 GIF 的信息（包含每个 GIF 的 index）
           timelineData: msg.timelineData, // ✅ Pass timeline data
+          exportTraceId: msg.exportTraceId || null,
           batchIndex: i,
           batchTotal: validTasks.length
         };

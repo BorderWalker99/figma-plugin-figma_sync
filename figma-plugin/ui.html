@@ -4920,6 +4920,8 @@
     
     // 日志配置：设为 false 可减少 Figma 控制台日志（降低 Datadog 警告）
     const ENABLE_CONSOLE_LOG = false; // 生产环境建议设为 false
+    let gifExportTraceSeq = 0;
+    let activeGifExportTraceId = null;
 
     // ========== 日志函数 ==========
     function log(msg) {
@@ -4942,6 +4944,23 @@
       } catch (error) {
         // 静默处理日志错误，避免递归
       }
+    }
+
+    function traceGifExport(message, level = 'log') {
+      const text = `[GIF导出追踪] ${message}`;
+      try {
+        if (level === 'error') console.error(text);
+        else if (level === 'warn') console.warn(text);
+        else console.log(text);
+      } catch (_) {}
+      try {
+        parent.postMessage({
+          pluginMessage: {
+            type: 'export-mode-log',
+            message: text
+          }
+        }, '*');
+      } catch (_) {}
     }
 
     // ========== WebSocket连接 ==========
@@ -5580,11 +5599,23 @@
           if (data.progress) {
              updateRealProgress(data.progress, data.message);
           }
+          const traceId = data.exportTraceId || activeGifExportTraceId || 'unknown';
+          if (data.exportModeLog) {
+            traceGifExport(`#${traceId} ${data.exportModeLog} (evaluated=${data.exportModeEvaluated === true ? 'yes' : 'no'})`);
+          }
+          traceGifExport(`#${traceId} 进度 ${Number(data.progress || 0).toFixed(0)}% - ${data.message || '无描述'}`);
         } else if (data.type === 'gif-compose-success') {
+          const traceId = data.exportTraceId || activeGifExportTraceId || 'unknown';
+          if (data.exportModeLog) {
+            traceGifExport(`#${traceId} ${data.exportModeLog} (evaluated=${data.exportModeEvaluated === true ? 'yes' : 'no'})`);
+          } else {
+            traceGifExport(`#${traceId} 导出模式: NOT_REPORTED [success-without-mode-log] (evaluated=${data.exportModeEvaluated === true ? 'yes' : 'no'})`, 'warn');
+          }
           // ⏱️ 在 console 中显示导出耗时
           if (data.exportDurationSeconds) {
             console.log(`✅ 导出成功，耗时 ${data.exportDurationSeconds} 秒`);
           }
+          traceGifExport(`#${traceId} 导出成功 skipped=${data.skipped ? 'yes' : 'no'} duration=${data.exportDurationSeconds || '?'}s`);
           
           handleExportSuccess();
           
@@ -5596,17 +5627,26 @@
           // 标记刚完成导出，这样即使计数没增加，也会优先显示导出状态
           justFinishedExport = true;
           updateStatus('connected', '');
+          activeGifExportTraceId = null;
         } else if (data.type === 'gif-compose-error') {
+          const traceId = data.exportTraceId || activeGifExportTraceId || 'unknown';
           // 取消导出后残余的进程错误，静默忽略
           if (isCancellingExport) {
             handleExportError();
             isCancellingExport = false;
+            traceGifExport(`#${traceId} 导出被取消后收到残余错误，已忽略`, 'warn');
             return;
           }
           
           console.error('❌ 收到服务器错误响应');
           console.error('   错误消息:', data.message || data.error || '未知错误');
           console.error('   完整错误详情:', data.details || '无');
+          if (data.exportModeLog) {
+            traceGifExport(`#${traceId} ${data.exportModeLog} (evaluated=${data.exportModeEvaluated === true ? 'yes' : 'no'})`);
+          } else {
+            traceGifExport(`#${traceId} 导出模式: NOT_REPORTED [error-without-mode-log]`, 'warn');
+          }
+          traceGifExport(`#${traceId} 导出失败: ${data.message || data.error || '未知错误'}`, 'error');
           
           // 检查是否是"未找到文件"的错误
           const errorMsg = data.message || data.error || '';
@@ -5625,8 +5665,17 @@
             // 只在 toast 显示简短错误提示，详细信息在 console
             showToast(t('toast_export_fail'), 'error');
           }
+          activeGifExportTraceId = null;
         } else if (data.type === 'gif-compose-cancelled') {
           // 处理取消确认消息 - UI 已经在 cancelGifExport 中处理了重置，这里不需要额外操作
+          const traceId = data.exportTraceId || activeGifExportTraceId || 'unknown';
+          if (data.exportModeLog) {
+            traceGifExport(`#${traceId} ${data.exportModeLog} (evaluated=${data.exportModeEvaluated === true ? 'yes' : 'no'})`);
+          } else {
+            traceGifExport(`#${traceId} 导出模式: NOT_REPORTED [cancelled-without-mode-log]`, 'warn');
+          }
+          traceGifExport(`#${traceId} 导出已取消`);
+          activeGifExportTraceId = null;
         } else if (data.type === 'sync-mode-info') {
           currentSyncMode = data.mode;
           updateSyncModeDisplay();
@@ -8000,7 +8049,10 @@
           } else {
             // 导出中途上传流程：直接继续导出
             parent.postMessage({
-              pluginMessage: { type: 'export-annotated-gif' }
+              pluginMessage: {
+                type: 'export-annotated-gif',
+                exportTraceId: activeGifExportTraceId
+              }
             }, '*');
           }
         } else {
@@ -8276,7 +8328,8 @@
         parent.postMessage({
           pluginMessage: { 
             type: 'export-annotated-gif',
-            skipServerCheck: msg.skipServerCheck || false
+            skipServerCheck: msg.skipServerCheck || false,
+            exportTraceId: activeGifExportTraceId
           }
         }, '*');
       } else if (msg.type === 'check-server-cache-for-unsynced') {
@@ -8299,10 +8352,12 @@
           // 添加 GIF 算法设置（使用 window 全局变量）
           const algorithmToUse = window.gifAlgorithmSetting || 'smooth_gradient';
           msg.gifAlgorithm = algorithmToUse;
-          console.log(`🎨 [导出] 使用算法: ${algorithmToUse} (${algorithmToUse === 'smooth_gradient' ? '更丝滑渐变 - floyd_steinberg' : '更少噪点 - 无抖动'})`);
+          const traceId = msg.exportTraceId || activeGifExportTraceId || 'unknown';
+          traceGifExport(`#${traceId} 已发送导出请求到服务器, algorithm=${algorithmToUse}, requestMode=auto`);
           ws.send(JSON.stringify(msg));
         } else {
           console.error('   ❌ WebSocket未连接，无法发送消息');
+          traceGifExport(`#${activeGifExportTraceId || 'unknown'} 发送导出请求失败: WebSocket未连接`, 'error');
           showToast(t('toast_server_offline'), 'error');
           // Reset button state
           const exportBtn = document.getElementById('exportGifBtn');
@@ -8313,6 +8368,7 @@
           }
           isExporting = false;
           stopSmoothProgress();
+          activeGifExportTraceId = null;
         }
       } else if (msg.type === 'frame-created') {
         log('✅ 画板已创建');
@@ -9537,11 +9593,14 @@
         
         // Send message to code.js
         // frameId 仅在时间线编辑导出时传递，直接导出使用 Figma 当前选区
+        activeGifExportTraceId = `${Date.now()}-${++gifExportTraceSeq}`;
+        traceGifExport(`#${activeGifExportTraceId} 用户触发导出GIF操作`);
         parent.postMessage({ 
             pluginMessage: { 
                 type: "export-annotated-gif",
                 timelineData: timelineSettings,
-                frameId: timelineSettings ? timelineFrameId : null
+                frameId: timelineSettings ? timelineFrameId : null,
+                exportTraceId: activeGifExportTraceId
             } 
         }, "*");
     }

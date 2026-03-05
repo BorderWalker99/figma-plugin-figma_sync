@@ -272,6 +272,7 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
 
   const normalizedRequestedMode = (exportMode === 'fast' || exportMode === 'quality') ? exportMode : 'auto';
   let _exportModeLogged = false;
+  let _exportModeLogText = '';
 
   // 自适应导出参数：自动按阈值切换 fast/quality，确保超大导出进入极速档。
   const getAdaptiveProfile = ({ preSizeMB = 0, decisionSizeMB = null, frameCount = 0, hasVideoLayers = false } = {}) => {
@@ -325,7 +326,8 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
       const reason = normalizedRequestedMode === 'auto'
         ? `auto(sourceSize=${modeSizeMB.toFixed(1)}MB,pixels=${pixels},frames=${frameCount},score=${Math.round(score)})`
         : `manual(${normalizedRequestedMode})`;
-      console.log(`   ⚙️ 导出模式: ${effectiveMode.toUpperCase()} [${reason}]`);
+      _exportModeLogText = `导出模式: ${effectiveMode.toUpperCase()} [${reason}]`;
+      console.log(`   ⚙️ ${_exportModeLogText}`);
       _exportModeLogged = true;
     }
 
@@ -497,12 +499,17 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
     const stats = fs.statSync(outputPath);
     reportProgress(100, '文件已存在，已跳过');
     _reservedExportNumbers.delete(sequenceNumber); // 🔒 释放预留序号
+    if (!_exportModeLogText) {
+      _exportModeLogText = '导出模式: NOT_EVALUATED [skip(existing-file)]';
+    }
     
     return {
       outputPath,
       filename: outputFilename,
       size: stats.size,
-      skipped: true
+      skipped: true,
+      exportModeLog: _exportModeLogText || null,
+      exportModeEvaluated: _exportModeLogged
     };
   }
   
@@ -3057,7 +3064,9 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
     return {
       outputPath,
       filename: outputFilename,
-      size: stats.size
+      size: stats.size,
+      exportModeLog: _exportModeLogText || null,
+      exportModeEvaluated: _exportModeLogged
     };
     
   } catch (error) {
@@ -3065,7 +3074,10 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
     
     // ✅ 优先检查是否被取消 (如果是取消导致的命令失败，统一视为取消)
     if (error.message === 'GIF_EXPORT_CANCELLED' || (shouldCancel && shouldCancel())) {
-      throw new Error('GIF_EXPORT_CANCELLED');
+      const cancelErr = new Error('GIF_EXPORT_CANCELLED');
+      cancelErr.exportModeLog = _exportModeLogText || '导出模式: NOT_EVALUATED [cancelled-before-decision]';
+      cancelErr.exportModeEvaluated = _exportModeLogged;
+      throw cancelErr;
     }
 
     // 清理临时文件
@@ -3085,7 +3097,10 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
 
     if (isCommandNotFound) {
       console.error('❌ 系统无法找到 ImageMagick 命令');
-      throw new Error('未找到 ImageMagick\n\n请先安装: brew install imagemagick');
+      const cmdErr = new Error('未找到 ImageMagick\n\n请先安装: brew install imagemagick');
+      cmdErr.exportModeLog = _exportModeLogText || '导出模式: NOT_EVALUATED [command-not-found]';
+      cmdErr.exportModeEvaluated = _exportModeLogged;
+      throw cmdErr;
     }
     
     // 如果是 ImageMagick 执行过程中的错误（比如参数不对，或者文件问题）
@@ -3101,9 +3116,17 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
       }
       
       // 不要吞掉原始错误，直接抛出，或者包装一下
-      throw new Error(`GIF 处理失败 (ImageMagick): ${detailedMsg}`);
+      const magickErr = new Error(`GIF 处理失败 (ImageMagick): ${detailedMsg}`);
+      magickErr.exportModeLog = _exportModeLogText || '导出模式: NOT_EVALUATED [magick-error-before-decision]';
+      magickErr.exportModeEvaluated = _exportModeLogged;
+      throw magickErr;
     }
-    
+    if (!error.exportModeLog) {
+      error.exportModeLog = _exportModeLogText || '导出模式: NOT_EVALUATED [failed-before-decision]';
+    }
+    if (typeof error.exportModeEvaluated !== 'boolean') {
+      error.exportModeEvaluated = _exportModeLogged;
+    }
     throw error;
   }
 }

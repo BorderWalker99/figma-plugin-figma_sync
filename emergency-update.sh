@@ -21,7 +21,6 @@ REPO="BorderWalker99/figma-plugin-figma_sync"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BACKUP_DIR="$SCRIPT_DIR/.emergency-backup-$(date +%Y%m%d%H%M%S)"
 TEMP_DIR="$(mktemp -d)"
-HOST_ARCH="$(uname -m)"
 RUNTIME_ARCH_DIR="intel"
 if [ "$HOST_ARCH" = "arm64" ]; then
   RUNTIME_ARCH_DIR="apple"

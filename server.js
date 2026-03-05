@@ -3725,8 +3725,17 @@ wss.on('connection', (ws, req) => {
     if (data.type === 'compose-annotated-gif') {
       // 重置取消标志
       cancelFlags.set(connectionId, false);
+      const exportTraceId = data.exportTraceId || null;
       
       console.log(`\n🎬 收到 GIF 导出请求: ${data.frameName || '未命名'} (${data.gifInfos?.length || 0} 个 GIF)`);
+      sendToFigma(targetGroup, {
+        type: 'gif-compose-progress',
+        progress: 0,
+        message: `导出任务已开始 (requestMode=${(data.exportMode || 'auto').toUpperCase()})`,
+        exportTraceId,
+        exportModeLog: `导出模式: PENDING [requestMode=${data.exportMode || 'auto'}]`,
+        exportModeEvaluated: false
+      });
       
       // 检查并补全缺失的 cacheId（从映射文件）
       if (data.gifInfos) {
@@ -3774,6 +3783,7 @@ wss.on('connection', (ws, req) => {
               type: 'gif-compose-progress',
               progress: percent,
               message: message,
+              exportTraceId,
               batchIndex: data.batchIndex,
               batchTotal: data.batchTotal
             });
@@ -3795,6 +3805,9 @@ wss.on('connection', (ws, req) => {
           outputPath: result.outputPath,
           filename: data.frameName || data.originalFilename,
           skipped: result.skipped || false,
+          exportModeLog: result.exportModeLog || null,
+          exportModeEvaluated: !!result.exportModeEvaluated,
+          exportTraceId,
           exportDuration: exportDuration,
           exportDurationSeconds: durationSeconds
         };
@@ -3859,7 +3872,10 @@ wss.on('connection', (ws, req) => {
           // 发送取消消息到 Figma
           sendToFigma(targetGroup, {
             type: 'gif-compose-cancelled',
-            message: '导出已取消'
+            message: '导出已取消',
+            exportModeLog: error.exportModeLog || '导出模式: NOT_EVALUATED [cancelled]',
+            exportModeEvaluated: typeof error.exportModeEvaluated === 'boolean' ? error.exportModeEvaluated : false,
+            exportTraceId
           });
           
           // 清理临时文件
@@ -3899,6 +3915,13 @@ wss.on('connection', (ws, req) => {
         if (cancelFlags.get(connectionId) === true) {
           console.log('\n🛑 GIF 导出已取消（残余进程错误已忽略）');
           console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+          sendToFigma(targetGroup, {
+            type: 'gif-compose-cancelled',
+            message: '导出已取消',
+            exportModeLog: error.exportModeLog || '导出模式: NOT_EVALUATED [cancelled-residual-error]',
+            exportModeEvaluated: typeof error.exportModeEvaluated === 'boolean' ? error.exportModeEvaluated : false,
+            exportTraceId
+          });
           return;
         }
         
@@ -3932,7 +3955,10 @@ wss.on('connection', (ws, req) => {
           type: 'gif-compose-error',
           message: error.message || '未知错误',
           error: error.message || '未知错误',
-          details: error.stack
+          details: error.stack,
+          exportModeLog: error.exportModeLog || '导出模式: NOT_EVALUATED [error]',
+          exportModeEvaluated: typeof error.exportModeEvaluated === 'boolean' ? error.exportModeEvaluated : false,
+          exportTraceId
         })) {
           console.warn('   ⚠️ 无法发送错误消息：Figma WebSocket未连接');
         }
