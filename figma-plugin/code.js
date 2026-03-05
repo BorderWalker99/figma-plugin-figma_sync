@@ -43,6 +43,13 @@ let currentFrame = null;
 let screenshotCount = 0;
 let screenshotIndex = 0; // 截屏图片计数器
 let screenRecordingIndex = 0; // 录屏计数器
+const SCREENSYNC_FRAME_BASE_NAME = 'ScreenSync Screenshots';
+let activeBatchFrameName = SCREENSYNC_FRAME_BASE_NAME;
+let activeBatchSerial = 1;
+let pendingFirstLooseNodeId = '';
+let waitingSecondScreenshotDecision = false;
+let firstLooseNodeMovedByUser = false;
+let suppressLooseNodeMoveTracking = false;
 let cancelGifExport = false; // GIF导出取消标志
 let serverCheckTimer = null; // Server 缓存检查超时计时器
 let focusNodeTimer = null;
@@ -237,35 +244,30 @@ function addRecentSyncedFile(key, value) {
 // 🛡️ 使用 try-catch 保护，防止切换文件时出错
 function initializeCounters() {
   try {
-    const frame = findFrameByName("ScreenSync Screenshots");
-    if (frame && frame.children) {
+    const frames = listScreenSyncFrames();
+    if (frames.length > 0) {
       let maxScreenshotIndex = 0;
       let maxScreenRecordingIndex = 0;
-      
-      frame.children.forEach(child => {
-        if (child.name) {
-          // 匹配 Screenshot_XXX 格式
-          const screenshotMatch = child.name.match(/^Screenshot_(\d+)$/);
-          if (screenshotMatch) {
-            const index = parseInt(screenshotMatch[1], 10);
-            if (index > maxScreenshotIndex) {
-              maxScreenshotIndex = index;
+      for (const frame of frames) {
+        if (!frame || !frame.children) continue;
+        frame.children.forEach(child => {
+          if (child.name) {
+            const screenshotMatch = child.name.match(/^Screenshot_(\d+)$/);
+            if (screenshotMatch) {
+              const index = parseInt(screenshotMatch[1], 10);
+              if (index > maxScreenshotIndex) maxScreenshotIndex = index;
+            }
+            const recordingMatch = child.name.match(/^ScreenRecording_(\d+)$/);
+            if (recordingMatch) {
+              const index = parseInt(recordingMatch[1], 10);
+              if (index > maxScreenRecordingIndex) maxScreenRecordingIndex = index;
             }
           }
-          
-          // 匹配 ScreenRecording_XXX 格式
-          const recordingMatch = child.name.match(/^ScreenRecording_(\d+)$/);
-          if (recordingMatch) {
-            const index = parseInt(recordingMatch[1], 10);         
-            if (index > maxScreenRecordingIndex) {
-              maxScreenRecordingIndex = index;
-            }
-          }
-        }
-      });
-      
+        });
+      }
       screenshotIndex = maxScreenshotIndex;
       screenRecordingIndex = maxScreenRecordingIndex;
+      syncActiveBatchStateFromCanvas();
     }
   } catch (e) {
     // 初始化计数器时出错（可能正在切换文件）
@@ -345,16 +347,74 @@ function findFrameByName(name) {
   }
 }
 
+function isScreenSyncFrameName(name) {
+  if (!name || typeof name !== 'string') return false;
+  return name === SCREENSYNC_FRAME_BASE_NAME || name.startsWith(`${SCREENSYNC_FRAME_BASE_NAME} #`);
+}
+
+function listScreenSyncFrames() {
+  try {
+    const page = figma.currentPage;
+    if (!page || !page.children) return [];
+    return page.children.filter(node => node.type === 'FRAME' && isScreenSyncFrameName(node.name));
+  } catch (_) {
+    return [];
+  }
+}
+
+function getActiveFrameName() {
+  return activeBatchFrameName || SCREENSYNC_FRAME_BASE_NAME;
+}
+
+function getScreenSyncFrameSerial(name) {
+  if (!isScreenSyncFrameName(name)) return 0;
+  if (name === SCREENSYNC_FRAME_BASE_NAME) return 1;
+  const m = name.match(/#(\d+)$/);
+  if (!m) return 1;
+  const n = parseInt(m[1], 10);
+  return Number.isFinite(n) && n > 0 ? n : 1;
+}
+
+function syncActiveBatchStateFromCanvas() {
+  const frames = listScreenSyncFrames();
+  if (frames.length === 0) {
+    activeBatchSerial = 1;
+    activeBatchFrameName = SCREENSYNC_FRAME_BASE_NAME;
+    return;
+  }
+  let maxSerial = 1;
+  let maxName = SCREENSYNC_FRAME_BASE_NAME;
+  for (const frame of frames) {
+    const serial = getScreenSyncFrameSerial(frame.name || '');
+    if (serial >= maxSerial) {
+      maxSerial = serial;
+      maxName = frame.name || SCREENSYNC_FRAME_BASE_NAME;
+    }
+  }
+  activeBatchSerial = maxSerial;
+  activeBatchFrameName = maxName;
+}
+
+function startNewAutoLayoutBatch() {
+  syncActiveBatchStateFromCanvas();
+  activeBatchSerial += 1;
+  activeBatchFrameName = `${SCREENSYNC_FRAME_BASE_NAME} #${activeBatchSerial}`;
+  currentFrame = null;
+}
+
 // 确保有有效的画板
-function ensureFrame() {
+function ensureFrame(options = {}) {
+  const forceCreateForActiveBatch = !!(options && options.forceCreateForActiveBatch);
   // 先检查当前画板是否有效
-  if (isFrameValid()) {
+  if (!forceCreateForActiveBatch && isFrameValid()) {
     return true;
   }
   
-  // 尝试查找已存在的画板
-  const existingFrame = findFrameByName("ScreenSync Screenshots");
-  if (existingFrame) {
+  const targetFrameName = getActiveFrameName();
+
+  // 尝试查找已存在的画板（强制新建当前批次时跳过）
+  const existingFrame = forceCreateForActiveBatch ? null : findFrameByName(targetFrameName);
+  if (existingFrame && existingFrame.name === targetFrameName) {
     currentFrame = existingFrame;
     
     // 确保画板使用 Auto Layout（如果还没有设置，或者设置不完整）
@@ -407,7 +467,7 @@ function ensureFrame() {
   // 如果没有找到，创建新画板
   try {
     const frame = figma.createFrame();
-    frame.name = "ScreenSync Screenshots";
+    frame.name = targetFrameName;
     
     // 设置 Auto Layout：水平方向，间距10
     frame.layoutMode = 'HORIZONTAL';
@@ -502,6 +562,9 @@ function markLooseFirstScreenshotNode(node) {
     node.setPluginData('screensyncLooseFirst', '1');
     node.setPluginData('screensyncLooseFirstAt', String(Date.now()));
     figma.currentPage.setPluginData(LOOSE_FIRST_NODE_ID_KEY, node.id);
+    pendingFirstLooseNodeId = node.id;
+    waitingSecondScreenshotDecision = true;
+    firstLooseNodeMovedByUser = false;
   } catch (_) {}
 }
 
@@ -511,6 +574,9 @@ function clearLooseFirstScreenshotRef(nodeId) {
     if (!trackedId) return;
     if (!nodeId || trackedId === nodeId) {
       figma.currentPage.setPluginData(LOOSE_FIRST_NODE_ID_KEY, '');
+      pendingFirstLooseNodeId = '';
+      waitingSecondScreenshotDecision = false;
+      firstLooseNodeMovedByUser = false;
     }
   } catch (_) {}
 }
@@ -2068,16 +2134,50 @@ figma.ui.onmessage = async (msg) => {
       if (msg.gifCacheId) {
         rect.setPluginData('gifCacheId', msg.gifCacheId);
       }
-      
-      const looseFirstNode = findLooseFirstScreenshotNode();
-      const shouldUseAutoLayout = isFrameValid() || !!looseFirstNode;
+
+      const existingAutoLayoutFrame = (() => {
+        if (isFrameValid() && currentFrame && currentFrame.layoutMode !== 'NONE') {
+          return currentFrame;
+        }
+        const frames = listScreenSyncFrames();
+        for (const frame of frames) {
+          if (frame && frame.layoutMode && frame.layoutMode !== 'NONE') {
+            return frame;
+          }
+        }
+        return null;
+      })();
+      if (existingAutoLayoutFrame) {
+        currentFrame = existingAutoLayoutFrame;
+      }
+      const frameAlreadyExists = !!existingAutoLayoutFrame;
+      let looseFirstNode = findLooseFirstScreenshotNode();
+      let shouldUseAutoLayout = frameAlreadyExists || !!looseFirstNode;
+
+      // 仅在“第一张 + 第二张”建组阶段判断：
+      // - 若首图被用户手动移动，则第二张不并组
+      // - 否则第二张与第一张进入同一 Auto Layout
+      // - 一旦 Auto Layout 已存在，后续默认直接追加，不再受本规则影响
+      if (!frameAlreadyExists && looseFirstNode) {
+        const shouldSplitSecond = waitingSecondScreenshotDecision &&
+          pendingFirstLooseNodeId &&
+          pendingFirstLooseNodeId === looseFirstNode.id &&
+          firstLooseNodeMovedByUser;
+        if (shouldSplitSecond) {
+          clearLooseFirstScreenshotMark(looseFirstNode);
+          looseFirstNode = null;
+          shouldUseAutoLayout = false;
+        }
+      }
 
       // 第一个图层不进自动布局：直接散放在画布
       if (!shouldUseAutoLayout) {
+        suppressLooseNodeMoveTracking = true;
         markLooseFirstScreenshotNode(rect);
         rect.x = figma.viewport.center.x - (finalWidth / 2);
         rect.y = figma.viewport.center.y - (finalHeight / 2);
         figma.currentPage.appendChild(rect);
+        setTimeout(() => { suppressLooseNodeMoveTracking = false; }, 500);
       } else {
         ensureFrame();
         if (isFrameValid()) {
@@ -2806,6 +2906,18 @@ figma.on('drop', (event) => {
 // 🛡️ 使用 try-catch 包裹整个监听器，防止切换文件时崩溃
 figma.on('documentchange', (event) => {
   try {
+    if (waitingSecondScreenshotDecision && pendingFirstLooseNodeId && !suppressLooseNodeMoveTracking) {
+      const pairingPropertyChanges = event.documentChanges.filter(change => change.type === 'PROPERTY_CHANGE');
+      for (const change of pairingPropertyChanges) {
+        if (change.id !== pendingFirstLooseNodeId) continue;
+        const props = Array.isArray(change.properties) ? change.properties : [];
+        if (props.includes('x') || props.includes('y')) {
+          firstLooseNodeMovedByUser = true;
+          break;
+        }
+      }
+    }
+
     // 🎬 时间线编辑器：检测图层位置变化并实时更新预览
     if (isTimelineEditorOpen && timelineFrameId) {
       // 位置变化 - 只更新位置不更新缩略图

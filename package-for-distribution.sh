@@ -17,6 +17,62 @@ echo -e "${BLUE}║  ScreenSync 用户分发打包脚本          ║${NC}"
 echo -e "${BLUE}║  (双架构独立打包版本)                 ║${NC}"
 echo -e "${BLUE}╚════════════════════════════════════════╝${NC}\n"
 
+require_file() {
+    local file_path="$1"
+    local hint="$2"
+    if [ ! -f "$file_path" ]; then
+        echo -e "${RED}❌ 缺少文件: $file_path${NC}"
+        if [ -n "$hint" ]; then
+            echo -e "${YELLOW}$hint${NC}"
+        fi
+        exit 1
+    fi
+}
+
+require_runtime_arch() {
+    local bin_path="$1"
+    local expected_arch="$2" # x86_64 | arm64
+    if [ ! -x "$bin_path" ]; then
+        echo -e "${RED}❌ 缺少可执行文件: $bin_path${NC}"
+        exit 1
+    fi
+    local info
+    info="$(file "$bin_path" 2>/dev/null || true)"
+    if [[ "$info" != *"$expected_arch"* ]]; then
+        echo -e "${RED}❌ 架构不匹配: $bin_path${NC}"
+        echo -e "${YELLOW}   期望: $expected_arch, 实际: $info${NC}"
+        exit 1
+    fi
+}
+
+resolve_runtime_source() {
+    local arch="$1" # intel / apple
+    local candidates=()
+    if [ "$arch" = "intel" ]; then
+        candidates+=(
+            "./runtime/intel"
+            "./runtime/x64"
+            "./offline-runtime/intel"
+            "./offline-runtime/x64"
+        )
+    else
+        candidates+=(
+            "./runtime/apple"
+            "./runtime/arm64"
+            "./offline-runtime/apple"
+            "./offline-runtime/arm64"
+        )
+    fi
+
+    for d in "${candidates[@]}"; do
+        if [ -d "$d" ] && [ -d "$d/bin" ]; then
+            echo "$d"
+            return 0
+        fi
+    done
+    return 1
+}
+
 # 构建 Electron 安装器 (双架构 DMG)
 echo -e "${YELLOW}🔨 正在构建最新版 GUI 安装器 (Electron)...${NC}"
 cd installer
@@ -81,6 +137,7 @@ create_package() {
     local ARCH_TYPE="$1"
     local DMG_PATH="$2"
     local PACKAGE_NAME="$3"
+    local ARCH_KEY="$4"
     local TEMP_DIR="/tmp/${PACKAGE_NAME}"
     
     echo -e "\n${BLUE}═══════════════════════════════════════════════════════${NC}"
@@ -93,6 +150,7 @@ create_package() {
     fi
     mkdir -p "$TEMP_DIR"
     mkdir -p "$TEMP_DIR/项目文件"
+    mkdir -p "$TEMP_DIR/runtime"
     
     # 1. 复制核心服务器文件
     echo -e "${YELLOW}📄 复制核心服务器文件...${NC}"
@@ -116,6 +174,53 @@ create_package() {
   cp package-lock.json "$TEMP_DIR/项目文件/"
   cp README.md "$TEMP_DIR/项目文件/"
   cp MANUAL_INSTALL_LEGACY.md "$TEMP_DIR/项目文件/" 2>/dev/null || echo "   ⚠️  MANUAL_INSTALL_LEGACY.md not found (optional)"
+
+    # 2.1 复制预置 node_modules（胖包核心）
+    echo -e "${YELLOW}📦 复制预置 node_modules...${NC}"
+    if [ ! -d "node_modules" ]; then
+        echo -e "${RED}❌ 未找到 node_modules，无法构建离线胖包${NC}"
+        echo -e "${YELLOW}请先在项目根目录执行: npm install${NC}"
+        exit 1
+    fi
+    rsync -a \
+      --exclude '.cache/' \
+      --exclude '*.log' \
+      "node_modules/" "$TEMP_DIR/项目文件/node_modules/"
+
+    # 2.2 复制离线运行时 runtime（按架构）
+    echo -e "${YELLOW}🧰 复制离线 runtime (${ARCH_TYPE})...${NC}"
+    local runtime_src
+    runtime_src="$(resolve_runtime_source "$ARCH_KEY" || true)"
+    if [ -z "$runtime_src" ]; then
+        echo -e "${RED}❌ 未找到 ${ARCH_TYPE} 对应 runtime 目录${NC}"
+        echo -e "${YELLOW}请准备以下任一目录（含 bin 子目录）:${NC}"
+        if [ "$ARCH_KEY" = "intel" ]; then
+            echo -e "${YELLOW}  ./runtime/intel  或 ./runtime/x64  或 ./offline-runtime/intel  或 ./offline-runtime/x64${NC}"
+        else
+            echo -e "${YELLOW}  ./runtime/apple  或 ./runtime/arm64 或 ./offline-runtime/apple  或 ./offline-runtime/arm64${NC}"
+        fi
+        exit 1
+    fi
+    rsync -a "$runtime_src/" "$TEMP_DIR/runtime/"
+    require_file "$TEMP_DIR/runtime/bin/node" "runtime/bin/node 必须存在"
+    require_file "$TEMP_DIR/runtime/bin/ffmpeg" "runtime/bin/ffmpeg 必须存在"
+    require_file "$TEMP_DIR/runtime/bin/gifsicle" "runtime/bin/gifsicle 必须存在"
+    if [ ! -f "$TEMP_DIR/runtime/bin/magick" ] && [ ! -f "$TEMP_DIR/runtime/bin/convert" ]; then
+        echo -e "${RED}❌ runtime/bin 下缺少 magick/convert${NC}"
+        exit 1
+    fi
+    local expected_bin_arch="arm64"
+    if [ "$ARCH_KEY" = "intel" ]; then
+        expected_bin_arch="x86_64"
+    fi
+    require_runtime_arch "$TEMP_DIR/runtime/bin/node" "$expected_bin_arch"
+    require_runtime_arch "$TEMP_DIR/runtime/bin/ffmpeg" "$expected_bin_arch"
+    require_runtime_arch "$TEMP_DIR/runtime/bin/gifsicle" "$expected_bin_arch"
+    if [ -f "$TEMP_DIR/runtime/bin/magick" ]; then
+        require_runtime_arch "$TEMP_DIR/runtime/bin/magick" "$expected_bin_arch"
+    else
+        require_runtime_arch "$TEMP_DIR/runtime/bin/convert" "$expected_bin_arch"
+    fi
     
     # 3. 复制对应架构的 DMG (不再需要 .command 脚本, 安装器内部自动清除隔离)
     echo -e "${YELLOW}🖥️  复制 ${ARCH_TYPE} 安装器...${NC}"
@@ -189,7 +294,7 @@ EOF
 
 步骤 2：跟随安装向导
    安装器会自动完成所有配置，包括：
-   - 环境依赖安装（Node.js、FFmpeg 等）
+   - 离线运行时校验（Node.js、ImageMagick、FFmpeg、Gifsicle 已内置）
    - 项目配置
    - 开机自启动设置
 
@@ -334,10 +439,10 @@ EOF
 echo -e "${GREEN}📦 开始打包...${NC}"
 
 # 创建 Intel 版本
-create_package "Intel" "$DMG_INTEL" "ScreenSync-Intel"
+create_package "Intel" "$DMG_INTEL" "ScreenSync-Intel" "intel"
 
 # 创建 Apple Silicon 版本
-create_package "Apple" "$DMG_ARM" "ScreenSync-Apple"
+create_package "Apple" "$DMG_ARM" "ScreenSync-Apple" "apple"
 
 # 显示最终结果
 echo -e "\n${GREEN}╔════════════════════════════════════════════════════════╗${NC}"

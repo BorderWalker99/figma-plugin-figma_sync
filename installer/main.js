@@ -84,6 +84,45 @@ try {
 }
 
 let mainWindow;
+let currentInstallPath = '';
+let bundledRuntimeBinDirs = [];
+
+function resolvePackageRootFromInstallPath(installPath) {
+  if (!installPath || typeof installPath !== 'string') return '';
+  const normalized = path.resolve(installPath);
+  const base = path.basename(normalized);
+  if (base === '项目文件') {
+    return path.dirname(normalized);
+  }
+  return normalized;
+}
+
+function collectBundledRuntimeBinDirs(installPath) {
+  const packageRoot = resolvePackageRootFromInstallPath(installPath);
+  if (!packageRoot) return [];
+  const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
+  const candidates = [
+    path.join(packageRoot, 'runtime', 'bin'),
+    path.join(packageRoot, 'runtime', arch, 'bin'),
+    path.join(packageRoot, 'runtime', process.arch, 'bin'),
+    path.join(packageRoot, 'runtime', 'node', 'bin'),
+    path.join(packageRoot, 'runtime', arch, 'node', 'bin'),
+    path.join(packageRoot, 'runtime', process.arch, 'node', 'bin'),
+    path.join(packageRoot, 'embedded-runtime', 'bin')
+  ];
+  return candidates.filter((dir, index) => candidates.indexOf(dir) === index && fs.existsSync(dir));
+}
+
+function applyBundledRuntimeEnv(installPath) {
+  bundledRuntimeBinDirs = collectBundledRuntimeBinDirs(installPath);
+  if (bundledRuntimeBinDirs.length === 0) return false;
+  for (const binDir of bundledRuntimeBinDirs.slice().reverse()) {
+    if (!process.env.PATH.includes(binDir)) {
+      process.env.PATH = `${binDir}:${process.env.PATH}`;
+    }
+  }
+  return true;
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -165,6 +204,8 @@ ipcMain.handle('get-project-root', async () => {
       const found = findProjectFiles(devDir);
       if (found) {
         console.log('✅ 开发模式: 找到项目根目录:', found);
+        currentInstallPath = found;
+        applyBundledRuntimeEnv(currentInstallPath);
         return found;
       }
       const parent = path.dirname(devDir);
@@ -198,12 +239,16 @@ ipcMain.handle('get-project-root', async () => {
           const found = findProjectFiles(dmgDir);
           if (found) {
             console.log('✅ 通过 DMG 回溯找到项目:', found);
+            currentInstallPath = found;
+            applyBundledRuntimeEnv(currentInstallPath);
             return found;
           }
           // DMG 可能嵌套一层，查父目录
           const parentFound = findProjectFiles(path.dirname(dmgDir));
           if (parentFound) {
             console.log('✅ 通过 DMG 父目录找到项目:', parentFound);
+            currentInstallPath = parentFound;
+            applyBundledRuntimeEnv(currentInstallPath);
             return parentFound;
           }
           console.warn('  ✗ DMG 目录中未找到项目文件:', dmgDir);
@@ -219,6 +264,8 @@ ipcMain.handle('get-project-root', async () => {
   const directFound = findProjectFiles(parentDir);
   if (directFound) {
     console.log('✅ 从 .app 父目录找到项目:', directFound);
+    currentInstallPath = directFound;
+    applyBundledRuntimeEnv(currentInstallPath);
     return directFound;
   }
 
@@ -230,6 +277,8 @@ ipcMain.handle('get-project-root', async () => {
     const upFound = findProjectFiles(searchDir);
     if (upFound) {
       console.log('✅ 从祖先目录找到项目:', upFound);
+      currentInstallPath = upFound;
+      applyBundledRuntimeEnv(currentInstallPath);
       return upFound;
     }
   }
@@ -253,6 +302,8 @@ ipcMain.handle('get-project-root', async () => {
         const found = findProjectFiles(candidate);
         if (found) {
           console.log('✅ 在常见目录中找到项目:', found);
+          currentInstallPath = found;
+          applyBundledRuntimeEnv(currentInstallPath);
           return found;
         }
       }
@@ -282,6 +333,8 @@ ipcMain.handle('select-project-root', async () => {
   // 检查 1: 直接是项目根目录（包含 package.json）
   if (fs.existsSync(path.join(selectedPath, 'package.json'))) {
     console.log('✅ 手动选择的路径有效:', selectedPath);
+    currentInstallPath = selectedPath;
+    applyBundledRuntimeEnv(currentInstallPath);
     return { success: true, path: selectedPath };
   }
   
@@ -289,6 +342,8 @@ ipcMain.handle('select-project-root', async () => {
   const projectFilesPath = path.join(selectedPath, '项目文件');
   if (fs.existsSync(path.join(projectFilesPath, 'package.json'))) {
     console.log('✅ 手动选择的是安装包根目录，自动定位到项目文件:', projectFilesPath);
+    currentInstallPath = projectFilesPath;
+    applyBundledRuntimeEnv(currentInstallPath);
     return { success: true, path: projectFilesPath };
   }
 
@@ -298,8 +353,31 @@ ipcMain.handle('select-project-root', async () => {
   };
 });
 
+ipcMain.handle('set-install-path', async (event, installPath) => {
+  if (!installPath || typeof installPath !== 'string') {
+    return { success: false, error: 'invalid-install-path' };
+  }
+  currentInstallPath = installPath;
+  const runtimeApplied = applyBundledRuntimeEnv(currentInstallPath);
+  return { success: true, runtimeApplied, runtimeBinDirs: bundledRuntimeBinDirs };
+});
+
 // 辅助函数：查找可执行文件并更新 PATH
 function findExecutable(name) {
+  if (currentInstallPath) {
+    applyBundledRuntimeEnv(currentInstallPath);
+  }
+
+  for (const binDir of bundledRuntimeBinDirs) {
+    const fullPath = path.join(binDir, name);
+    if (fs.existsSync(fullPath)) {
+      if (!process.env.PATH.includes(binDir)) {
+        process.env.PATH = `${binDir}:${process.env.PATH}`;
+      }
+      return fullPath;
+    }
+  }
+
   // 1. 优先使用 'which' 命令查找（最准确的方式）
   try {
     const output = require('child_process').execSync(`which ${name}`, { encoding: 'utf8', timeout: 3000 }).trim();
@@ -497,7 +575,15 @@ function ensureNpmShimFromNode(nodePath) {
   }
 }
 
-ipcMain.handle('check-homebrew', async () => {
+ipcMain.handle('check-homebrew', async (event, installPath = null) => {
+  if (installPath) {
+    currentInstallPath = installPath;
+    applyBundledRuntimeEnv(currentInstallPath);
+  }
+  const bundledRuntime = await detectBundledOfflineRuntime(currentInstallPath);
+  if (bundledRuntime && bundledRuntime.available) {
+    return { installed: true, skipped: true, bundled: true };
+  }
   const darwinVersion = parseInt(os.release().split('.')[0], 10);
   const isLegacyMacOS = darwinVersion < 23;
   if (isLegacyMacOS) {
@@ -521,7 +607,11 @@ ipcMain.handle('check-homebrew', async () => {
   }
 });
 
-ipcMain.handle('check-node', async () => {
+ipcMain.handle('check-node', async (event, installPath = null) => {
+  if (installPath) {
+    currentInstallPath = installPath;
+    applyBundledRuntimeEnv(currentInstallPath);
+  }
   return new Promise((resolve) => {
     const nodePath = resolveNodeBinary();
     
@@ -537,6 +627,36 @@ ipcMain.handle('check-node', async () => {
     }
   });
 });
+
+async function detectBundledOfflineRuntime(installPath) {
+  const runtimeDetected = applyBundledRuntimeEnv(installPath || currentInstallPath);
+  if (!runtimeDetected) {
+    return { available: false };
+  }
+
+  const nodePath = resolveNodeBinary();
+  const ffmpegPath = findExecutable('ffmpeg');
+  const gifsiclePath = findExecutable('gifsicle');
+  const magickPath = findExecutable('magick') || findExecutable('convert');
+
+  const hasNode = !!nodePath;
+  const hasFfmpeg = !!ffmpegPath;
+  const hasGifsicle = !!gifsiclePath;
+  let hasImageMagick = !!magickPath;
+  if (hasImageMagick) {
+    const health = await verifyImageMagickPngHealth(magickPath);
+    hasImageMagick = !!health.ok;
+  }
+
+  return {
+    available: hasNode && hasFfmpeg && hasGifsicle && hasImageMagick,
+    runtimeDetected,
+    nodePath,
+    ffmpegPath,
+    gifsiclePath,
+    magickPath
+  };
+}
 
 async function verifyImageMagickPngHealth(magickPath) {
   if (!magickPath || !fs.existsSync(magickPath)) {
@@ -565,7 +685,11 @@ async function verifyImageMagickPngHealth(magickPath) {
   }
 }
 
-ipcMain.handle('check-imagemagick', async () => {
+ipcMain.handle('check-imagemagick', async (event, installPath = null) => {
+  if (installPath) {
+    currentInstallPath = installPath;
+    applyBundledRuntimeEnv(currentInstallPath);
+  }
   const magickPath = findExecutable('magick') || findExecutable('convert');
   if (!magickPath) return { installed: false };
 
@@ -585,7 +709,11 @@ ipcMain.handle('check-imagemagick', async () => {
   }
 });
 
-ipcMain.handle('check-ffmpeg', async () => {
+ipcMain.handle('check-ffmpeg', async (event, installPath = null) => {
+  if (installPath) {
+    currentInstallPath = installPath;
+    applyBundledRuntimeEnv(currentInstallPath);
+  }
   return new Promise((resolve) => {
     const ffmpegPath = findExecutable('ffmpeg');
     
@@ -606,7 +734,11 @@ ipcMain.handle('check-ffmpeg', async () => {
   });
 });
 
-ipcMain.handle('check-gifsicle', async () => {
+ipcMain.handle('check-gifsicle', async (event, installPath = null) => {
+  if (installPath) {
+    currentInstallPath = installPath;
+    applyBundledRuntimeEnv(currentInstallPath);
+  }
   return new Promise((resolve) => {
     const gifsiclePath = findExecutable('gifsicle');
     
@@ -1319,6 +1451,19 @@ async function installLegacyDeps(event, dependencyStatus, options = {}) {
 
 // In-app dependency installation (no Terminal.app needed)
 ipcMain.handle('install-all-dependencies', async (event, dependencyStatus, options = {}) => {
+  const bundledRuntime = await detectBundledOfflineRuntime(currentInstallPath);
+  if (bundledRuntime && bundledRuntime.available) {
+    const sendProgress = (dep, status, message) => {
+      try { event.sender.send('dep-install-progress', { dep, status, message }); } catch (_) {}
+    };
+    sendProgress('homebrew', 'done', '无需安装（离线运行时）');
+    sendProgress('node', 'done', '已使用离线运行时');
+    sendProgress('imagemagick', 'done', '已使用离线运行时');
+    sendProgress('ffmpeg', 'done', '已使用离线运行时');
+    sendProgress('gifsicle', 'done', '已使用离线运行时');
+    return { success: true, message: '已使用离线运行时，跳过依赖安装', bundled: true };
+  }
+
   // Detect macOS version — use legacy direct-download mode for macOS 13 and below
   const darwinVersion = parseInt(os.release().split('.')[0], 10);
   const isLegacyMacOS = darwinVersion < 23; // Darwin 23 = macOS 14
@@ -1613,6 +1758,8 @@ ipcMain.handle('install-dependencies', async (event, installPath) => {
   return new Promise((resolve) => {
     console.log('📦 开始安装依赖...');
     console.log('📂 安装路径:', installPath);
+    currentInstallPath = installPath || currentInstallPath;
+    applyBundledRuntimeEnv(currentInstallPath);
     
     // 严格检查 installPath
     if (!installPath || typeof installPath !== 'string') {
@@ -1655,6 +1802,19 @@ ipcMain.handle('install-dependencies', async (event, installPath) => {
     
     console.log('✅ 找到 package.json');
     
+    // 离线胖包模式：若已包含完整依赖，直接跳过 npm install
+    const bundledRuntimeQuickCheck = bundledRuntimeBinDirs.length > 0 &&
+      !!resolveNodeBinary() &&
+      !!(findExecutable('magick') || findExecutable('convert')) &&
+      !!findExecutable('ffmpeg') &&
+      !!findExecutable('gifsicle');
+    const existingNodeModules = fs.existsSync(nodeModulesPath);
+    if (bundledRuntimeQuickCheck && existingNodeModules) {
+      console.log('✅ 检测到离线胖包运行时 + 预置 node_modules，跳过在线 npm 安装');
+      resolve({ success: true, bundled: true, skippedNpmInstall: true });
+      return;
+    }
+
     // 清理可能的冲突文件
     const lockFilePath = path.join(installPath, 'package-lock.json');
     const nodeModulesPath = path.join(installPath, 'node_modules');

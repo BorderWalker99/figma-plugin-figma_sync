@@ -525,6 +525,57 @@ async function trashFile(fileId, supportsAllDrives = true) {
   }
 }
 
+async function deleteFileImmediately(fileId, supportsAllDrives = true) {
+  if (!fileId || fileId.trim() === '' || fileId === '.') {
+    throw new Error(`deleteFileImmediately 缺少或无效的 fileId: "${fileId}"`);
+  }
+
+  const drive = getDriveClient();
+  const params = { fileId };
+  if (supportsAllDrives) {
+    params.supportsAllDrives = true;
+    params.supportsTeamDrives = true;
+  }
+
+  try {
+    const deletePromise = drive.files.delete(params, { timeout: 15000 });
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('永久删除文件超时（超过15秒）')), 15000);
+    });
+    await Promise.race([deletePromise, timeoutPromise]);
+    return true;
+  } catch (error) {
+    const errorMsg = error.message || String(error);
+    if (errorMsg.includes('File not found') ||
+        errorMsg.includes('not found') ||
+        errorMsg.includes('404') ||
+        errorMsg.includes('does not exist')) {
+      throw new Error(`File not found: ${fileId}`);
+    }
+    throw error;
+  }
+}
+
+async function removeFileFromFolder(fileId, folderId) {
+  if (!fileId || fileId.trim() === '' || fileId === '.') {
+    throw new Error(`removeFileFromFolder 缺少或无效的 fileId: "${fileId}"`);
+  }
+  if (!folderId || folderId.trim() === '') {
+    throw new Error(`removeFileFromFolder 缺少或无效的 folderId: "${folderId}"`);
+  }
+
+  const drive = getDriveClient();
+  const updatePromise = drive.files.update(
+    { fileId, removeParents: folderId, supportsAllDrives: true, supportsTeamDrives: true },
+    { timeout: 15000 }
+  );
+  const timeoutPromise = new Promise((_, reject) => {
+    setTimeout(() => reject(new Error('从文件夹移除文件超时（超过15秒）')), 15000);
+  });
+  await Promise.race([updatePromise, timeoutPromise]);
+  return true;
+}
+
 /**
  * 在指定父文件夹中创建子文件夹
  * @param {string} folderName - 文件夹名称
@@ -723,6 +774,8 @@ module.exports = {
   listFolderFiles,
   downloadFileBuffer,
   trashFile,
+  deleteFileImmediately,
+  removeFileFromFolder,
   createFolder,
   getFileInfo,
   getResumableUploadUrl,

@@ -338,6 +338,19 @@ install_imagemagick_fallback() {
       fi
       echo "   ⚠️  预编译包安装后健康检查失败，继续尝试源码编译..."
     fi
+
+    # 新增保底：从官方 archive/binaries 索引自动挑选可用 Intel 包
+    if within_install_budget; then
+      echo "   ↪️  尝试官方归档索引自动匹配 Intel 安装包..."
+      if install_imagemagick_from_archive_index "$tmp_dir" "$im_dir" "$local_bin"; then
+        ensure_local_bins_path
+        if verify_imagemagick_health; then
+          rm -rf "$tmp_dir"
+          return 0
+        fi
+        echo "   ⚠️  归档索引安装后健康检查失败"
+      fi
+    fi
   fi
 
   if [ "${ENABLE_IMAGEMAGICK_SOURCE_BUILD:-0}" = "1" ]; then
@@ -361,6 +374,54 @@ install_imagemagick_fallback() {
   fi
 
   rm -rf "$tmp_dir"
+  return 1
+}
+
+install_imagemagick_from_archive_index() {
+  local tmp_dir="$1"
+  local im_dir="$2"
+  local local_bin="$3"
+  local index_file urls_file
+  index_file="$tmp_dir/im_archive_index.html"
+  urls_file="$tmp_dir/im_archive_urls.txt"
+
+  rm -f "$index_file" "$urls_file" 2>/dev/null || true
+
+  # 多源拉取目录索引，减少单一域名失败概率
+  if ! curl -fL --connect-timeout 8 --max-time 25 \
+      --retry 2 --retry-delay 1 --retry-all-errors \
+      "https://download.imagemagick.org/archive/binaries/" -o "$index_file" 2>/dev/null; then
+    curl -fL --connect-timeout 8 --max-time 25 \
+      --retry 2 --retry-delay 1 --retry-all-errors \
+      "https://imagemagick.org/archive/binaries/" -o "$index_file" 2>/dev/null || return 1
+  fi
+
+  python3 - "$index_file" "$urls_file" <<'PY'
+import re, sys
+index_path, out_path = sys.argv[1], sys.argv[2]
+text = open(index_path, "r", encoding="utf-8", errors="ignore").read()
+matches = re.findall(r'ImageMagick-x86_64-apple-darwin[0-9.]+\.tar\.gz', text, flags=re.I)
+seen = set()
+ordered = []
+for m in matches:
+    if m not in seen:
+        seen.add(m)
+        ordered.append(m)
+ordered = ordered[:5]
+with open(out_path, "w", encoding="utf-8") as f:
+    for name in ordered:
+        f.write("https://download.imagemagick.org/archive/binaries/" + name + "\n")
+        f.write("https://imagemagick.org/archive/binaries/" + name + "\n")
+PY
+
+  [ -s "$urls_file" ] || return 1
+  while IFS= read -r url; do
+    [ -n "$url" ] || continue
+    echo "      - 尝试: $(basename "$url")"
+    if install_imagemagick_from_tarball "$url" "$tmp_dir" "$im_dir" "$local_bin"; then
+      return 0
+    fi
+  done < "$urls_file"
   return 1
 }
 
@@ -1149,6 +1210,7 @@ if [ -n "$MISSING_DEPS" ]; then
 
   # 复检 + 本地兜底（每个依赖独立处理）
   STILL_MISSING=""
+  MAGICK_SKIPPED="0"
   for dep in $MISSING_DEPS; do
     dep_cmd="$dep"
     [ "$dep" = "imagemagick" ] && dep_cmd="magick"
@@ -1172,10 +1234,20 @@ if [ -n "$MISSING_DEPS" ]; then
         if check_dep_quick "$dep_cmd"; then
           echo -e "   ${GREEN}✅ $dep 安装成功${NC}"
         else
-          STILL_MISSING="$STILL_MISSING $dep"
+          if [ "$dep" = "imagemagick" ] && [ "${ALLOW_SKIP_MAGICK_ON_FAILURE:-1}" = "1" ]; then
+            MAGICK_SKIPPED="1"
+            echo -e "   ${YELLOW}⚠️  $dep 仍不可用，已按策略跳过（后续 GIF 将回退 FFmpeg）${NC}"
+          else
+            STILL_MISSING="$STILL_MISSING $dep"
+          fi
         fi
       else
-        STILL_MISSING="$STILL_MISSING $dep"
+        if [ "$dep" = "imagemagick" ] && [ "${ALLOW_SKIP_MAGICK_ON_FAILURE:-1}" = "1" ]; then
+          MAGICK_SKIPPED="1"
+          echo -e "   ${YELLOW}⚠️  $dep 安装失败，已按策略跳过（后续 GIF 将回退 FFmpeg）${NC}"
+        else
+          STILL_MISSING="$STILL_MISSING $dep"
+        fi
       fi
       set -e
     else
@@ -1184,7 +1256,12 @@ if [ -n "$MISSING_DEPS" ]; then
   done
 
   if [ -z "$STILL_MISSING" ]; then
-    echo -e "${GREEN}✅ 系统依赖已补齐${NC}"
+    if [ "$MAGICK_SKIPPED" = "1" ]; then
+      echo -e "${YELLOW}⚠️  ImageMagick 已跳过，其它系统依赖已补齐${NC}"
+      echo "   可稍后单独修复：ENABLE_IMAGEMAGICK_SOURCE_BUILD=1 bash $0"
+    else
+      echo -e "${GREEN}✅ 系统依赖已补齐${NC}"
+    fi
   else
     echo -e "${YELLOW}⚠️  以下依赖安装失败（不阻塞更新，运行时有兜底）:${STILL_MISSING}${NC}"
     echo "   GIF 导出会自动回退 FFmpeg，功能基本不受影响。"

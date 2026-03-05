@@ -5332,6 +5332,17 @@
           if (!isManualSyncing) handleConversionProgress(data);
         } else if (data.type === 'manual-sync-progress') {
           handleManualSyncProgress(data);
+        } else if (data.type === 'manual-sync-file-count') {
+          if (isManualSyncing) {
+            const subtitle = document.getElementById('manualSyncSubtitle');
+            if (subtitle) {
+              const total = Math.max(0, Number(data.count || 0));
+              subtitle.style.display = '';
+              subtitle.textContent = total > 0
+                ? (currentLang === 'zh' ? `共 ${total} 个文件` : `${total} files`)
+                : (currentLang === 'zh' ? '共 0 个文件' : '0 files');
+            }
+          }
         } else if (data.type === 'large-file-download-failed' || data.type === 'oversized-files-cleaned') {
           // 兼容旧类型 oversized-files-cleaned，按 primaryReason 给出更准确提示
           const count = data.count || 0;
@@ -5527,12 +5538,24 @@
         } else if (data.type === 'error') {
           // 处理服务器通用错误消息
           console.error('❌ Server Error:', data.message);
+          const errMsg = String(data.message || '');
+          if (isManualSyncing && errMsg.includes('Mac端未连接') && manualSyncDispatchRetryCount < 2) {
+            manualSyncDispatchRetryCount++;
+            showToast(currentLang === 'zh' ? '同步服务正在重连，自动重试中…' : 'Sync service reconnecting, retrying...', 'warning');
+            setTimeout(() => {
+              if (!isManualSyncing) return;
+              wsSend('manual-sync-count-files');
+              wsSend('manual-sync');
+            }, 1200);
+            return;
+          }
           showToast(data.message || t('toast_unknown_error'), 'error');
           
           // 如果手动同步正在进行中，重置状态
           if (isManualSyncing) {
             isManualSyncing = false;
             isManualSyncCancelling = false;
+            manualSyncDispatchRetryCount = 0;
             manualSyncSavedGifFromScreenshots = 0;
             const manualSyncBtn = document.getElementById('manualSyncBtn');
             if (manualSyncBtn) {
@@ -8548,38 +8571,39 @@
     // Export GIF Logic
     // ==========================================
     
-    let totalExports = 0;
-    let completedExports = 0;
-    let isExporting = false;
-    let isCancellingExport = false; // 标记是否正在取消导出（用于忽略取消后的错误消息）
-    let pendingExportCacheCheck = false; // 标记是否有待处理的导出流程缓存检查
-    let successTimer = null;
-    let circumference = 0;
-    let progressCircle = null;
+    var totalExports = 0;
+    var completedExports = 0;
+    var isExporting = false;
+    var isCancellingExport = false; // 标记是否正在取消导出（用于忽略取消后的错误消息）
+    var pendingExportCacheCheck = false; // 标记是否有待处理的导出流程缓存检查
+    var successTimer = null;
+    var circumference = 0;
+    var progressCircle = null;
     
     // Manual Sync Progress
-    let totalManualSyncFiles = 0;
-    let completedManualSyncFiles = 0;
-    let isManualSyncing = false;
-    let isManualSyncCancelling = false;
-    let manualSyncSavedGifFromScreenshots = 0; // 手动同步期间，已通过 screenshot 消息计入的 GIF 数
-    let syncStarted = false; // ✅ 标记同步是否已经开始（收到了第一个响应）
-    let manualSyncTimeoutId = null; // ✅ 保存超时 ID，以便清除
+    var totalManualSyncFiles = 0;
+    var completedManualSyncFiles = 0;
+    var isManualSyncing = false;
+    var isManualSyncCancelling = false;
+    var manualSyncSavedGifFromScreenshots = 0; // 手动同步期间，已通过 screenshot 消息计入的 GIF 数
+    var syncStarted = false; // ✅ 标记同步是否已经开始（收到了第一个响应）
+    var manualSyncTimeoutId = null; // ✅ 保存超时 ID，以便清除
+    var manualSyncDispatchRetryCount = 0; // 手动同步发送重试次数（用于 watcher 连接竞态）
     
     // ✅ 导出超时检测
-    let exportTimeoutId = null; // 导出超时计时器
-    let lastProgressUpdate = 0; // 上次进度更新时间
-    const EXPORT_STALL_TIMEOUT = 600000; // 10分钟无进度更新视为卡住
-    let circumferenceManual = 0;
-    let progressCircleManual = null;
-    let progressRingManual = null;
-    let progressRing = null;
-    let exportGifBtn = null;
-    let smoothProgressInterval = null;
-    let currentSmoothProgress = 0;
+    var exportTimeoutId = null; // 导出超时计时器
+    var lastProgressUpdate = 0; // 上次进度更新时间
+    var EXPORT_STALL_TIMEOUT = 600000; // 10分钟无进度更新视为卡住
+    var circumferenceManual = 0;
+    var progressCircleManual = null;
+    var progressRingManual = null;
+    var progressRing = null;
+    var exportGifBtn = null;
+    var smoothProgressInterval = null;
+    var currentSmoothProgress = 0;
     
     // 跟踪窗口焦点状态（用于判断是否显示 toast）
-    let windowHasFocus = !document.hidden;
+    var windowHasFocus = !document.hidden;
     
     // 监听窗口焦点和可见性变化
     window.addEventListener('focus', () => {
@@ -8684,6 +8708,7 @@
                 // ✅ 立即开始视觉反馈（无需等待）
                 isManualSyncing = true;
                 isManualSyncCancelling = false;
+                manualSyncDispatchRetryCount = 0;
                 manualDragCount = 0;
                 skippedFilesSet.clear();
                 manualSyncSavedGifFromScreenshots = 0;
@@ -8743,11 +8768,16 @@
                 
                 // ✅ 直接发送同步请求（立即响应）
                 try {
-                    wsSend('manual-sync');
+                    wsSend('manual-sync-count-files');
+                    const sent = wsSend('manual-sync');
+                    if (!sent) {
+                      throw new Error('manual-sync-send-failed');
+                    }
                 } catch (error) {
                     console.error('❌ 发送同步请求失败:', error);
                     isManualSyncing = false;
                     isManualSyncCancelling = false;
+                    manualSyncDispatchRetryCount = 0;
                     manualSyncBtn.classList.remove('exporting');
                     manualSyncBtn.setAttribute('data-tooltip', t('tooltip_manual_sync'));
                     if (progressRingManual) {
@@ -8948,6 +8978,7 @@
 
       isManualSyncing = false;
       isManualSyncCancelling = false;
+      manualSyncDispatchRetryCount = 0;
       manualSyncSavedGifFromScreenshots = 0;
       syncStarted = false;
     }

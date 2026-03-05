@@ -5,7 +5,7 @@ const sharp = require('sharp');
 // 优化 sharp 配置，减少内存占用并提高稳定性（特别是在 LaunchAgent 环境下）
 sharp.cache(false); // 禁用缓存
 sharp.simd(false); // 禁用 SIMD
-sharp.concurrency(1); // 限制并发
+sharp.concurrency(Math.max(2, Math.min(8, (require('os').cpus()?.length || 4)))); // 提升并发处理吞吐
 
 const { exec } = require('child_process');
 const { promisify } = require('util');
@@ -45,6 +45,8 @@ const {
   listFolderFiles,
   downloadFileBuffer,
   trashFile,
+  deleteFileImmediately,
+  removeFileFromFolder,
   createFolder,
   getFileInfo
 } = require('./googleDrive');
@@ -360,7 +362,7 @@ const CONFIG = {
   connectionId: process.env.CONNECTION_ID || 'sync-session-1',
   sharedDriveFolderId: SHARED_DRIVE_FOLDER_ID,
   userFolderId: null, // 将在初始化时设置
-  pollIntervalMs: Number(process.env.DRIVE_POLL_INTERVAL_MS || 2000), // 默认2秒轮询，更快检测新文件
+  pollIntervalMs: Number(process.env.DRIVE_POLL_INTERVAL_MS || 800), // 默认0.8秒轮询，提升实时响应
   maxWidth: Number(process.env.DRIVE_MAX_WIDTH || 1920),
   quality: Number(process.env.DRIVE_IMAGE_QUALITY || 85),
   processExisting: process.env.DRIVE_PROCESS_EXISTING === '1',
@@ -533,6 +535,9 @@ const knownFileIds = new Set();
 const knownFileMD5s = new Map(); // md5Checksum -> { fileId, filename, createdTime } - 用于去重
 const pendingDeletes = new Map(); // fileId -> { filename, timestamp }
 const processingFileIds = new Set(); // 正在处理中的文件 ID — 全局互斥锁，防止同一文件被实时同步和手动同步同时处理
+const realtimeVideoQueue = [];
+const realtimeQueuedVideoFileIds = new Set();
+let isDriveRealtimeVideoQueueRunning = false;
 const MAX_KNOWN_FILES = 10000; // 限制已知文件数量，防止内存无限增长
 const DEEP_CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000; // 每 6 小时做一次深度清理
 const STALE_TEMP_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 临时文件保留 24 小时
@@ -582,20 +587,62 @@ function requestManualSyncCancel() {
   return true;
 }
 
+function enqueueDriveRealtimeVideo(file) {
+  if (!file || !file.id) return;
+  if (realtimeQueuedVideoFileIds.has(file.id)) return;
+  realtimeQueuedVideoFileIds.add(file.id);
+  realtimeVideoQueue.push(file);
+  drainDriveRealtimeVideoQueue().catch(() => {});
+}
+
+async function drainDriveRealtimeVideoQueue() {
+  if (isDriveRealtimeVideoQueueRunning) return;
+  isDriveRealtimeVideoQueueRunning = true;
+  try {
+    const VIDEO_TIMEOUT_MS = 480000; // 视频→GIF 转换(含降级策略)需要更多时间：8 分钟
+    while (realtimeVideoQueue.length > 0 && isRealTimeMode) {
+      const file = realtimeVideoQueue.shift();
+      if (!file) continue;
+      realtimeQueuedVideoFileIds.delete(file.id);
+      let _timeoutId;
+      const fileTimeout = new Promise((_, reject) => {
+        _timeoutId = setTimeout(() => reject(new Error(`SYNC_TIMEOUT:${file.name}`)), VIDEO_TIMEOUT_MS);
+      });
+      try {
+        await Promise.race([handleDriveFile(file, true, null, null, 'realtime'), fileTimeout]);
+      } catch (fileError) {
+        const msg = String(fileError && fileError.message ? fileError.message : fileError || '');
+        const isTimeout = msg.startsWith('SYNC_TIMEOUT:') || msg.includes('超时');
+        if (isTimeout) {
+          console.warn(`   ⚠️  [Video→GIF] 视频转换超时，已保留源文件: ${file.name}`);
+        } else {
+          console.error(`   ❌ 实时视频处理失败: ${file.name} ${msg}`);
+        }
+      } finally {
+        clearTimeout(_timeoutId);
+      }
+    }
+  } finally {
+    isDriveRealtimeVideoQueueRunning = false;
+    if (realtimeVideoQueue.length > 0 && isRealTimeMode) {
+      drainDriveRealtimeVideoQueue().catch(() => {});
+    }
+  }
+}
+
 // 清理文件的所有记录（从knownFileIds、knownFileMD5s、processingFileIds中移除）
 function cleanupFileRecord(fileId, md5Checksum = null) {
-  knownFileIds.delete(fileId);
+  // 注意：不能从 knownFileIds 中删除！
+  // 文件一旦被处理过，即使云端删除成功/失败，都必须保留在 knownFileIds 中，
+  // 否则下次轮询会把它当"新文件"再次同步，导致无限重复。
   processingFileIds.delete(fileId);
   
-  // 从knownFileMD5s中移除（如果提供了MD5）
   if (md5Checksum && knownFileMD5s.has(md5Checksum)) {
     const record = knownFileMD5s.get(md5Checksum);
-    // 只有当记录的fileId匹配时才删除（防止误删新文件的记录）
     if (record.fileId === fileId) {
       knownFileMD5s.delete(md5Checksum);
     }
   } else if (!md5Checksum) {
-    // 如果没有提供MD5，尝试从knownFileMD5s中找到并删除
     for (const [md5, record] of knownFileMD5s.entries()) {
       if (record.fileId === fileId) {
         knownFileMD5s.delete(md5);
@@ -604,6 +651,47 @@ function cleanupFileRecord(fileId, md5Checksum = null) {
     }
   }
 }
+
+async function deleteDriveSourceFileWithFallback(fileId, filename, md5Checksum = null) {
+  if (!fileId) return false;
+
+  const folderId = CONFIG.userFolderId;
+  const ops = [
+    // 最优先：从监控文件夹中移除（Service Account Editor 权限即可操作）
+    folderId
+      ? { name: 'removeFromFolder', fn: () => removeFileFromFolder(fileId, folderId) }
+      : null,
+    { name: 'trash(allDrives)', fn: () => trashFile(fileId, true) },
+    { name: 'trash(singleDrive)', fn: () => trashFile(fileId, false) },
+    { name: 'delete(allDrives)', fn: () => deleteFileImmediately(fileId, true) },
+    { name: 'delete(singleDrive)', fn: () => deleteFileImmediately(fileId, false) }
+  ].filter(Boolean);
+
+  let lastErr = null;
+  for (const op of ops) {
+    try {
+      await op.fn();
+      cleanupFileRecord(fileId, md5Checksum);
+      console.log(`   🗑️  已从云端清理源文件: ${filename} (${op.name})`);
+      return true;
+    } catch (err) {
+      const msg = err && err.message ? err.message : String(err);
+      if (msg.includes('File not found') || msg.includes('not found') || msg.includes('404') || msg.includes('does not exist')) {
+        cleanupFileRecord(fileId, md5Checksum);
+        console.log(`   ℹ️  云端文件已不存在，视为已清理: ${filename}`);
+        return true;
+      }
+      lastErr = err;
+      console.warn(`   ⚠️  清理尝试失败 (${op.name}): ${filename} (${msg})`);
+    }
+  }
+
+  if (lastErr) {
+    throw lastErr;
+  }
+  return false;
+}
+
 const CLEANUP_INTERVAL_MS = 5 * 60 * 1000; // 每5分钟清理一次
 
 async function initializeKnownFiles() {
@@ -620,6 +708,9 @@ async function initializeKnownFiles() {
   // 清空已知文件列表和处理锁
   knownFileIds.clear();
   processingFileIds.clear();
+  realtimeVideoQueue.length = 0;
+  realtimeQueuedVideoFileIds.clear();
+  isDriveRealtimeVideoQueueRunning = false;
   
   try {
     // 获取所有现有的图片文件
@@ -764,7 +855,6 @@ async function pollDrive() {
       
       // 并发处理新文件（提高多图同步速度）
       const IMAGE_TIMEOUT_MS = 60000; // 图片 60 秒
-      const VIDEO_TIMEOUT_MS = 480000; // 视频→GIF 转换(含降级策略)需要更多时间：8 分钟
       const downloadFailedFiles = []; // 记录失败明细（保留云端）
       
       // 分类：图片优先即时同步，录屏异步进入转换队列
@@ -781,7 +871,7 @@ async function pollDrive() {
         console.log(`   📸 ${imageFiles.length} 张图片即时同步...`);
       }
       if (videoFiles.length > 0) {
-        console.log(`   🎬 ${videoFiles.length} 段录屏进入转换队列...`);
+        console.log(`   🎬 ${videoFiles.length} 段录屏进入后台转换队列（不阻塞图片同步）...`);
       }
       
       const processFile = async (file, timeoutMs) => {
@@ -816,20 +906,19 @@ async function pollDrive() {
                 detail: reason.detail
               });
             }
-            knownFileIds.delete(file.id);
           }
         } finally {
           clearTimeout(_fileTimeoutId);
         }
       };
       
-      // 图片优先：先并发完成图片，再进入视频转换，避免视频耗时影响图片进度
+      // 图片优先：先并发完成图片；视频进入后台队列，避免阻塞后续图片同步
       try {
         if (imageFiles.length > 0) {
           await Promise.all(imageFiles.map(f => processFile(f, IMAGE_TIMEOUT_MS)));
         }
         if (videoFiles.length > 0) {
-          await Promise.all(videoFiles.map(f => processFile(f, VIDEO_TIMEOUT_MS)));
+          for (const vf of videoFiles) enqueueDriveRealtimeVideo(vf);
         }
       } catch (timeoutError) {
         console.error('⚠️  批量处理超时，部分文件可能未处理完成');
@@ -1405,7 +1494,9 @@ async function handleDriveFile(file, deleteAfterSync = false, progressCb = null,
         const outFilename = backupImageFilename || file.name.replace(/\.(png|heic|heif|webp)$/i, '.jpg');
         const outMime = backupImageMimeType || 'image/jpeg';
         const saveResult = await saveFileToLocalFolder(processedBuffer, outFilename, outMime);
-        if (saveResult && !saveResult.success) {
+        if (saveResult && saveResult.success) {
+          backedUpLocally = true;
+        } else if (saveResult && !saveResult.success) {
           localSaveFailureReason = classifyLargeFileFailure({ code: saveResult.errorCode, message: saveResult.error });
         }
       } catch (backupError) {
@@ -1441,6 +1532,13 @@ async function handleDriveFile(file, deleteAfterSync = false, progressCb = null,
     };
 
     throwIfAborted();
+    if (deleteAfterSync && file && file.id) {
+      pendingDeletes.set(file.id, {
+        filename: file.name,
+        timestamp: Date.now(),
+        md5Checksum: file.md5Checksum || null
+      });
+    }
     ws.send(JSON.stringify(payload));
     emitProgress('done', 100, looksLikeVideo ? { isVideo: true } : {});
     // 非删除模式下仍执行延迟本地备份
@@ -1448,7 +1546,6 @@ async function handleDriveFile(file, deleteAfterSync = false, progressCb = null,
       setImmediate(() => { deferredLocalBackup(); });
     }
 
-    // 仅在“已成功保存本地”时才删除云端源文件，避免网络异常导致丢失
     if (deleteAfterSync) {
       if (deferredLocalBackup) {
         try {
@@ -1457,32 +1554,11 @@ async function handleDriveFile(file, deleteAfterSync = false, progressCb = null,
         } catch (_) {}
         deferredLocalBackup = null;
       }
-      if (!backedUpLocally) {
-        const reasonCode = (localSaveFailureReason && localSaveFailureReason.code) || 'unknown';
-        console.warn(`   ⚠️  本地未成功保存，保留云端源文件: ${file.name} (reason=${reasonCode})`);
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({
-            type: 'large-file-download-failed',
-            reason: 'local-save-failed',
-            primaryReason: reasonCode,
-            count: 1,
-            filenames: [file.name],
-            failures: [{ filename: file.name, reasonCode, detail: (localSaveFailureReason && localSaveFailureReason.detail) || 'local-save-failed' }]
-          }));
-        }
-        return;
-      }
       try {
-        await trashFile(file.id);
-        cleanupFileRecord(file.id, file.md5Checksum);
-        console.log(`   🗑️  已从云端清理源文件: ${file.name}`);
+        await deleteDriveSourceFileWithFallback(file.id, file.name, file.md5Checksum);
+        pendingDeletes.delete(file.id);
       } catch (delErr) {
-        const msg = delErr.message || String(delErr);
-        if (msg.includes('not found') || msg.includes('404')) {
-          cleanupFileRecord(file.id, file.md5Checksum);
-        } else {
-          console.warn(`   ⚠️  删除云端源文件失败 (${file.name}): ${msg}`);
-        }
+        console.warn(`   ⚠️  云端源文件删除失败 (${file.name}): ${delErr.message || delErr}`);
       }
     }
   } catch (error) {
@@ -1550,12 +1626,22 @@ async function performManualSync() {
   console.log('\n📦 [Drive] 执行手动同步...');
   
   if (isSyncing) {
-    console.log('⏳ [Drive] 上一次同步尚未结束，已排队等待');
-    pendingManualSync = true;
-    return;
+    console.log('⏳ [Drive] 上一次同步尚未结束，正在强制终止...');
+    manualSyncAbortRequested = true;
+    killAllChildProcesses();
+    const waitStart = Date.now();
+    while (isSyncing && Date.now() - waitStart < 3000) {
+      await new Promise(r => setTimeout(r, 100));
+    }
+    if (isSyncing) {
+      console.warn('⚠️  [Drive] 旧同步未在 3 秒内结束，强制重置状态');
+      isSyncing = false;
+      manualSyncAbortRequested = false;
+    }
   }
   
   isSyncing = true;
+  pendingManualSync = false;
   manualSyncAbortRequested = false;
   _abortAllConversions = false;
   const currentRunId = ++manualSyncRunId;
@@ -1563,6 +1649,11 @@ async function performManualSync() {
   const throwIfManualSyncAborted = () => {
     if (shouldAbort()) throw createManualSyncCancelledError();
   };
+  
+  sendProgress('manual-sync-progress', {
+    total: 0, completed: 0, percent: 0,
+    fileIndex: 0, filename: '', filePercent: 0, stage: 'listing'
+  });
   
   // 如果用户文件夹未初始化，尝试重新初始化（可能是第一次使用，用户刚上传文件）
   if (!CONFIG.userFolderId) {
@@ -1751,12 +1842,10 @@ async function performManualSync() {
           return { success: true, isGif: isGif, file };
         } catch (error) {
           if (isManualSyncCancelledError(error) || (error && error.code === 'CONVERSION_ABORTED') || shouldAbort()) {
-            if (!wasKnown) knownFileIds.delete(file.id);
             return { success: false, cancelled: true, file };
           }
           console.error(`   ❌ 处理文件失败: ${file.name}`, error.message);
           processingErrors.push({ filename: file.name, error: error.message, stack: error.stack });
-          if (!wasKnown) knownFileIds.delete(file.id);
           const reason = classifyLargeFileFailure(error);
           return {
             success: false,
@@ -1776,7 +1865,6 @@ async function performManualSync() {
       } catch (timeoutError) {
         clearTimeout(_manualFileTimeoutId);
         if (isManualSyncCancelledError(timeoutError) || (timeoutError && timeoutError.code === 'CONVERSION_ABORTED') || shouldAbort()) {
-          if (!wasKnown) knownFileIds.delete(file.id);
           return { success: false, cancelled: true, file };
         }
         const isTimeout = timeoutError.message.startsWith('SYNC_TIMEOUT:') || timeoutError.message.includes('超时');
@@ -1790,7 +1878,6 @@ async function performManualSync() {
             console.warn(`   ⚠️  [Video→GIF] 手动同步视频转换超时，已保留源文件: ${file.name}`);
           }
         }
-        if (!wasKnown) knownFileIds.delete(file.id);
         return {
           success: false,
           timeout: true,
@@ -1803,35 +1890,23 @@ async function performManualSync() {
     };
     
     let skippedDuplicates = 0;
-    const orderedFiles = [...imageBatch, ...videoBatch];
     let cancelled = false;
-    
-    // 顺序处理，确保副标题 X/Y 与当前文件进度稳定、准确
-    for (let i = 0; i < orderedFiles.length; i++) {
-      if (shouldAbort()) {
-        cancelled = true;
-        break;
-      }
-      const file = orderedFiles[i];
-      const fileOrder = i + 1;
-      const value = await processOneFile(file, fileOrder);
-      if (value && value.cancelled) {
-        cancelled = true;
-        break;
-      }
+
+    const manualImageConcurrency = Math.max(2, Math.min(8, Number(process.env.DRIVE_MANUAL_IMAGE_CONCURRENCY || 6)));
+    const handleManualFileResult = (value, fileOrder, fileName) => {
       results.push({ status: 'fulfilled', value });
-      
+
       if (value && value.duplicate) {
         skippedDuplicates++;
         completedCount++;
         const dupPct = totalFiles > 0 ? Math.round((fileOrder / totalFiles) * 100) : 100;
         sendProgress('manual-sync-progress', {
           total: totalFiles, completed: completedCount, percent: dupPct,
-          fileIndex: fileOrder, filename: file.name, filePercent: 100, stage: 'file-done'
+          fileIndex: fileOrder, filename: fileName, filePercent: 100, stage: 'file-done'
         });
-        continue;
+        return;
       }
-      
+
       const wasSuccess = value && value.success === true;
       if (value && value.isGif) {
         gifCount++;
@@ -1839,13 +1914,42 @@ async function performManualSync() {
       } else if (value && value.file) {
         if (wasSuccess) { imageCount++; success++; }
       }
-      
+
       completedCount++;
       const pct = totalFiles > 0 ? Math.round((fileOrder / totalFiles) * 100) : 100;
       sendProgress('manual-sync-progress', {
         total: totalFiles, completed: completedCount, percent: pct,
         fileIndex: fileOrder, filename: '', filePercent: 100, stage: 'file-done'
       });
+    };
+
+    // 图片并发批处理（显著提升小图手动同步速度）
+    for (let start = 0; start < imageBatch.length; start += manualImageConcurrency) {
+      if (shouldAbort()) { cancelled = true; break; }
+      const chunk = imageBatch.slice(start, start + manualImageConcurrency);
+      const chunkResults = await Promise.all(
+        chunk.map((file, idx) => processOneFile(file, start + idx + 1))
+      );
+      for (let idx = 0; idx < chunkResults.length; idx++) {
+        const value = chunkResults[idx];
+        const fileOrder = start + idx + 1;
+        const fileName = chunk[idx] && chunk[idx].name ? chunk[idx].name : '';
+        if (value && value.cancelled) { cancelled = true; break; }
+        handleManualFileResult(value, fileOrder, fileName);
+      }
+      if (cancelled) break;
+    }
+
+    // 视频继续串行，避免转 GIF 抢占过多资源
+    if (!cancelled) {
+      for (let i = 0; i < videoBatch.length; i++) {
+        if (shouldAbort()) { cancelled = true; break; }
+        const file = videoBatch[i];
+        const fileOrder = imageBatch.length + i + 1;
+        const value = await processOneFile(file, fileOrder);
+        if (value && value.cancelled) { cancelled = true; break; }
+        handleManualFileResult(value, fileOrder, file.name);
+      }
     }
 
     if (cancelled) {
@@ -2071,18 +2175,9 @@ function connectWebSocket() {
         
         if (shouldDelete && deleteInfo && fileIdToDelete) {
           try {
-            await trashFile(fileIdToDelete);
-            cleanupFileRecord(fileIdToDelete);
+            await deleteDriveSourceFileWithFallback(fileIdToDelete, filename, deleteInfo.md5Checksum || null);
           } catch (error) {
-            const errorMsg = error.message || String(error);
-            if (errorMsg.includes('File not found') || 
-                errorMsg.includes('not found') || 
-                errorMsg.includes('404') ||
-                errorMsg.includes('does not exist')) {
-              cleanupFileRecord(fileIdToDelete);
-            } else {
-              console.error(`   ⚠️  删除 Drive 文件失败 (${filename}):`, errorMsg);
-            }
+            console.error(`   ⚠️  删除 Drive 文件失败 (${filename}):`, error.message || error);
           }
         }
         return;
@@ -2109,12 +2204,17 @@ function connectWebSocket() {
         pendingManualSync = false;
         killAllChildProcesses();
         processingFileIds.clear();
+        realtimeVideoQueue.length = 0;
+        realtimeQueuedVideoFileIds.clear();
+        isDriveRealtimeVideoQueueRunning = false;
         stopPolling();
         return;
       }
 
       if (message.type === 'manual-sync-count-files') {
-        await countFilesForManualSync();
+        countFilesForManualSync().catch(err => {
+          console.error('❌ [Drive] countFilesForManualSync 异常:', err.message);
+        });
         return;
       }
 
@@ -2170,6 +2270,9 @@ function connectWebSocket() {
     isRealTimeMode = false;
     killAllChildProcesses();
     processingFileIds.clear();
+    realtimeVideoQueue.length = 0;
+    realtimeQueuedVideoFileIds.clear();
+    isDriveRealtimeVideoQueueRunning = false;
     stopPolling();
     setTimeout(connectWebSocket, 5000);
   });

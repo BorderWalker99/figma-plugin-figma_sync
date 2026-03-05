@@ -8,7 +8,7 @@ const sharp = require('sharp');
 // 优化 sharp 配置，减少内存占用并提高稳定性（特别是在 LaunchAgent 环境下）
 sharp.cache(false); // 禁用缓存
 sharp.simd(false); // 禁用 SIMD
-sharp.concurrency(1); // 限制并发
+sharp.concurrency(Math.max(2, Math.min(8, (require('os').cpus()?.length || 4)))); // 提升并发处理吞吐
 
 const { exec } = require('child_process');
 const { promisify } = require('util');
@@ -86,8 +86,11 @@ const realtimeVideoQueue = [];
 const realtimeQueuedFilePaths = new Set();
 const realtimeRetryTimers = new Set();
 const realtimeInflightAcks = new Map(); // Map<taskId, { task, filePath, subfolder, filename, timer }>
-let isRealtimeQueueRunning = false;
+let isRealtimeImageQueueRunning = false;
+let isRealtimeVideoQueueRunning = false;
 const REALTIME_IMAGE_MAX_RETRIES = 8;
+const REALTIME_IMAGE_WORKERS = Math.max(2, Math.min(8, Number(process.env.ICLOUD_REALTIME_IMAGE_CONCURRENCY || 4)));
+const MANUAL_IMAGE_CONCURRENCY = Math.max(2, Math.min(8, Number(process.env.ICLOUD_MANUAL_IMAGE_CONCURRENCY || 6)));
 const REALTIME_VIDEO_MAX_RETRIES = 3;
 const REALTIME_RETRY_BASE_DELAY_MS = 800;
 const REALTIME_ACK_TIMEOUT_MS = 15000;
@@ -167,20 +170,22 @@ function cleanupOriginalVideo(videoPath, gifPath, displayFilename) {
   }
 }
 
+function runPostVideoOps(result, keepGif, displayFilename, syncSource = 'realtime') {
+  try {
+    if (keepGif) {
+      try {
+        const wasExisting = fs.existsSync(result.gifPath);
+        fs.writeFileSync(result.gifPath, result.gifBuffer);
+        if (!wasExisting) notifyLocalGifSaved(result.gifFilename, syncSource);
+      } catch (_) {}
+      console.log(`   📌 根据备份设置，保留 GIF: ${result.gifFilename}`);
+    }
+    cleanupOriginalVideo(result.sourceVideoPath, result.gifPath, displayFilename);
+  } catch (_) {}
+}
+
 function schedulePostVideoOps(result, keepGif, displayFilename, syncSource = 'realtime') {
-  setImmediate(() => {
-    try {
-      if (keepGif) {
-        try {
-          const wasExisting = fs.existsSync(result.gifPath);
-          fs.writeFileSync(result.gifPath, result.gifBuffer);
-          if (!wasExisting) notifyLocalGifSaved(result.gifFilename, syncSource);
-        } catch (_) {}
-        console.log(`   📌 根据备份设置，保留 GIF: ${result.gifFilename}`);
-      }
-      cleanupOriginalVideo(result.sourceVideoPath, result.gifPath, displayFilename);
-    } catch (_) {}
-  });
+  setImmediate(() => runPostVideoOps(result, keepGif, displayFilename, syncSource));
 }
 
 function createManualSyncCancelledError() {
@@ -337,7 +342,7 @@ function scheduleRealtimeReconcile(reason = 'idle') {
 async function performRealtimeReconcile(reason = 'idle') {
   if (!ENABLE_REALTIME_RECONCILE) return;
   if (!isRealTimeMode) return;
-  if (isRealtimeQueueRunning) return;
+  if (isRealtimeImageQueueRunning || isRealtimeVideoQueueRunning) return;
   if (realtimeImageQueue.length > 0 || realtimeVideoQueue.length > 0) return;
 
   const candidates = listRealtimeReconcileCandidates();
@@ -373,10 +378,11 @@ function scheduleRealtimeRetry(task, reason = 'retry') {
     realtimeQueuedFilePaths.add(retryTask.finalPath);
     if (retryTask.isVideo) {
       realtimeVideoQueue.push(retryTask);
+      drainRealtimeVideoQueue().catch(() => {});
     } else {
       realtimeImageQueue.unshift(retryTask); // 图片重试继续优先
+      drainRealtimeImageQueue().catch(() => {});
     }
-    drainRealtimeSyncQueue().catch(() => {});
   }, delay);
   realtimeRetryTimers.add(timer);
 }
@@ -477,20 +483,59 @@ function enqueueRealtimeSyncTask(task) {
   realtimeQueuedFilePaths.add(normalizedTask.finalPath);
   if (normalizedTask.isVideo) {
     realtimeVideoQueue.push(normalizedTask);
+    drainRealtimeVideoQueue().catch(() => {});
   } else {
     realtimeImageQueue.push(normalizedTask);
+    drainRealtimeImageQueue().catch(() => {});
   }
-  drainRealtimeSyncQueue().catch(() => {});
 }
 
-async function drainRealtimeSyncQueue() {
-  if (isRealtimeQueueRunning) return;
-  isRealtimeQueueRunning = true;
+function maybeScheduleRealtimeReconcileWhenIdle(reason = 'queue-drained') {
+  if (isRealtimeImageQueueRunning || isRealtimeVideoQueueRunning) return;
+  if (realtimeImageQueue.length > 0 || realtimeVideoQueue.length > 0) return;
+  scheduleRealtimeReconcile(reason);
+}
+
+async function drainRealtimeImageQueue() {
+  if (isRealtimeImageQueueRunning) return;
+  isRealtimeImageQueueRunning = true;
   try {
-    while (realtimeImageQueue.length > 0 || realtimeVideoQueue.length > 0) {
-      const task = realtimeImageQueue.length > 0
-        ? realtimeImageQueue.shift()
-        : realtimeVideoQueue.shift();
+    const worker = async () => {
+      while (realtimeImageQueue.length > 0) {
+        const task = realtimeImageQueue.shift();
+        if (!task) continue;
+        realtimeQueuedFilePaths.delete(task.finalPath);
+        try {
+          await processRealtimeSyncTask(task);
+        } catch (err) {
+          const msg = String(err && err.message ? err.message : err || '');
+          console.warn(`⚠️  [实时模式] 同步失败，准备重试: ${task.displayFilename} (${msg})`);
+          scheduleRealtimeRetry(task, msg);
+        }
+      }
+    };
+
+    const workers = [];
+    for (let i = 0; i < REALTIME_IMAGE_WORKERS; i++) {
+      workers.push(worker());
+    }
+    await Promise.all(workers);
+  } finally {
+    isRealtimeImageQueueRunning = false;
+    if (realtimeImageQueue.length > 0) {
+      drainRealtimeImageQueue().catch(() => {});
+    } else {
+      maybeScheduleRealtimeReconcileWhenIdle('image-queue-drained');
+    }
+  }
+}
+
+async function drainRealtimeVideoQueue() {
+  if (isRealtimeVideoQueueRunning) return;
+  isRealtimeVideoQueueRunning = true;
+  try {
+    while (realtimeVideoQueue.length > 0) {
+      const task = realtimeVideoQueue.shift();
       if (!task) continue;
       realtimeQueuedFilePaths.delete(task.finalPath);
       try {
@@ -500,13 +545,15 @@ async function drainRealtimeSyncQueue() {
         console.warn(`⚠️  [实时模式] 同步失败，准备重试: ${task.displayFilename} (${msg})`);
         scheduleRealtimeRetry(task, msg);
       }
+      // 让出事件循环，避免视频连续处理影响图片队列时效
+      await new Promise(resolve => setTimeout(resolve, 0));
     }
   } finally {
-    isRealtimeQueueRunning = false;
-    if (realtimeImageQueue.length > 0 || realtimeVideoQueue.length > 0) {
-      drainRealtimeSyncQueue().catch(() => {});
+    isRealtimeVideoQueueRunning = false;
+    if (realtimeVideoQueue.length > 0) {
+      drainRealtimeVideoQueue().catch(() => {});
     } else {
-      scheduleRealtimeReconcile('queue-drained');
+      maybeScheduleRealtimeReconcileWhenIdle('video-queue-drained');
     }
   }
 }
@@ -1212,6 +1259,8 @@ function connectWebSocket() {
         realtimeImageQueue.length = 0;
         realtimeVideoQueue.length = 0;
         realtimeQueuedFilePaths.clear();
+        isRealtimeImageQueueRunning = false;
+        isRealtimeVideoQueueRunning = false;
         realtimeSessionStartedAt = 0;
         manualSyncAbortRequested = true;
       } else if (message.type === 'manual-sync-count-files') {
@@ -1285,6 +1334,8 @@ function connectWebSocket() {
     realtimeImageQueue.length = 0;
     realtimeVideoQueue.length = 0;
     realtimeQueuedFilePaths.clear();
+    isRealtimeImageQueueRunning = false;
+    isRealtimeVideoQueueRunning = false;
     realtimeSessionStartedAt = 0;
     manualSyncAbortRequested = true;
     stopWatching();
@@ -1680,16 +1731,31 @@ function countFilesForManualSync() {
 
 async function performManualSync() {
   if (isSyncing) {
-    console.log('⏳ [iCloud] 上一次同步尚未结束，已排队等待');
-    pendingManualSync = true;
-    return;
+    console.log('⏳ [iCloud] 上一次同步尚未结束，正在强制终止...');
+    manualSyncAbortRequested = true;
+    killAllChildProcesses();
+    const waitStart = Date.now();
+    while (isSyncing && Date.now() - waitStart < 3000) {
+      await new Promise(r => setTimeout(r, 100));
+    }
+    if (isSyncing) {
+      console.warn('⚠️  [iCloud] 旧同步未在 3 秒内结束，强制重置状态');
+      isSyncing = false;
+      manualSyncAbortRequested = false;
+    }
   }
 
   isSyncing = true;
+  pendingManualSync = false;
   manualSyncAbortRequested = false;
   _abortAllConversions = false;
   const currentRunId = ++manualSyncRunId;
   const shouldAbort = () => manualSyncAbortRequested || currentRunId !== manualSyncRunId;
+
+  sendProgress('manual-sync-progress', {
+    total: 0, completed: 0, percent: 0,
+    fileIndex: 0, filename: '', filePercent: 0, stage: 'listing'
+  });
 
   try {
     if (!fs.existsSync(CONFIG.icloudPath)) {
@@ -1787,18 +1853,13 @@ async function performManualSync() {
     const processingErrors = [];
     let cancelled = false;
 
-    for (let i = 0; i < orderedFiles.length; i++) {
-      if (shouldAbort()) { cancelled = true; break; }
-
-      const { filePath, subfolder } = orderedFiles[i];
+    const processManualItem = async ({ filePath, subfolder }, fileOrder) => {
       const file = path.basename(filePath);
-      const fileOrder = i + 1;
 
       // 跳过正在被实时同步处理的文件
       if (processingFilePaths.has(filePath)) {
         console.log(`   ⏭️  [手动同步-去重] 跳过正在处理中的文件: ${file}`);
-        completedCount++;
-        continue;
+        return { skipped: true, file, fileOrder };
       }
 
       const fileProgressCb = (stage, percent, extra = {}) => {
@@ -1848,44 +1909,81 @@ async function performManualSync() {
               keptInIcloud: keepGif,
               syncSource: 'manual'
             });
-            successCount++;
-            gifCount++;
             markFileAsProcessed(filePath);
-            schedulePostVideoOps(result, keepGif, file, 'manual');
+            runPostVideoOps(result, keepGif, file, 'manual');
+            return { success: true, isGif: true, isVideo: true, file, fileOrder };
           } catch (convErr) {
-            if (isManualSyncCancelledError(convErr) || (convErr && convErr.code === 'CONVERSION_ABORTED')) { cancelled = true; break; }
+            if (isManualSyncCancelledError(convErr) || (convErr && convErr.code === 'CONVERSION_ABORTED')) {
+              return { cancelled: true, file, fileOrder };
+            }
             console.error(`   ❌ [Video→GIF] 转换失败: ${convErr.message}`);
-            // 转换失败时缓存原始视频
             try {
               const buf = fs.readFileSync(filePath);
               userConfig.saveGifToCache(buf, file, null);
             } catch (_) {}
             safeSend({ type: 'file-skipped', filename: file, reason: 'video' });
-            videoCount++;
+            return { success: false, isVideo: true, file, fileOrder, error: convErr.message };
           }
-        } else if (isGif) {
-          fileProgressCb('importing', 50);
-          await syncScreenshot(filePath, true, subfolder, 'manual');
-          successCount++;
-          gifCount++;
-        } else {
-          fileProgressCb('importing', 50);
-          await syncScreenshot(filePath, true, subfolder, 'manual');
-          successCount++;
         }
 
-        completedCount++;
-        const pct = totalFiles > 0 ? Math.round((fileOrder / totalFiles) * 100) : 100;
-        sendProgress('manual-sync-progress', {
-          total: totalFiles, completed: completedCount, percent: pct,
-          fileIndex: fileOrder, filename: '', filePercent: 100, stage: 'file-done'
-        });
-
+        fileProgressCb('importing', 50);
+        await syncScreenshot(filePath, true, subfolder, 'manual');
+        return { success: true, isGif, isVideo: false, file, fileOrder };
       } catch (error) {
-        if (isManualSyncCancelledError(error) || (error && error.code === 'CONVERSION_ABORTED')) { cancelled = true; break; }
+        if (isManualSyncCancelledError(error) || (error && error.code === 'CONVERSION_ABORTED')) {
+          return { cancelled: true, file, fileOrder };
+        }
         console.error(`❌ 同步失败: ${file}`, error.message);
-        processingErrors.push({ filename: file, error: error.message });
+        return { success: false, isGif: false, isVideo: false, file, fileOrder, error: error.message };
+      }
+    };
+
+    const applyManualResult = (result) => {
+      if (!result) return;
+      if (result.cancelled) { cancelled = true; return; }
+      if (result.skipped) {
         completedCount++;
+      } else {
+        if (result.success) {
+          successCount++;
+          if (result.isGif) gifCount++;
+        } else if (result.isVideo) {
+          videoCount++;
+        }
+        if (!result.success && result.error) {
+          processingErrors.push({ filename: result.file, error: result.error });
+        }
+        completedCount++;
+      }
+
+      const pct = totalFiles > 0 ? Math.round((result.fileOrder / totalFiles) * 100) : 100;
+      sendProgress('manual-sync-progress', {
+        total: totalFiles, completed: completedCount, percent: pct,
+        fileIndex: result.fileOrder, filename: '', filePercent: 100, stage: 'file-done'
+      });
+    };
+
+    // 图片并发批处理
+    for (let start = 0; start < imageBatch.length; start += MANUAL_IMAGE_CONCURRENCY) {
+      if (shouldAbort()) { cancelled = true; break; }
+      const chunk = imageBatch.slice(start, start + MANUAL_IMAGE_CONCURRENCY);
+      const chunkResults = await Promise.all(
+        chunk.map((item, idx) => processManualItem(item, start + idx + 1))
+      );
+      for (const result of chunkResults) {
+        applyManualResult(result);
+        if (cancelled) break;
+      }
+      if (cancelled) break;
+    }
+
+    // 视频串行处理
+    if (!cancelled) {
+      for (let i = 0; i < videoBatch.length; i++) {
+        if (shouldAbort()) { cancelled = true; break; }
+        const result = await processManualItem(videoBatch[i], imageBatch.length + i + 1);
+        applyManualResult(result);
+        if (cancelled) break;
       }
     }
 
@@ -2114,6 +2212,14 @@ async function syncScreenshot(filePath, deleteAfterSync = false, subfolder = nul
 
     const shouldWaitAck = syncSource === 'realtime' && realtimeTask && realtimeTask.taskId;
     if (shouldWaitAck) {
+      markFileAsProcessed(filePath);
+      if (deleteAfterSync && shouldCleanupFile(subfolder)) {
+        if (fs.existsSync(filePath)) {
+          deleteFile(filePath);
+        }
+      } else if (deleteAfterSync) {
+        console.log(`   📌 根据备份设置，保留文件: ${filename}`);
+      }
       registerRealtimeInflightAck(realtimeTask, filePath, subfolder, filename);
       const duration = ((Date.now() - startTime) / 1000).toFixed(2);
       console.log(`   📤 已发送，等待 Figma ACK (${duration}秒)`);

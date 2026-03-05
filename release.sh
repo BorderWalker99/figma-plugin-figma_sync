@@ -167,6 +167,10 @@ verify_archive() {
     local has_manifest=0
     local has_server=0
     local has_plugin=0
+    local has_runtime_node=0
+    local has_runtime_ffmpeg=0
+    local has_runtime_gifsicle=0
+    local has_runtime_magick_or_convert=0
     local has_node_modules=0
     local has_cache=0
 
@@ -174,6 +178,10 @@ verify_archive() {
         [[ "$entry" == */项目文件/update-manifest.json ]] && has_manifest=1
         [[ "$entry" == */项目文件/server.js ]] && has_server=1
         [[ "$entry" == */项目文件/figma-plugin/manifest.json ]] && has_plugin=1
+        [[ "$entry" == */runtime/bin/node ]] && has_runtime_node=1
+        [[ "$entry" == */runtime/bin/ffmpeg ]] && has_runtime_ffmpeg=1
+        [[ "$entry" == */runtime/bin/gifsicle ]] && has_runtime_gifsicle=1
+        [[ "$entry" == */runtime/bin/magick || "$entry" == */runtime/bin/convert ]] && has_runtime_magick_or_convert=1
         [[ "$entry" == *"/node_modules/"* ]] && has_node_modules=1
         [[ "$entry" == *"/.gif-cache/"* || "$entry" == *"/.gif_cache/"* ]] && has_cache=1
     done < <(tar -tzf "$archive")
@@ -182,8 +190,16 @@ verify_archive() {
         echo -e "   ${RED}❌ ${archive} 缺少必要更新内容（manifest/server/plugin）${NC}"
         missing=1
     fi
-    if [ $has_node_modules -eq 1 ] || [ $has_cache -eq 1 ]; then
-        echo -e "   ${RED}❌ ${archive} 包含不应发布的冗余目录（node_modules 或 cache）${NC}"
+    if [ $has_runtime_node -eq 0 ] || [ $has_runtime_ffmpeg -eq 0 ] || [ $has_runtime_gifsicle -eq 0 ] || [ $has_runtime_magick_or_convert -eq 0 ]; then
+        echo -e "   ${RED}❌ ${archive} 缺少离线 runtime 必要文件（node/ffmpeg/gifsicle/magick|convert）${NC}"
+        missing=1
+    fi
+    if [ $has_node_modules -eq 0 ]; then
+        echo -e "   ${RED}❌ ${archive} 缺少预置 node_modules（非胖包）${NC}"
+        missing=1
+    fi
+    if [ $has_cache -eq 1 ]; then
+        echo -e "   ${RED}❌ ${archive} 包含不应发布的缓存目录（.gif-cache）${NC}"
         missing=1
     fi
 

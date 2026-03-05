@@ -207,6 +207,7 @@ async function detectProjectRoot() {
     // 必须存在 package.json 才算有效
     if (detectedPath && fs.existsSync(path.join(detectedPath, 'package.json'))) {
       installPath = detectedPath;
+      await ipcRenderer.invoke('set-install-path', installPath).catch(() => {});
       console.log('✅ 自动检测到项目目录:', installPath);
       return true;
     } else {
@@ -249,6 +250,7 @@ function showManualSelectionUI() {
     const result = await ipcRenderer.invoke('select-project-root');
     if (result.success && result.path) {
       installPath = result.path;
+      await ipcRenderer.invoke('set-install-path', installPath).catch(() => {});
       showToast('已选择项目目录', 'success');
       // 移除警告
       alertDiv.remove();
@@ -419,7 +421,7 @@ Homebrew 不支持此系统版本，自动安装将会失败。
     
     // 检查 Homebrew
     const homebrewCheck = checks.children[0];
-    const homebrewResult = await ipcRenderer.invoke('check-homebrew');
+    const homebrewResult = await ipcRenderer.invoke('check-homebrew', installPath);
     dependencyStatus.homebrew = homebrewResult.installed;
     
     if (homebrewResult.skipped) {
@@ -454,7 +456,7 @@ Homebrew 不支持此系统版本，自动安装将会失败。
     
     // 检查 Node.js
     const nodeCheck = checks.children[1];
-    const nodeResult = await ipcRenderer.invoke('check-node');
+    const nodeResult = await ipcRenderer.invoke('check-node', installPath);
     dependencyStatus.node = nodeResult.installed;
     
     if (nodeResult.installed) {
@@ -479,7 +481,7 @@ Homebrew 不支持此系统版本，自动安装将会失败。
     
     // 检查 ImageMagick
     const imageMagickCheck = checks.children[2];
-    const imageMagickResult = await ipcRenderer.invoke('check-imagemagick');
+    const imageMagickResult = await ipcRenderer.invoke('check-imagemagick', installPath);
     dependencyStatus.imagemagick = imageMagickResult.installed;
     
     if (imageMagickResult.installed) {
@@ -504,7 +506,7 @@ Homebrew 不支持此系统版本，自动安装将会失败。
     
     // 检查 FFmpeg
     const ffmpegCheck = checks.children[3];
-    const ffmpegResult = await ipcRenderer.invoke('check-ffmpeg');
+    const ffmpegResult = await ipcRenderer.invoke('check-ffmpeg', installPath);
     dependencyStatus.ffmpeg = ffmpegResult.installed;
     
     if (ffmpegResult.installed) {
@@ -529,7 +531,7 @@ Homebrew 不支持此系统版本，自动安装将会失败。
     
     // 检查 Gifsicle
     const gifsicleCheck = checks.children[4];
-    const gifsicleResult = await ipcRenderer.invoke('check-gifsicle');
+    const gifsicleResult = await ipcRenderer.invoke('check-gifsicle', installPath);
     dependencyStatus.gifsicle = gifsicleResult.installed;
     
     if (gifsicleResult.installed) {

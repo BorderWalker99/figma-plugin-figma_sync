@@ -66,3 +66,13 @@ Developer_*.command
 
 # 缓存文件
 .gif-cache/
+
+# 离线胖包运行时（二进制本地准备，不入库）
+runtime/**
+!runtime/README.md
+!runtime/*/
+!runtime/*/README.md
+!runtime/*/bin/
+!runtime/*/bin/.gitkeep
+offline-runtime/**
+!offline-runtime/README.md
