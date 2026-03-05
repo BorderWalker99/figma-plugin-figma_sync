@@ -526,6 +526,7 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
   if (!gifInfos || !Array.isArray(gifInfos) || gifInfos.length === 0) {
     throw new Error('gifInfos 为空或格式不正确');
   }
+  reportProgress(1, '正在校验导出资源...');
   
   const gifPaths = [];
   for (let i = 0; i < gifInfos.length; i++) {
@@ -850,19 +851,42 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
     const ext = path.extname(item.path).toLowerCase();
     return ext === '.mp4' || ext === '.mov';
   });
+  const preflightSourceSizeMB = gifPaths.reduce((max, item) => {
+    const s = Number(item && item.sourceSizeMB);
+    return Number.isFinite(s) ? Math.max(max, s) : max;
+  }, 0);
+  const preflightPixels = Math.max(1, Math.round((frameBounds && frameBounds.width) || 1)) * Math.max(1, Math.round((frameBounds && frameBounds.height) || 1));
+  const preflightTrigger = ((mediaTuning.composerExport || {}).ultraTrigger) || {};
+  const preflightGlobalUltraMb = Number.isFinite((mediaTuning.thresholds || {}).ultraSpeedVideoMb) ? (mediaTuning.thresholds || {}).ultraSpeedVideoMb : 150;
+  const preflightMinVideoMb = Number.isFinite(preflightTrigger.minVideoMb) ? preflightTrigger.minVideoMb : preflightGlobalUltraMb;
+  const preflightMinPixels = Number.isFinite(preflightTrigger.minPixels) ? preflightTrigger.minPixels : 3500000;
+  const preflightAutoFast = preflightSourceSizeMB >= preflightMinVideoMb || preflightPixels >= preflightMinPixels;
+  const preflightMode = normalizedRequestedMode === 'auto' ? (preflightAutoFast ? 'fast' : 'quality') : normalizedRequestedMode;
+  const totalVideoCount = gifPaths.filter(item => {
+    const ext = path.extname(item.path).toLowerCase();
+    return ext === '.mp4' || ext === '.mov';
+  }).length;
+  let finishedVideoCount = 0;
+  reportProgress(2, `已执行极速档预判: ${preflightMode.toUpperCase()} [preflight(sourceSize=${preflightSourceSizeMB.toFixed(1)}MB,pixels=${preflightPixels})]`);
   
   // 如果有视频文件，预先检查 FFmpeg
   if (hasVideo) {
+    reportProgress(3, `正在检查视频处理环境 (0/${totalVideoCount})...`);
     try {
-      await execAsync('which ffmpeg');
+      await execAsync('which ffmpeg', { timeout: 8000 });
     } catch (e) {
       throw new Error('未找到 FFmpeg\n\n视频转 GIF 需要 FFmpeg，请先安装:\nbrew install ffmpeg');
     }
+  } else {
+    reportProgress(3, '正在分析 GIF 资源...');
   }
   
   // 🚀 优化：并行处理所有视频转换任务
   // 说明：GIF 在后续统一帧合成与最终编码阶段会再次走调色板+压缩，
   // 这里不再做一次“预重编码”，避免重复计算造成导出变慢。
+  if (hasVideo) {
+    reportProgress(4, `正在预处理视频 (0/${totalVideoCount})...`);
+  }
   await Promise.all(gifPaths.map(async (item, i) => {
     const ext = path.extname(item.path).toLowerCase();
     
@@ -872,6 +896,7 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
       
       const targetW = Math.round(item.bounds.width);
       const targetH = Math.round(item.bounds.height);
+      reportProgress(4, `正在预压缩视频 (${finishedVideoCount + 1}/${totalVideoCount})...`);
       const videoSourceForGif = await buildHalfScaleVideo(item.path, `pre_${i}`);
       
       // 🚀 缓存：源视频→GIF 的转换结果（包含目标尺寸+抖动算法+当前帧率上限配置）
@@ -909,6 +934,9 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
         fs.copyFileSync(cachedGifPath, processedGifPath);
         item.path = processedGifPath;
         console.log(`   ⚡ 命中缓存，跳过转换 (${targetW}x${targetH})`);
+        finishedVideoCount++;
+        const preProgress = Math.min(6, Math.round(4 + (finishedVideoCount / Math.max(1, totalVideoCount)) * 2));
+        reportProgress(preProgress, `正在预处理视频 (${finishedVideoCount}/${totalVideoCount})...`);
         return;
       }
       
@@ -1002,6 +1030,9 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
         
         // 更新路径为处理后的 GIF
         item.path = processedGifPath;
+        finishedVideoCount++;
+        const preProgress = Math.min(6, Math.round(4 + (finishedVideoCount / Math.max(1, totalVideoCount)) * 2));
+        reportProgress(preProgress, `正在预处理视频 (${finishedVideoCount}/${totalVideoCount})...`);
         
         // 清理临时调色板文件
         try {
