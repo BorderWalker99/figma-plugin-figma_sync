@@ -240,8 +240,29 @@ function syncBundledRuntimeFromExtractedDir(extractedDir) {
   if (!runtimeSource) return false;
 
   const runtimeDest = path.join(packageRoot, 'runtime');
+  const resolveSafe = (p) => {
+    try { return fs.realpathSync(p); } catch (_) { return path.resolve(p); }
+  };
+  const srcResolved = resolveSafe(runtimeSource);
+  const destResolved = resolveSafe(runtimeDest);
+  if (srcResolved === destResolved) {
+    console.log('   ℹ️  runtime 源目录与目标目录相同，跳过复制');
+    addBundledRuntimeToPath();
+    return true;
+  }
+  const relToSrc = path.relative(srcResolved, destResolved);
+  if (relToSrc && !relToSrc.startsWith('..') && !path.isAbsolute(relToSrc)) {
+    console.warn(`   ⚠️  检测到 runtime 目标位于源目录内部，已跳过复制: ${destResolved}`);
+    return false;
+  }
+
   fs.mkdirSync(runtimeDest, { recursive: true });
-  fs.cpSync(runtimeSource, runtimeDest, { recursive: true, force: true });
+  // 仅复制目录内容，避免出现 runtime/runtime 嵌套或“copy into itself”错误
+  for (const entry of fs.readdirSync(runtimeSource)) {
+    const srcEntry = path.join(runtimeSource, entry);
+    const destEntry = path.join(runtimeDest, entry);
+    fs.cpSync(srcEntry, destEntry, { recursive: true, force: true });
+  }
   addBundledRuntimeToPath();
   return true;
 }
@@ -250,8 +271,28 @@ function syncBundledNodeModulesFromExtractedDir(extractedDir) {
   const source = path.join(extractedDir, 'node_modules');
   const dest = path.join(__dirname, 'node_modules');
   if (!fs.existsSync(source) || !fs.statSync(source).isDirectory()) return false;
+  const resolveSafe = (p) => {
+    try { return fs.realpathSync(p); } catch (_) { return path.resolve(p); }
+  };
+  const srcResolved = resolveSafe(source);
+  const destResolved = resolveSafe(dest);
+  if (srcResolved === destResolved) {
+    console.log('   ℹ️  node_modules 源目录与目标目录相同，跳过复制');
+    return true;
+  }
+  const relToSrc = path.relative(srcResolved, destResolved);
+  if (relToSrc && !relToSrc.startsWith('..') && !path.isAbsolute(relToSrc)) {
+    console.warn(`   ⚠️  检测到 node_modules 目标位于源目录内部，已跳过复制: ${destResolved}`);
+    return false;
+  }
+
   fs.mkdirSync(dest, { recursive: true });
-  fs.cpSync(source, dest, { recursive: true, force: true });
+  // 仅复制目录内容，避免出现 node_modules/node_modules 嵌套或“copy into itself”错误
+  for (const entry of fs.readdirSync(source)) {
+    const srcEntry = path.join(source, entry);
+    const destEntry = path.join(dest, entry);
+    fs.cpSync(srcEntry, destEntry, { recursive: true, force: true });
+  }
   return true;
 }
 
