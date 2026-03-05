@@ -166,6 +166,7 @@ fi
 echo -e "   ${YELLOW}正在校验安装包内容...${NC}"
 verify_archive() {
     local archive="$1"
+    local expected_arch="$2" # intel | apple
     local missing=0
     local has_manifest=0
     local has_server=0
@@ -176,6 +177,7 @@ verify_archive() {
     local has_runtime_magick_or_convert=0
     local has_node_modules=0
     local has_cache=0
+    local has_unexpected_runtime_arch=0
 
     while IFS= read -r entry; do
         [[ "$entry" == */项目文件/update-manifest.json ]] && has_manifest=1
@@ -187,6 +189,11 @@ verify_archive() {
         [[ "$entry" == */runtime/bin/magick || "$entry" == */runtime/bin/convert ]] && has_runtime_magick_or_convert=1
         [[ "$entry" == *"/node_modules/"* ]] && has_node_modules=1
         [[ "$entry" == *"/.gif-cache/"* || "$entry" == *"/.gif_cache/"* ]] && has_cache=1
+        if [ "$expected_arch" = "intel" ]; then
+            [[ "$entry" == */runtime/apple/* || "$entry" == */runtime/arm64/* ]] && has_unexpected_runtime_arch=1
+        else
+            [[ "$entry" == */runtime/intel/* || "$entry" == */runtime/x64/* ]] && has_unexpected_runtime_arch=1
+        fi
     done < <(tar -tzf "$archive")
 
     if [ $has_manifest -eq 0 ] || [ $has_server -eq 0 ] || [ $has_plugin -eq 0 ]; then
@@ -205,6 +212,14 @@ verify_archive() {
         echo -e "   ${RED}❌ ${archive} 包含不应发布的缓存目录（.gif-cache）${NC}"
         missing=1
     fi
+    if [ $has_unexpected_runtime_arch -eq 1 ]; then
+        if [ "$expected_arch" = "intel" ]; then
+            echo -e "   ${RED}❌ ${archive} 包含 Apple runtime 目录（runtime/apple 或 runtime/arm64）${NC}"
+        else
+            echo -e "   ${RED}❌ ${archive} 包含 Intel runtime 目录（runtime/intel 或 runtime/x64）${NC}"
+        fi
+        missing=1
+    fi
 
     if [ $missing -eq 1 ]; then
         return 1
@@ -213,8 +228,8 @@ verify_archive() {
     return 0
 }
 
-verify_archive "$INTEL_TAR"
-verify_archive "$APPLE_TAR"
+verify_archive "$INTEL_TAR" "intel"
+verify_archive "$APPLE_TAR" "apple"
 
 # ==================== 步骤 3: 提交代码 ====================
 echo -e "\n${BLUE}📤 步骤 3/5: 提交代码到 GitHub...${NC}"

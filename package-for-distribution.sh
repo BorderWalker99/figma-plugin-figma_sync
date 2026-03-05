@@ -202,6 +202,22 @@ create_package() {
         exit 1
     fi
     rsync -a "$runtime_src/" "$TEMP_DIR/runtime/"
+    # 仅保留当前安装包所需 runtime，避免误带另一架构目录
+    rm -rf "$TEMP_DIR/runtime/apple" "$TEMP_DIR/runtime/arm64" \
+           "$TEMP_DIR/runtime/intel" "$TEMP_DIR/runtime/x64" 2>/dev/null || true
+
+    if [ "$ARCH_KEY" = "intel" ]; then
+        if [ -d "$TEMP_DIR/runtime/apple" ] || [ -d "$TEMP_DIR/runtime/arm64" ]; then
+            echo -e "${RED}❌ Intel 安装包包含了 Apple runtime 目录，已中止${NC}"
+            exit 1
+        fi
+    else
+        if [ -d "$TEMP_DIR/runtime/intel" ] || [ -d "$TEMP_DIR/runtime/x64" ]; then
+            echo -e "${RED}❌ Apple 安装包包含了 Intel runtime 目录，已中止${NC}"
+            exit 1
+        fi
+    fi
+
     require_file "$TEMP_DIR/runtime/bin/node" "runtime/bin/node 必须存在"
     require_file "$TEMP_DIR/runtime/bin/ffmpeg" "runtime/bin/ffmpeg 必须存在"
     require_file "$TEMP_DIR/runtime/bin/gifsicle" "runtime/bin/gifsicle 必须存在"
