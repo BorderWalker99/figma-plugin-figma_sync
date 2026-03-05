@@ -4322,12 +4322,31 @@ server.listen(PORT, HOST, () => {
   process.exit(1);
 }
 
-process.on('SIGINT', () => {
-  console.log('\n\n👋 关闭服务器...');
-  clearInterval(_userFolderCacheSweepTimer);
-  clearInterval(_cleanupTimer);
-  clearInterval(_staleWsSweepTimer);
+let _serverShuttingDown = false;
+function shutdownServer(signal = 'SIGINT') {
+  if (_serverShuttingDown) return;
+  _serverShuttingDown = true;
+  console.log(`\n\n👋 关闭服务器... (${signal})`);
+
+  try { clearInterval(_userFolderCacheSweepTimer); } catch (_) {}
+  try { clearInterval(_cleanupTimer); } catch (_) {}
+  try { clearInterval(_staleWsSweepTimer); } catch (_) {}
   try { clearInterval(_proxySessionSweepTimer); } catch (_) {}
   try { clearInterval(_chunkSessionSweepTimer); } catch (_) {}
-  server.close(() => process.exit(0));
-});
+
+  try {
+    wss.clients.forEach((client) => {
+      try { client.terminate(); } catch (_) {}
+    });
+  } catch (_) {}
+
+  try {
+    server.close(() => process.exit(0));
+    setTimeout(() => process.exit(0), 2000);
+  } catch (_) {
+    process.exit(0);
+  }
+}
+
+process.on('SIGINT', () => shutdownServer('SIGINT'));
+process.on('SIGTERM', () => shutdownServer('SIGTERM'));

@@ -177,6 +177,64 @@ let server = null;
 let serverRestartCount = 0;
 const MAX_RESTART_BACKOFF_MS = 60000;
 let startupContinued = false;
+let modeCheckInterval = null;
+let shuttingDown = false;
+let serverFileWatcher = null;
+const pendingTimeouts = new Set();
+
+function scheduleTimeout(fn, delayMs) {
+  const id = setTimeout(() => {
+    pendingTimeouts.delete(id);
+    if (shuttingDown) return;
+    try { fn(); } catch (_) {}
+  }, delayMs);
+  pendingTimeouts.add(id);
+  return id;
+}
+
+function clearPendingTimeouts() {
+  for (const id of pendingTimeouts) {
+    try { clearTimeout(id); } catch (_) {}
+  }
+  pendingTimeouts.clear();
+}
+
+function cleanupSyncModeFile() {
+  try {
+    if (fs.existsSync(SYNC_MODE_FILE)) {
+      fs.unlinkSync(SYNC_MODE_FILE);
+    }
+  } catch (_) {}
+}
+
+function shutdown(reason = 'SIGINT') {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`\n\n👋 正在停止所有服务... (${reason})`);
+  clearPendingTimeouts();
+
+  if (modeCheckInterval) {
+    clearInterval(modeCheckInterval);
+    modeCheckInterval = null;
+  }
+  if (serverFileWatcher) {
+    try { serverFileWatcher.close(); } catch (_) {}
+    serverFileWatcher = null;
+  }
+
+  try {
+    services.forEach((s) => {
+      if (!s) return;
+      if (typeof s.kill === 'function') {
+        try { s.kill(); } catch (_) {}
+      } else if (typeof s.close === 'function') {
+        try { s.close(); } catch (_) {}
+      }
+    });
+  } catch (_) {}
+  cleanupSyncModeFile();
+  process.exit(0);
+}
 
 // 检查环境（只在启动时检查一次）
 function checkEnvironment() {
@@ -242,6 +300,7 @@ function checkEnvironment() {
 
 // 启动服务器（支持自动重启）
 function startServer() {
+  if (shuttingDown) return;
   console.log('🚀 启动WebSocket服务器...');
   
   // 增加 Node.js 内存限制到 4GB，以支持大文件（GIF/视频）处理
@@ -277,7 +336,7 @@ function startServer() {
       serverRestartCount++;
       const retryDelay = Math.min(MAX_RESTART_BACKOFF_MS, 3000 * Math.pow(2, Math.min(serverRestartCount - 1, 5)));
       console.log(`\n🔄 尝试自动重启服务器（第 ${serverRestartCount} 次，${Math.round(retryDelay / 1000)} 秒后）...`);
-      setTimeout(() => {
+      scheduleTimeout(() => {
         cleanupPort(); // 防止端口被僵尸进程占用导致反复失败
         startServer();
       }, retryDelay);
@@ -314,11 +373,11 @@ function checkEnvironmentWithRetry() {
     console.warn(`\n⚠️  环境检查失败（第 ${envCheckAttempts}/${MAX_ENV_CHECK_ATTEMPTS} 次）`);
     console.log(`   将在 10 秒后重试...\n`);
     
-    setTimeout(() => {
+    scheduleTimeout(() => {
       if (!checkEnvironmentWithRetry()) {
         console.error('\n❌ 环境检查多次失败，保持后台重试...');
         console.error('   请检查依赖安装状态，服务将在 30 秒后再次尝试\n');
-        setTimeout(() => {
+        scheduleTimeout(() => {
           if (checkEnvironmentWithRetry() && !startupContinued) {
             startupContinued = true;
             continueStartup();
@@ -338,7 +397,7 @@ function checkEnvironmentWithRetry() {
   
   console.error('\n❌ 环境检查失败，已达到最大重试次数');
   console.error('   将在后台继续重试，不退出进程\n');
-  setTimeout(() => {
+  scheduleTimeout(() => {
     if (checkEnvironmentWithRetry() && !startupContinued) {
       startupContinued = true;
       continueStartup();
@@ -361,12 +420,13 @@ function continueStartup() {
 
   // 监听 server.js 变化实现自动重启
   if (chokidar) {
-    const serverWatcher = chokidar.watch(path.join(__dirname, 'server.js'), {
+    serverFileWatcher = chokidar.watch(path.join(__dirname, 'server.js'), {
       persistent: true,
       ignoreInitial: true
     });
 
-    serverWatcher.on('change', (filePath) => {
+    serverFileWatcher.on('change', (filePath) => {
+      if (shuttingDown) return;
       console.log(`\n🔄 检测到服务器文件变化: ${path.basename(filePath)}`);
       console.log('   正在重启服务器...');
       
@@ -389,7 +449,7 @@ function continueStartup() {
       }
       
       // 稍等一下再重启，确保文件写入完成和端口释放
-      setTimeout(() => {
+      scheduleTimeout(() => {
         cleanupPort(); // 确保端口已清理
         startServer();
       }, 2000); // 增加等待时间到 2 秒
@@ -400,7 +460,7 @@ function continueStartup() {
   }
   
   // 延迟启动监听器，避免重复启动
-  setTimeout(() => {
+  scheduleTimeout(() => {
     startWatcher();
     startModeCheck(); // 启动模式检查
     
@@ -410,26 +470,13 @@ function continueStartup() {
   }, 2000);
   
   // 优雅退出
-  process.on('SIGINT', () => {
-    console.log('\n\n👋 正在停止所有服务...');
-    if (modeCheckInterval) {
-      clearInterval(modeCheckInterval);
-    }
-    services.forEach(s => s.kill());
-    // 清理配置文件
-    try {
-      if (fs.existsSync(SYNC_MODE_FILE)) {
-        fs.unlinkSync(SYNC_MODE_FILE);
-      }
-    } catch (error) {
-      // 忽略错误
-    }
-    process.exit(0);
-  });
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
 }
 
 // 启动监听器
 function startWatcher() {
+  if (shuttingDown) return;
   // 读取最新的模式
   const currentMode = readSyncMode();
   
@@ -465,13 +512,13 @@ function startWatcher() {
       const newMode = readSyncMode();
       if (newMode !== SYNC_MODE) {
         console.log(`🔄 检测到模式切换: ${SYNC_MODE} -> ${newMode}`);
-        setTimeout(() => {
+        scheduleTimeout(() => {
           startWatcher();
         }, 1000);
       } else {
         // 即使模式没变，也尝试重启（可能是意外退出）
         console.log(`🔄 监听器意外退出，正在重启...`);
-        setTimeout(() => {
+        scheduleTimeout(() => {
           startWatcher();
         }, 2000);
       }
@@ -492,13 +539,13 @@ function startWatcher() {
       const newMode = readSyncMode();
       if (newMode !== SYNC_MODE) {
         console.log(`🔄 检测到模式切换: ${SYNC_MODE} -> ${newMode}`);
-        setTimeout(() => {
+        scheduleTimeout(() => {
           startWatcher();
         }, 1000);
       } else {
         // 即使模式没变，也尝试重启（可能是意外退出）
         console.log(`🔄 监听器意外退出，正在重启...`);
-        setTimeout(() => {
+        scheduleTimeout(() => {
           startWatcher();
         }, 2000);
       }
@@ -519,13 +566,13 @@ function startWatcher() {
       const newMode = readSyncMode();
       if (newMode !== SYNC_MODE) {
         console.log(`🔄 检测到模式切换: ${SYNC_MODE} -> ${newMode}`);
-        setTimeout(() => {
+        scheduleTimeout(() => {
           startWatcher();
         }, 1000);
       } else {
         // 即使模式没变，也尝试重启（可能是意外退出）
         console.log(`🔄 监听器意外退出，正在重启...`);
-        setTimeout(() => {
+        scheduleTimeout(() => {
           startWatcher();
         }, 2000);
       }
@@ -536,7 +583,6 @@ function startWatcher() {
 }
 
 // 定期检查模式文件变化（每3秒检查一次）
-let modeCheckInterval = null;
 function startModeCheck() {
   if (modeCheckInterval) {
     clearInterval(modeCheckInterval);
