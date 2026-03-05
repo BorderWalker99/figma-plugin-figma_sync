@@ -45,6 +45,55 @@ require_runtime_arch() {
     fi
 }
 
+ensure_sharp_matches_arch() {
+    local project_dir="$1"
+    local runtime_bin_dir="$2"
+    local npm_cpu="$3" # x64 | arm64
+    local npm_bin=""
+    local expected_pkg_dir="$project_dir/node_modules/@img/sharp-darwin-${npm_cpu}"
+    local expected_libvips_dir="$project_dir/node_modules/@img/sharp-libvips-darwin-${npm_cpu}"
+
+    # 先做静态校验（跨架构主机可用，不要求执行目标架构 node）
+    if [ -d "$expected_pkg_dir" ] && [ -d "$expected_libvips_dir" ]; then
+        echo "   ✅ sharp 预编译包已匹配 darwin-${npm_cpu}"
+        return 0
+    fi
+
+    # 使用宿主 npm 做“目标架构定向安装”（避免在 Apple 机器执行 x64 runtime/node 失败）
+    if command -v npm >/dev/null 2>&1; then
+        npm_bin="$(command -v npm)"
+    elif [ -x "$runtime_bin_dir/npm" ]; then
+        npm_bin="$runtime_bin_dir/npm"
+    fi
+
+    if [ -z "$npm_bin" ]; then
+        echo -e "${YELLOW}⚠️  未找到可用 npm，跳过打包期 sharp 预修复（安装时会自动修复）${NC}"
+        return 0
+    fi
+
+    echo "   ⚠️  sharp 目标架构包缺失，尝试预修复为 darwin-${npm_cpu}..."
+    set +e
+    "$npm_bin" --prefix "$project_dir" install \
+      --no-save \
+      --include=optional \
+      --legacy-peer-deps \
+      --platform=darwin \
+      --arch="$npm_cpu" \
+      sharp \
+      --registry=https://registry.npmmirror.com >/dev/null 2>&1
+    local sharp_install_rc=$?
+    set -e
+
+    if [ "$sharp_install_rc" -eq 0 ] && [ -d "$expected_pkg_dir" ] && [ -d "$expected_libvips_dir" ]; then
+        echo "   ✅ sharp 预修复成功（darwin-${npm_cpu}）"
+        return 0
+    fi
+
+    echo -e "${YELLOW}⚠️  sharp 预修复未完成（darwin-${npm_cpu}），继续打包${NC}"
+    echo -e "${YELLOW}   安装器/emergency-update 启动时会执行 sharp 运行时自愈。${NC}"
+    return 0
+}
+
 resolve_runtime_source() {
     local arch="$1" # intel / apple
     local candidates=()
@@ -237,6 +286,12 @@ create_package() {
     else
         require_runtime_arch "$TEMP_DIR/runtime/bin/convert" "$expected_bin_arch"
     fi
+
+    local expected_npm_cpu="arm64"
+    if [ "$ARCH_KEY" = "intel" ]; then
+        expected_npm_cpu="x64"
+    fi
+    ensure_sharp_matches_arch "$TEMP_DIR/项目文件" "$TEMP_DIR/runtime/bin" "$expected_npm_cpu"
     
     # 3. 复制对应架构的 DMG (不再需要 .command 脚本, 安装器内部自动清除隔离)
     echo -e "${YELLOW}🖥️  复制 ${ARCH_TYPE} 安装器...${NC}"

@@ -1995,8 +1995,7 @@ async function performManualSync() {
     console.log(`\n✅ [Drive] 手动同步完成: ${success}/${refreshedFiles.length} 成功 (图片:${imageCount}, GIF:${gifCount}${processingErrors.length > 0 ? `, 失败:${processingErrors.length}` : ''}${downloadFailedFiles.length > 0 ? `, 下载失败:${downloadFailedFiles.length}` : ''})`);
 
     if (ws && ws.readyState === WebSocket.OPEN) {
-      const backupModeForCount = userConfig.getBackupMode();
-      const savedGifCount = (backupModeForCount !== 'none') ? gifCount : 0;
+      const savedGifCount = gifCount;
       
       const message = {
         type: 'manual-sync-complete',
@@ -2086,6 +2085,23 @@ function stopPolling() {
     clearInterval(pollTimer);
     pollTimer = null;
     console.log('🛑 [Drive] 停止轮询');
+  }
+}
+
+function releaseRuntimeResources(options = {}) {
+  const preserveKnown = options.preserveKnown === true;
+  killAllChildProcesses();
+  stopPolling();
+  processingFileIds.clear();
+  realtimeVideoQueue.length = 0;
+  realtimeQueuedVideoFileIds.clear();
+  isDriveRealtimeVideoQueueRunning = false;
+  manualSyncAbortRequested = false;
+  pendingManualSync = false;
+  if (!preserveKnown) {
+    knownFileIds.clear();
+    knownFileMD5s.clear();
+    pendingDeletes.clear();
   }
 }
 
@@ -2201,13 +2217,7 @@ function connectWebSocket() {
         console.log('\n⏸️  [Drive] 停止实时同步模式');
         isRealTimeMode = false;
         wasRealTimeMode = false;
-        pendingManualSync = false;
-        killAllChildProcesses();
-        processingFileIds.clear();
-        realtimeVideoQueue.length = 0;
-        realtimeQueuedVideoFileIds.clear();
-        isDriveRealtimeVideoQueueRunning = false;
-        stopPolling();
+        releaseRuntimeResources({ preserveKnown: true });
         return;
       }
 
@@ -2268,12 +2278,7 @@ function connectWebSocket() {
     console.log('⚠️  [Drive] 服务器连接断开，5秒后重连');
     wasRealTimeMode = isRealTimeMode;
     isRealTimeMode = false;
-    killAllChildProcesses();
-    processingFileIds.clear();
-    realtimeVideoQueue.length = 0;
-    realtimeQueuedVideoFileIds.clear();
-    isDriveRealtimeVideoQueueRunning = false;
-    stopPolling();
+    releaseRuntimeResources({ preserveKnown: true });
     setTimeout(connectWebSocket, 5000);
   });
 
@@ -2479,14 +2484,15 @@ async function start() {
   const _cacheCleanupTimer = setInterval(cleanupCache, CLEANUP_INTERVAL_MS);
   console.log(`🧹 [缓存管理] 已启动定期清理，每 ${CLEANUP_INTERVAL_MS / 1000 / 60} 分钟执行一次`);
 
-  process.on('SIGINT', () => {
-    console.log('\n👋 [Drive] 停止服务');
-    killAllChildProcesses();
+  const shutdown = (signal) => {
+    console.log(`\n👋 [Drive] 停止服务 (${signal})`);
     clearInterval(_cacheCleanupTimer);
-    stopPolling();
+    releaseRuntimeResources({ preserveKnown: false });
     if (ws) ws.close();
     process.exit(0);
-  });
+  };
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
 }
 
 start();

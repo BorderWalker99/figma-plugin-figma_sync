@@ -4087,8 +4087,8 @@ wss.on('connection', (ws, req) => {
         sendToFigma(targetGroup, { type: 'backup-screenshot-setting-info', mode, enabled: mode === 'all' });
       } else {
         let mode = data.mode;
-        if (!mode && typeof data.enabled !== 'undefined') mode = data.enabled ? 'all' : 'none';
-        if (!['none', 'gif_only', 'all'].includes(mode)) mode = 'none';
+        if (!mode && typeof data.enabled !== 'undefined') mode = data.enabled ? 'all' : 'gif_only';
+        if (!['gif_only', 'all'].includes(mode)) mode = 'gif_only';
         userConfig.updateBackupMode(mode);
         const payload = { type: 'backup-screenshot-setting-updated', success: true, mode, enabled: mode === 'all' };
         sendToFigma(targetGroup, payload);

@@ -1120,7 +1120,6 @@ async function moveFileToSubfolder(filePath, isExportedGif = false) {
 /**
  * 根据备份模式判断是否应该清理文件（iCloud 模式）
  * iCloud 仅使用 ScreenSyncImg 下的「图片 / GIF / 导出的GIF」，不使用视频子文件夹：
- * - 'none': 同步后清理「图片」和「GIF」
  * - 'gif_only': 同步后保留「GIF」，清理「图片」
  * - 'all': 同步后保留「图片」和「GIF」
  * - 导出的GIF：始终保留
@@ -1135,7 +1134,7 @@ function shouldCleanupFile(subfolder) {
   
   // GIF 子文件夹
   if (subfolder === CONFIG.subfolders.gif) {
-    return backupMode === 'none';
+    return false;
   }
   
   // 图片子文件夹
@@ -1250,17 +1249,7 @@ function connectWebSocket() {
       } else if (message.type === 'stop-realtime') {
         console.log('\n⏸️  停止实时同步模式\n');
         isRealTimeMode = false;
-        pendingManualSync = false;
-        killAllChildProcesses();
-        processingFilePaths.clear();
-        clearRealtimeRetryTimers();
-        clearRealtimeInflightAcks();
-        clearRealtimeReconcileTimer();
-        realtimeImageQueue.length = 0;
-        realtimeVideoQueue.length = 0;
-        realtimeQueuedFilePaths.clear();
-        isRealtimeImageQueueRunning = false;
-        isRealtimeVideoQueueRunning = false;
+        releaseRuntimeResources({ preserveProcessedCache: true });
         realtimeSessionStartedAt = 0;
         manualSyncAbortRequested = true;
       } else if (message.type === 'manual-sync-count-files') {
@@ -1305,9 +1294,8 @@ function connectWebSocket() {
         if (message.mode !== 'icloud') {
           console.log('⚠️  当前是 iCloud watcher，需要切换到其他模式');
           console.log('   正在退出，请等待 start.js 重启正确的 watcher...\n');
-          killAllChildProcesses();
+          releaseRuntimeResources({ preserveProcessedCache: false });
           clearInterval(cacheCleanupInterval);
-          stopWatching();
           if (ws) {
             ws.close();
           }
@@ -1326,20 +1314,9 @@ function connectWebSocket() {
   ws.on('close', () => {
     console.log('⚠️  服务器连接断开');
     isRealTimeMode = false;
-    killAllChildProcesses();
-    processingFilePaths.clear();
-    clearRealtimeRetryTimers();
-    clearRealtimeInflightAcks();
-    clearRealtimeReconcileTimer();
-    realtimeImageQueue.length = 0;
-    realtimeVideoQueue.length = 0;
-    realtimeQueuedFilePaths.clear();
-    isRealtimeImageQueueRunning = false;
-    isRealtimeVideoQueueRunning = false;
+    releaseRuntimeResources({ preserveProcessedCache: true });
     realtimeSessionStartedAt = 0;
     manualSyncAbortRequested = true;
-    stopWatching();
-    pendingDeletes.clear();
     scheduleReconnect();
   });
   
@@ -1664,6 +1641,27 @@ function stopWatching() {
       console.error('❌ 停止监听器失败:', error);
       watcher = null;
     }
+  }
+}
+
+function releaseRuntimeResources(options = {}) {
+  const preserveProcessedCache = options.preserveProcessedCache === true;
+  killAllChildProcesses();
+  stopWatching();
+  clearRealtimeRetryTimers();
+  clearRealtimeInflightAcks();
+  clearRealtimeReconcileTimer();
+  realtimeImageQueue.length = 0;
+  realtimeVideoQueue.length = 0;
+  realtimeQueuedFilePaths.clear();
+  pendingDeletes.clear();
+  processingFilePaths.clear();
+  isRealtimeImageQueueRunning = false;
+  isRealtimeVideoQueueRunning = false;
+  manualSyncAbortRequested = false;
+  pendingManualSync = false;
+  if (!preserveProcessedCache) {
+    processedFilesCache.clear();
   }
 }
 
@@ -2003,9 +2001,8 @@ async function performManualSync() {
       console.log(`   ❌ 失败: ${processingErrors.length} 个`);
     }
 
-    const backupMode = userConfig.getBackupMode ? userConfig.getBackupMode() : 'gif_only';
     const imageCount = Math.max(0, successCount - gifCount);
-    const savedGifCount = (backupMode !== 'none') ? gifCount : 0;
+    const savedGifCount = gifCount;
     safeSend({
       type: 'manual-sync-complete',
       count: successCount,
@@ -2292,16 +2289,17 @@ function start() {
   // ✅ 无论是否连接插件，都立即启动文件监听器（用于自动整理）
   startWatching();
   
-  process.on('SIGINT', () => {
-    console.log('\n\n👋 停止服务...');
+  const shutdown = (signal) => {
+    console.log(`\n\n👋 停止服务 (${signal})...`);
     console.log(`📊 总共同步了 ${syncCount} 张截图`);
     console.log(`📋 待删除队列: ${pendingDeletes.size} 个文件\n`);
-    killAllChildProcesses();
     clearInterval(cacheCleanupInterval);
-    stopWatching();
+    releaseRuntimeResources({ preserveProcessedCache: false });
     if (ws) ws.close();
     process.exit(0);
-  });
+  };
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
 }
 
 start();

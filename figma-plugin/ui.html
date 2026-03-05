@@ -3967,7 +3967,6 @@
             <select id="backupModeSelect" class="settings-select">
                 <option value="gif_only" data-i18n-option="backup_gif">GIF</option>
                 <option value="all" data-i18n-option="backup_gif_images">GIF + 图片</option>
-                <option value="none" data-i18n-option="backup_none">无</option>
             </select>
         </div>
 
@@ -5751,7 +5750,8 @@
         } else if (data.type === 'backup-screenshot-setting-info') {
           // 接收备份截图设置信息
           if (typeof backupModeSelect !== 'undefined' && backupModeSelect) {
-            const mode = data.mode || (data.enabled ? 'all' : 'none');
+            const rawMode = data.mode || (data.enabled ? 'all' : 'gif_only');
+            const mode = (rawMode === 'all') ? 'all' : 'gif_only';
             backupModeSelect.value = mode;
             originalSettings.backupMode = mode;
             // 调整宽度以适应当前选项
@@ -5763,7 +5763,8 @@
           // 备份截图设置已更新
           if (data.success) {
             if (typeof backupModeSelect !== 'undefined' && backupModeSelect) {
-              const mode = data.mode || (data.enabled ? 'all' : 'none');
+              const rawMode = data.mode || (data.enabled ? 'all' : 'gif_only');
+              const mode = (rawMode === 'all') ? 'all' : 'gif_only';
               originalSettings.backupMode = mode;
             }
           } else {
@@ -5865,6 +5866,34 @@
       const fnLower = (data.filename || '').toLowerCase();
       const isGifFile = fnLower.endsWith('.gif');
       const hasGifUrl = typeof data.gifUrl === 'string' && data.gifUrl.length > 0;
+      const isGifPayload = !!data.isGif || isGifFile || hasGifUrl;
+
+      // GIF 不再自动放入 Figma：仅保留本地保存计数提示（connection pill）。
+      if (isGifPayload) {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          const driveFileId = data.driveFileId || (currentFileIdType === 'drive' ? currentFileId : null);
+          const ossFileId = data.ossFileId || (currentFileIdType === 'oss' ? currentFileId : null);
+          if (data.taskId || driveFileId || ossFileId) {
+            try {
+              const confirmMessage = {
+                type: 'screenshot-received',
+                filename: data.filename || '未命名文件',
+                taskId: data.taskId || null,
+                timestamp: Date.now()
+              };
+              if (ossFileId) confirmMessage.ossFileId = ossFileId;
+              if (driveFileId) confirmMessage.driveFileId = driveFileId;
+              ws.send(JSON.stringify(confirmMessage));
+            } catch (error) {
+              console.error('❌ GIF 确认发送失败:', error);
+            }
+          }
+        }
+        currentFileId = null;
+        currentFileIdType = null;
+        currentFileBackedUp = false;
+        return;
+      }
 
       // 速度优化：在 UI 层预解码 base64 → Uint8Array，避免 Figma 端重复解码
       let bytesPayload = data.bytes;
@@ -6641,6 +6670,24 @@
     
     const themeMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
     themeMediaQuery.addEventListener('change', handleThemeChange);
+    window.addEventListener('beforeunload', () => {
+      try { themeMediaQuery.removeEventListener('change', handleThemeChange); } catch (_) {}
+      try { if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; } } catch (_) {}
+      try { if (updateCheckTimer) { clearInterval(updateCheckTimer); updateCheckTimer = null; } } catch (_) {}
+      try { if (backgroundReconnectTimer) { clearInterval(backgroundReconnectTimer); backgroundReconnectTimer = null; } } catch (_) {}
+      try { if (reconnectAttemptTimer) { clearTimeout(reconnectAttemptTimer); reconnectAttemptTimer = null; } } catch (_) {}
+      try { if (_wsConnectTimeoutId) { clearTimeout(_wsConnectTimeoutId); _wsConnectTimeoutId = null; } } catch (_) {}
+      try { if (initialConnectFallbackTimer) { clearTimeout(initialConnectFallbackTimer); initialConnectFallbackTimer = null; } } catch (_) {}
+      try { if (manualSyncTimeoutId) { clearTimeout(manualSyncTimeoutId); manualSyncTimeoutId = null; } } catch (_) {}
+      try { if (_pillAnimTimer) { clearTimeout(_pillAnimTimer); _pillAnimTimer = null; } } catch (_) {}
+      try { if (_sizeSettingsTimer) { clearTimeout(_sizeSettingsTimer); _sizeSettingsTimer = null; } } catch (_) {}
+      try { if (_layoutSettingsTimer) { clearTimeout(_layoutSettingsTimer); _layoutSettingsTimer = null; } } catch (_) {}
+      try {
+        if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+          ws.close();
+        }
+      } catch (_) {}
+    });
 
     const viewUseCases = document.getElementById('viewUseCases'); // Legacy, may be null
 
@@ -6892,7 +6939,7 @@
     
     // Auto-save: backup mode (immediate on select change)
     function autoSaveBackupMode() {
-      const backupMode = backupModeSelect ? backupModeSelect.value : 'none';
+      const backupMode = backupModeSelect ? backupModeSelect.value : 'gif_only';
       wsSend('update-backup-screenshot-setting', { mode: backupMode });
       originalSettings.backupMode = backupMode;
     }
@@ -8279,8 +8326,7 @@
           log(`⚠️  GIF 放入画板超时 (${Math.round(timeoutMs / 1000)}秒)，请从本地备份拖入: ${timeoutFilename}`);
           showToast(currentLang === 'zh' ? 'GIF过大，请从本地拖入' : 'GIF too large, auto-import timed out. Please drag from local backup.', 'warning');
 
-          const bm = (typeof originalSettings !== 'undefined' && originalSettings.backupMode) || 'gif_only';
-          if (bm === 'none' && msg.gifCacheId) {
+          if (msg.gifCacheId) {
             wsSend('force-save-gif', { gifCacheId: msg.gifCacheId, filename: timeoutFilename });
           }
         }

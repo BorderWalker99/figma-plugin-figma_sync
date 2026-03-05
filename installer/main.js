@@ -541,6 +541,55 @@ function resolveNpmBinary() {
   return null;
 }
 
+async function checkSharpRuntimeHealth(nodePath, installPath) {
+  if (!nodePath || !isUsableNodeBinary(nodePath)) return false;
+  if (!installPath || !fs.existsSync(path.join(installPath, 'node_modules', 'sharp'))) return false;
+  const installPathLiteral = JSON.stringify(installPath);
+  try {
+    await execPromise(`"${nodePath}" -e 'process.chdir(${installPathLiteral});require(\"sharp\")'`, { timeout: 15000 });
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+async function repairSharpRuntimeForCurrentArch({ installPath, npmPath, nodePath, sendOutput }) {
+  if (!installPath || !npmPath || !nodePath) return false;
+  const cpu = process.arch === 'arm64' ? 'arm64' : 'x64';
+  const log = (msg) => {
+    if (typeof sendOutput === 'function') sendOutput(msg);
+  };
+
+  log(`⚠️ 检测到 sharp 架构不匹配，正在修复（darwin-${cpu}）...\n`);
+  try {
+    fs.rmSync(path.join(installPath, 'node_modules', 'sharp'), { recursive: true, force: true });
+    fs.rmSync(path.join(installPath, 'node_modules', '@img'), { recursive: true, force: true });
+  } catch (_) {}
+
+  try {
+    await execPromise(
+      `"${npmPath}" --prefix "${installPath}" install --no-save --include=optional --legacy-peer-deps --os=darwin --cpu=${cpu} sharp --registry=https://registry.npmmirror.com`,
+      { timeout: 8 * 60 * 1000, env: { ...process.env } }
+    );
+  } catch (_) {
+    try {
+      log('   ↪️ sharp 定向安装失败，尝试 rebuild...\n');
+      await execPromise(
+        `"${npmPath}" --prefix "${installPath}" rebuild sharp --include=optional --os=darwin --cpu=${cpu}`,
+        { timeout: 5 * 60 * 1000, env: { ...process.env } }
+      );
+    } catch (__ ) {
+      return false;
+    }
+  }
+
+  const ok = await checkSharpRuntimeHealth(nodePath, installPath);
+  if (ok) {
+    log(`✅ sharp 修复成功（darwin-${cpu}）\n`);
+  }
+  return ok;
+}
+
 function ensureNpmShimFromNode(nodePath) {
   if (!isUsableNodeBinary(nodePath)) return false;
   try {
@@ -1755,7 +1804,7 @@ ipcMain.handle('install-all-dependencies', async (event, dependencyStatus, optio
 });
 
 ipcMain.handle('install-dependencies', async (event, installPath) => {
-  return new Promise((resolve) => {
+  return new Promise(async (resolve) => {
     console.log('📦 开始安装依赖...');
     console.log('📂 安装路径:', installPath);
     currentInstallPath = installPath || currentInstallPath;
@@ -1802,7 +1851,11 @@ ipcMain.handle('install-dependencies', async (event, installPath) => {
     
     console.log('✅ 找到 package.json');
     
-    // 离线胖包模式：若已包含完整依赖，直接跳过 npm install
+    const nodeModulesPath = path.join(installPath, 'node_modules');
+    const lockFilePath = path.join(installPath, 'package-lock.json');
+    const nodeBinForHealth = resolveNodeBinary();
+
+    // 离线胖包模式：若已包含完整依赖且可运行，直接跳过 npm install
     const bundledRuntimeQuickCheck = bundledRuntimeBinDirs.length > 0 &&
       !!resolveNodeBinary() &&
       !!(findExecutable('magick') || findExecutable('convert')) &&
@@ -1810,15 +1863,29 @@ ipcMain.handle('install-dependencies', async (event, installPath) => {
       !!findExecutable('gifsicle');
     const existingNodeModules = fs.existsSync(nodeModulesPath);
     if (bundledRuntimeQuickCheck && existingNodeModules) {
-      console.log('✅ 检测到离线胖包运行时 + 预置 node_modules，跳过在线 npm 安装');
-      resolve({ success: true, bundled: true, skippedNpmInstall: true });
-      return;
+      const sharpHealthy = await checkSharpRuntimeHealth(nodeBinForHealth, installPath);
+      if (sharpHealthy) {
+        console.log('✅ 检测到离线胖包运行时 + 预置 node_modules（含 sharp 可运行），跳过在线 npm 安装');
+        resolve({ success: true, bundled: true, skippedNpmInstall: true });
+        return;
+      }
+      console.warn('⚠️ 预置 node_modules 中 sharp 与当前架构不兼容，将尝试修复');
+      const quickNpm = resolveNpmBinary();
+      if (quickNpm && nodeBinForHealth) {
+        const fixed = await repairSharpRuntimeForCurrentArch({
+          installPath,
+          npmPath: quickNpm,
+          nodePath: nodeBinForHealth,
+          sendOutput: (msg) => event.sender.send('install-output', { type: 'stdout', data: msg })
+        });
+        if (fixed) {
+          resolve({ success: true, bundled: true, skippedNpmInstall: true, sharpFixed: true });
+          return;
+        }
+      }
     }
 
     // 清理可能的冲突文件
-    const lockFilePath = path.join(installPath, 'package-lock.json');
-    const nodeModulesPath = path.join(installPath, 'node_modules');
-    
     if (fs.existsSync(lockFilePath)) {
       try {
         fs.unlinkSync(lockFilePath);
@@ -2007,8 +2074,34 @@ ipcMain.handle('install-dependencies', async (event, installPath) => {
           }
         }
         
-        console.log('✅ 依赖安装验证成功（所有关键依赖已确认）');
-        resolve({ success: true });
+        const verifiedNodeBin = resolveNodeBinary();
+        checkSharpRuntimeHealth(verifiedNodeBin, installPath).then(async (sharpOk) => {
+          if (sharpOk) {
+            console.log('✅ 依赖安装验证成功（所有关键依赖已确认）');
+            resolve({ success: true });
+            return;
+          }
+          const fixed = await repairSharpRuntimeForCurrentArch({
+            installPath,
+            npmPath,
+            nodePath: verifiedNodeBin,
+            sendOutput: (msg) => event.sender.send('install-output', { type: 'stdout', data: msg })
+          });
+          if (!fixed) {
+            resolve({
+              success: false,
+              error: 'sharp 与当前系统架构不兼容，自动修复失败。请检查网络后重试安装。'
+            });
+            return;
+          }
+          console.log('✅ 依赖安装验证成功（sharp 已自动修复）');
+          resolve({ success: true, sharpFixed: true });
+        }).catch(() => {
+          resolve({
+            success: false,
+            error: 'sharp 运行时校验失败，请重试安装。'
+          });
+        });
       } else {
         console.error('❌ npm install 失败');
         resolve({ 

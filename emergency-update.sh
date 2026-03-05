@@ -314,6 +314,78 @@ for (const dep of deps) {
 ' "$project_dir" >/dev/null 2>&1
 }
 
+get_host_npm_cpu() {
+  local arch
+  arch="$(uname -m)"
+  if [ "$arch" = "arm64" ]; then
+    echo "arm64"
+  else
+    echo "x64"
+  fi
+}
+
+check_sharp_runtime_health() {
+  local node_bin="$1"
+  local project_dir="$2"
+  if [ -z "${node_bin:-}" ] || [ ! -x "$node_bin" ]; then
+    return 1
+  fi
+  if [ ! -f "$project_dir/node_modules/sharp/package.json" ]; then
+    return 1
+  fi
+  "$node_bin" -e "process.chdir(process.argv[1]);try{require('sharp');process.exit(0);}catch(e){process.exit(1);}" \
+    "$project_dir" >/dev/null 2>&1
+}
+
+repair_sharp_for_current_arch() {
+  local node_bin="$1"
+  local npm_bin="$2"
+  local project_dir="$3"
+  local cpu
+  cpu="$(get_host_npm_cpu)"
+
+  if [ -z "${node_bin:-}" ] || [ ! -x "$node_bin" ]; then
+    return 1
+  fi
+  if [ -z "${npm_bin:-}" ] || [ ! -x "$npm_bin" ]; then
+    return 1
+  fi
+
+  echo "   ↪️  检测到 sharp 架构不匹配，正在修复（darwin-$cpu）..."
+  rm -rf "$project_dir/node_modules/sharp" "$project_dir/node_modules/@img" 2>/dev/null || true
+
+  set +e
+  "$npm_bin" --prefix "$project_dir" install \
+    --no-save \
+    --include=optional \
+    --legacy-peer-deps \
+    --os=darwin \
+    --cpu="$cpu" \
+    sharp >/dev/null 2>&1
+  local install_rc=$?
+  set -e
+
+  if [ "$install_rc" -ne 0 ]; then
+    echo "   ⚠️  sharp 定向重装失败，尝试 npm rebuild..."
+    set +e
+    "$npm_bin" --prefix "$project_dir" rebuild sharp \
+      --include=optional \
+      --os=darwin \
+      --cpu="$cpu" >/dev/null 2>&1
+    local rebuild_rc=$?
+    set -e
+    if [ "$rebuild_rc" -ne 0 ]; then
+      return 1
+    fi
+  fi
+
+  if check_sharp_runtime_health "$node_bin" "$project_dir"; then
+    echo "   ✅ sharp 运行时修复成功（darwin-$cpu）"
+    return 0
+  fi
+  return 1
+}
+
 print_startup_logs() {
   echo ""
   echo -e "${YELLOW}📄 启动失败诊断（最近日志）${NC}"
@@ -1309,15 +1381,40 @@ fi
 
 if [ -n "$NPM_BIN" ]; then
   if [ -n "$NODE_BIN" ] && has_required_node_modules "$NODE_BIN" "$SCRIPT_DIR"; then
-    echo -e "${GREEN}✅ Node.js 依赖已完整，跳过 npm 安装${NC}"
+    if check_sharp_runtime_health "$NODE_BIN" "$SCRIPT_DIR"; then
+      echo -e "${GREEN}✅ Node.js 依赖已完整，跳过 npm 安装${NC}"
+    else
+      echo -e "${YELLOW}⚠️  检测到 sharp 与当前系统架构不兼容，执行自动修复...${NC}"
+      if repair_sharp_for_current_arch "$NODE_BIN" "$NPM_BIN" "$SCRIPT_DIR"; then
+        echo -e "${GREEN}✅ sharp 已修复，跳过全量 npm 安装${NC}"
+      else
+        echo -e "${YELLOW}⚠️  sharp 自动修复失败，改为执行全量 npm 安装...${NC}"
+        cd "$SCRIPT_DIR"
+        "$NPM_BIN" install --production --omit=dev --legacy-peer-deps
+      fi
+    fi
   else
     cd "$SCRIPT_DIR"
     "$NPM_BIN" install --production --omit=dev --legacy-peer-deps
-    echo -e "${GREEN}✅ Node.js 依赖安装完成${NC}"
   fi
+  if ! check_sharp_runtime_health "$NODE_BIN" "$SCRIPT_DIR"; then
+    echo -e "${YELLOW}⚠️  npm 安装后 sharp 仍不可用，正在进行架构定向修复...${NC}"
+    if ! repair_sharp_for_current_arch "$NODE_BIN" "$NPM_BIN" "$SCRIPT_DIR"; then
+      echo -e "${RED}❌ sharp 修复失败（当前架构: darwin-$(get_host_npm_cpu)）${NC}"
+      echo "   请检查网络后重试 emergency-update.sh。"
+      exit 1
+    fi
+  fi
+  echo -e "${GREEN}✅ Node.js 依赖安装完成${NC}"
 else
   if [ -n "$NODE_BIN" ] && has_required_node_modules "$NODE_BIN" "$SCRIPT_DIR"; then
-    echo -e "${YELLOW}⚠️  未找到 npm，但检测到依赖已就绪，跳过安装步骤${NC}"
+    if check_sharp_runtime_health "$NODE_BIN" "$SCRIPT_DIR"; then
+      echo -e "${YELLOW}⚠️  未找到 npm，但检测到依赖已就绪，跳过安装步骤${NC}"
+    else
+      echo -e "${RED}❌ 未找到 npm，且 sharp 与当前系统架构不兼容，无法自动修复${NC}"
+      echo "   请先补齐 npm（或运行安装器）后重试。"
+      exit 1
+    fi
   else
     echo -e "${RED}❌ 未找到 npm，且依赖不完整，无法继续${NC}"
     echo "   已尝试本地自动修复（含下载完整 Node+npm）仍失败。"

@@ -271,11 +271,11 @@ function updateLocalDownloadFolder(folderPath) {
 
 /**
  * 获取备份模式
- * @returns {string} 'none' | 'gif_only' | 'all'
+ * @returns {string} 'gif_only' | 'all'
  */
 function getBackupMode() {
   const config = getOrCreateUserConfig();
-  if (config.backupMode) {
+  if (config.backupMode === 'gif_only' || config.backupMode === 'all') {
     return config.backupMode;
   }
   // 向后兼容：如果启用了截图备份，则默认为'all'；否则默认为 'gif_only'
@@ -287,11 +287,11 @@ function getBackupMode() {
 
 /**
  * 更新备份模式
- * @param {string} mode 'none' | 'gif_only' | 'all'
+ * @param {string} mode 'gif_only' | 'all'
  */
 function updateBackupMode(mode) {
   const config = getOrCreateUserConfig();
-  if (['none', 'gif_only', 'all'].includes(mode)) {
+  if (['gif_only', 'all'].includes(mode)) {
     config.backupMode = mode;
     // 更新旧字段以保持向后兼容
     config.backupScreenshots = (mode === 'all');
@@ -313,7 +313,7 @@ function getBackupScreenshots() {
  * 更新截图备份设置（兼容旧接口）
  */
 function updateBackupScreenshots(enabled) {
-  return updateBackupMode(enabled ? 'all' : 'none');
+  return updateBackupMode(enabled ? 'all' : 'gif_only');
 }
 
 /**
