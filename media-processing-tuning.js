@@ -200,6 +200,48 @@ module.exports = {
     fpsCapXLarge: envNumber('COMPOSER_FPS_CAP_XLARGE', 15)
   },
 
+  // B2.1 时间线导出模式参数（FFmpeg-first）
+  // auto 模式下：达到 ultraTrigger 条件则切 fast，否则走 quality。
+  composerExport: {
+    ultraTrigger: {
+      // 默认与全局 ULTRA_SPEED_VIDEO_THRESHOLD_MB 对齐
+      minVideoMb: envNumber('COMPOSER_ULTRA_TRIGGER_MB', 150),
+      minPixels: envNumber('COMPOSER_ULTRA_TRIGGER_PIXELS', 3500000),
+      minFrames: envNumber('COMPOSER_ULTRA_TRIGGER_FRAMES', 220),
+      minScore: envNumber('COMPOSER_ULTRA_TRIGGER_SCORE', 12000000)
+    },
+    fast: {
+      fpsCap: envNumber('COMPOSER_FAST_FPS_CAP', 24),
+      fpsCapMedium: envNumber('COMPOSER_FAST_FPS_CAP_MEDIUM', 20),
+      fpsCapLarge: envNumber('COMPOSER_FAST_FPS_CAP_LARGE', 16),
+      fpsCapXLarge: envNumber('COMPOSER_FAST_FPS_CAP_XLARGE', 12),
+      lossyBase: envNumber('COMPOSER_FAST_LOSSY_BASE', 94),
+      lossyMedium: envNumber('COMPOSER_FAST_LOSSY_MEDIUM', 100),
+      lossyLarge: envNumber('COMPOSER_FAST_LOSSY_LARGE', 106),
+      lossyXLarge: envNumber('COMPOSER_FAST_LOSSY_XLARGE', 110),
+      timeoutScale: envNumber('COMPOSER_FAST_TIMEOUT_SCALE', 0.65),
+      pipelinePerFrameMs: envNumber('COMPOSER_FAST_PIPELINE_PER_FRAME_MS', 3500),
+      paletteGenTimeoutMs: envNumber('COMPOSER_FAST_PALETTEGEN_TIMEOUT_MS', 45000),
+      paletteUseTimeoutMs: envNumber('COMPOSER_FAST_PALETTEUSE_TIMEOUT_MS', 90000),
+      gifsicleTimeoutPerMbMs: envNumber('COMPOSER_FAST_GIFSICLE_TIMEOUT_PER_MB_MS', 3200)
+    },
+    quality: {
+      fpsCap: envNumber('COMPOSER_QUALITY_FPS_CAP', 60),
+      fpsCapMedium: envNumber('COMPOSER_QUALITY_FPS_CAP_MEDIUM', 50),
+      fpsCapLarge: envNumber('COMPOSER_QUALITY_FPS_CAP_LARGE', 30),
+      fpsCapXLarge: envNumber('COMPOSER_QUALITY_FPS_CAP_XLARGE', 15),
+      lossyBase: envNumber('COMPOSER_QUALITY_LOSSY_BASE', 80),
+      lossyMedium: envNumber('COMPOSER_QUALITY_LOSSY_MEDIUM', 88),
+      lossyLarge: envNumber('COMPOSER_QUALITY_LOSSY_LARGE', 94),
+      lossyXLarge: envNumber('COMPOSER_QUALITY_LOSSY_XLARGE', 102),
+      timeoutScale: envNumber('COMPOSER_QUALITY_TIMEOUT_SCALE', 1.0),
+      pipelinePerFrameMs: envNumber('COMPOSER_QUALITY_PIPELINE_PER_FRAME_MS', 5000),
+      paletteGenTimeoutMs: envNumber('COMPOSER_QUALITY_PALETTEGEN_TIMEOUT_MS', 60000),
+      paletteUseTimeoutMs: envNumber('COMPOSER_QUALITY_PALETTEUSE_TIMEOUT_MS', 120000),
+      gifsicleTimeoutPerMbMs: envNumber('COMPOSER_QUALITY_GIFSICLE_TIMEOUT_PER_MB_MS', 5000)
+    }
+  },
+
   // B3. 时间线编辑器预览帧提取参数（server.js extract-preview-frames 使用）
   // 目标：更激进提升长视频预览帧还原，同时通过分辨率分层保护加载速度
   composerPreview: {

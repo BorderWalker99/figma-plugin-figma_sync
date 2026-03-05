@@ -88,8 +88,18 @@ function output(result) {
  * This avoids LaunchAgent using a different node than manual runs (e.g. firewall
  * or native module mismatch).
  */
-function resolveNodePath() {
+function resolveNodePath(installPath) {
+  const runtimeArch = process.arch === 'arm64' ? 'apple' : 'intel';
+  const runtimeNodeCandidates = installPath ? [
+    path.join(installPath, 'runtime', runtimeArch, 'node', 'bin', 'node'),
+    path.join(installPath, 'runtime', process.arch, 'node', 'bin', 'node'),
+    path.join(installPath, 'runtime', 'node', 'bin', 'node'),
+    path.join(installPath, 'runtime', runtimeArch, 'bin', 'node'),
+    path.join(installPath, 'runtime', process.arch, 'bin', 'node'),
+    path.join(installPath, 'runtime', 'bin', 'node')
+  ] : [];
   const candidates = [
+    ...runtimeNodeCandidates.map((p) => () => (fs.existsSync(p) ? { ok: true, out: p } : { ok: false, out: '' })),
     () => run('bash -l -c "which node"'),
     () => run('bash -c "which node"'),
     () => ({ ok: true, out: process.execPath }),
@@ -147,7 +157,7 @@ function main() {
     process.exit(1);
   }
 
-  const nodePath = resolveNodePath();
+  const nodePath = resolveNodePath(installPath);
   const startScript = path.join(installPath, 'start.js');
   if (!fs.existsSync(startScript)) {
     output({ success: false, error: `未找到 start.js: ${startScript}` });
@@ -165,6 +175,12 @@ function main() {
   const templatePath = path.join(installPath, plistName);
 
   const comprehensivePath = [
+    path.join(installPath, 'runtime', process.arch, 'node', 'bin'),
+    path.join(installPath, 'runtime', process.arch, 'bin'),
+    path.join(installPath, 'runtime', process.arch === 'arm64' ? 'apple' : 'intel', 'node', 'bin'),
+    path.join(installPath, 'runtime', process.arch === 'arm64' ? 'apple' : 'intel', 'bin'),
+    path.join(installPath, 'runtime', 'node', 'bin'),
+    path.join(installPath, 'runtime', 'bin'),
     path.join(os.homedir(), '.screensync', 'bin'),
     path.join(os.homedir(), '.screensync', 'deps', 'node', 'bin'),
     '/usr/local/bin',

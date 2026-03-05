@@ -5,23 +5,49 @@ const fs = require('fs');
 const os = require('os');
 const { checkUpdateAsync } = require('./update-manager');
 
-// Inject ScreenSync local deps into PATH and env (for legacy macOS without Homebrew)
-const localBin = path.join(os.homedir(), '.screensync', 'bin');
-const localNodeBin = path.join(os.homedir(), '.screensync', 'deps', 'node', 'bin');
-const localImBin = path.join(os.homedir(), '.screensync', 'deps', 'imagemagick', 'bin');
-for (const p of [localBin, localNodeBin, localImBin]) {
-  if (fs.existsSync(p) && !process.env.PATH.includes(p)) {
-    process.env.PATH = `${p}:${process.env.PATH}`;
+// Inject bundled runtime/local deps into PATH.
+(() => {
+  const prependPathOnce = (dir) => {
+    if (!dir || !fs.existsSync(dir)) return;
+    const current = process.env.PATH || '';
+    if (!current.split(':').includes(dir)) {
+      process.env.PATH = current ? `${dir}:${current}` : dir;
+    }
+  };
+
+  const archKey = process.arch === 'arm64' ? 'apple' : 'intel';
+  const runtimeCandidates = [
+    path.join(__dirname, 'runtime', 'bin'),
+    path.join(__dirname, 'runtime', archKey, 'bin'),
+    path.join(__dirname, 'runtime', process.arch, 'bin'),
+    path.join(__dirname, 'runtime', 'node', 'bin'),
+    path.join(__dirname, 'runtime', archKey, 'node', 'bin'),
+    path.join(__dirname, 'runtime', process.arch, 'node', 'bin')
+  ];
+
+  // runtime 优先，确保胖包依赖被优先使用。
+  for (const p of runtimeCandidates.reverse()) prependPathOnce(p);
+
+  const localBin = path.join(os.homedir(), '.screensync', 'bin');
+  const localNodeBin = path.join(os.homedir(), '.screensync', 'deps', 'node', 'bin');
+  const localImBin = path.join(os.homedir(), '.screensync', 'deps', 'imagemagick', 'bin');
+  for (const p of [localBin, localNodeBin, localImBin].reverse()) prependPathOnce(p);
+
+  if (!process.env.MAGICK_HOME) {
+    const runtimeImHome = path.join(__dirname, 'runtime', 'imagemagick');
+    const localImHome = path.join(os.homedir(), '.screensync', 'deps', 'imagemagick');
+    const imHome = fs.existsSync(path.join(runtimeImHome, 'bin', 'magick'))
+      ? runtimeImHome
+      : localImHome;
+    if (fs.existsSync(path.join(imHome, 'bin', 'magick'))) {
+      process.env.MAGICK_HOME = imHome;
+      const imLib = path.join(imHome, 'lib');
+      if (fs.existsSync(imLib)) {
+        process.env.DYLD_LIBRARY_PATH = imLib + (process.env.DYLD_LIBRARY_PATH ? ':' + process.env.DYLD_LIBRARY_PATH : '');
+      }
+    }
   }
-}
-const imHome = path.join(os.homedir(), '.screensync', 'deps', 'imagemagick');
-if (fs.existsSync(path.join(imHome, 'bin', 'magick')) && !process.env.MAGICK_HOME) {
-  process.env.MAGICK_HOME = imHome;
-  const imLib = path.join(imHome, 'lib');
-  if (fs.existsSync(imLib)) {
-    process.env.DYLD_LIBRARY_PATH = imLib + (process.env.DYLD_LIBRARY_PATH ? ':' + process.env.DYLD_LIBRARY_PATH : '');
-  }
-}
+})();
 let chokidar;
 try {
   chokidar = require('chokidar');

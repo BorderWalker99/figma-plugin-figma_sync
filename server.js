@@ -38,25 +38,47 @@ const fs = require('fs');
 const os = require('os');
 const mediaTuning = require('./media-processing-tuning');
 
-// Inject ScreenSync local deps into PATH (for legacy macOS without Homebrew)
+// Inject bundled runtime/local deps into PATH.
 (() => {
+  const prependPathOnce = (dir) => {
+    if (!dir || !fs.existsSync(dir)) return;
+    const current = process.env.PATH || '';
+    if (!current.split(':').includes(dir)) {
+      process.env.PATH = current ? `${dir}:${current}` : dir;
+    }
+  };
+
+  const archKey = process.arch === 'arm64' ? 'apple' : 'intel';
+  const runtimeDirs = [
+    path.join(__dirname, 'runtime', 'bin'),
+    path.join(__dirname, 'runtime', archKey, 'bin'),
+    path.join(__dirname, 'runtime', process.arch, 'bin'),
+    path.join(__dirname, 'runtime', 'node', 'bin'),
+    path.join(__dirname, 'runtime', archKey, 'node', 'bin'),
+    path.join(__dirname, 'runtime', process.arch, 'node', 'bin')
+  ];
+  for (const d of runtimeDirs.reverse()) prependPathOnce(d);
+
   const dirs = [
     path.join(os.homedir(), '.screensync', 'bin'),
     path.join(os.homedir(), '.screensync', 'deps', 'node', 'bin'),
     path.join(os.homedir(), '.screensync', 'deps', 'imagemagick', 'bin')
   ];
-  for (const d of dirs) {
-    if (fs.existsSync(d) && !process.env.PATH.includes(d)) {
-      process.env.PATH = `${d}:${process.env.PATH}`;
-    }
-  }
+  for (const d of dirs.reverse()) prependPathOnce(d);
+
   // Set MAGICK_HOME for compiled-from-source ImageMagick
-  const imHome = path.join(os.homedir(), '.screensync', 'deps', 'imagemagick');
-  if (fs.existsSync(path.join(imHome, 'bin', 'magick')) && !process.env.MAGICK_HOME) {
-    process.env.MAGICK_HOME = imHome;
-    const imLib = path.join(imHome, 'lib');
-    if (fs.existsSync(imLib)) {
-      process.env.DYLD_LIBRARY_PATH = imLib + (process.env.DYLD_LIBRARY_PATH ? ':' + process.env.DYLD_LIBRARY_PATH : '');
+  if (!process.env.MAGICK_HOME) {
+    const runtimeImHome = path.join(__dirname, 'runtime', 'imagemagick');
+    const localImHome = path.join(os.homedir(), '.screensync', 'deps', 'imagemagick');
+    const imHome = fs.existsSync(path.join(runtimeImHome, 'bin', 'magick'))
+      ? runtimeImHome
+      : localImHome;
+    if (fs.existsSync(path.join(imHome, 'bin', 'magick'))) {
+      process.env.MAGICK_HOME = imHome;
+      const imLib = path.join(imHome, 'lib');
+      if (fs.existsSync(imLib)) {
+        process.env.DYLD_LIBRARY_PATH = imLib + (process.env.DYLD_LIBRARY_PATH ? ':' + process.env.DYLD_LIBRARY_PATH : '');
+      }
     }
   }
 })();
@@ -3743,6 +3765,7 @@ wss.on('connection', (ws, req) => {
           gifInfos: data.gifInfos,
           timelineData: data.timelineData, // ✅ Pass timeline data
           gifAlgorithm: data.gifAlgorithm || 'smooth_gradient', // ✅ GIF 算法设置
+          exportMode: data.exportMode || 'auto', // auto: 按阈值切换 fast/quality
           // 🔍 验证: 确保从 UI 正确接收算法设置
           connectionId: connectionId,
           shouldCancel: () => cancelFlags.get(connectionId) === true,
