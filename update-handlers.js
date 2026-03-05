@@ -146,14 +146,113 @@ function compareVersions(v1, v2) {
 }
 
 function addLocalDepsToPath() {
+  const prependPathIfExists = (p) => {
+    if (!p || !fs.existsSync(p)) return;
+    const segments = String(process.env.PATH || '').split(path.delimiter);
+    if (!segments.includes(p)) {
+      process.env.PATH = `${p}${path.delimiter}${process.env.PATH || ''}`;
+    }
+  };
+  addBundledRuntimeToPath();
   const localBin = path.join(os.homedir(), '.screensync', 'bin');
   const localNodeBin = path.join(os.homedir(), '.screensync', 'deps', 'node', 'bin');
   const localImBin = path.join(os.homedir(), '.screensync', 'deps', 'imagemagick', 'bin');
-  for (const p of [localBin, localNodeBin, localImBin]) {
-    if (fs.existsSync(p) && !process.env.PATH.includes(p)) {
-      process.env.PATH = `${p}:${process.env.PATH}`;
+  for (const p of [localBin, localNodeBin, localImBin]) prependPathIfExists(p);
+}
+
+function getPackageRootDirForUpdate() {
+  return path.basename(__dirname) === '项目文件' ? path.dirname(__dirname) : __dirname;
+}
+
+function getRuntimeArchDirForUpdate() {
+  return process.arch === 'arm64' ? 'apple' : 'intel';
+}
+
+function collectBundledRuntimeBinDirs() {
+  const packageRoot = getPackageRootDirForUpdate();
+  const archDir = getRuntimeArchDirForUpdate();
+  const candidates = [
+    path.join(packageRoot, 'runtime', 'bin'),
+    path.join(packageRoot, 'runtime', archDir, 'bin'),
+    path.join(__dirname, 'runtime', 'bin'),
+    path.join(__dirname, 'runtime', archDir, 'bin')
+  ];
+  const seen = new Set();
+  const result = [];
+  for (const candidate of candidates) {
+    if (candidate && fs.existsSync(candidate) && !seen.has(candidate)) {
+      seen.add(candidate);
+      result.push(candidate);
     }
   }
+  return result;
+}
+
+function addBundledRuntimeToPath() {
+  const bins = collectBundledRuntimeBinDirs();
+  for (const binDir of bins) {
+    const segments = String(process.env.PATH || '').split(path.delimiter);
+    if (!segments.includes(binDir)) {
+      process.env.PATH = `${binDir}${path.delimiter}${process.env.PATH || ''}`;
+    }
+  }
+}
+
+function detectBundledOfflineRuntime() {
+  addBundledRuntimeToPath();
+  const bins = collectBundledRuntimeBinDirs();
+  const resolved = {
+    ready: false,
+    node: null,
+    npm: null,
+    ffmpeg: null,
+    gifsicle: null,
+    magick: null
+  };
+  for (const binDir of bins) {
+    const nodePath = path.join(binDir, 'node');
+    const npmPath = path.join(binDir, 'npm');
+    const ffmpegPath = path.join(binDir, 'ffmpeg');
+    const gifsiclePath = path.join(binDir, 'gifsicle');
+    const magickPath = fs.existsSync(path.join(binDir, 'magick'))
+      ? path.join(binDir, 'magick')
+      : (fs.existsSync(path.join(binDir, 'convert')) ? path.join(binDir, 'convert') : null);
+
+    if (!resolved.node && fs.existsSync(nodePath)) resolved.node = nodePath;
+    if (!resolved.npm && fs.existsSync(npmPath)) resolved.npm = npmPath;
+    if (!resolved.ffmpeg && fs.existsSync(ffmpegPath)) resolved.ffmpeg = ffmpegPath;
+    if (!resolved.gifsicle && fs.existsSync(gifsiclePath)) resolved.gifsicle = gifsiclePath;
+    if (!resolved.magick && magickPath) resolved.magick = magickPath;
+  }
+  if (resolved.node && resolved.npm && resolved.ffmpeg && resolved.gifsicle && resolved.magick) {
+    resolved.ready = true;
+  }
+  return resolved;
+}
+
+function syncBundledRuntimeFromExtractedDir(extractedDir) {
+  const packageRoot = getPackageRootDirForUpdate();
+  const runtimeSources = [
+    path.join(extractedDir, 'runtime'),
+    path.join(path.dirname(extractedDir), 'runtime')
+  ];
+  const runtimeSource = runtimeSources.find((dir) => fs.existsSync(dir) && fs.statSync(dir).isDirectory());
+  if (!runtimeSource) return false;
+
+  const runtimeDest = path.join(packageRoot, 'runtime');
+  fs.mkdirSync(runtimeDest, { recursive: true });
+  fs.cpSync(runtimeSource, runtimeDest, { recursive: true, force: true });
+  addBundledRuntimeToPath();
+  return true;
+}
+
+function syncBundledNodeModulesFromExtractedDir(extractedDir) {
+  const source = path.join(extractedDir, 'node_modules');
+  const dest = path.join(__dirname, 'node_modules');
+  if (!fs.existsSync(source) || !fs.statSync(source).isDirectory()) return false;
+  fs.mkdirSync(dest, { recursive: true });
+  fs.cpSync(source, dest, { recursive: true, force: true });
+  return true;
 }
 
 async function commandExists(cmd) {
@@ -185,6 +284,15 @@ async function runWithAdminIfNeeded(command, timeout = 600000) {
 
 function resolveNodeBinaryForUpdate() {
   addLocalDepsToPath();
+  const runtimeBins = collectBundledRuntimeBinDirs();
+  for (const runtimeBin of runtimeBins) {
+    const candidate = path.join(runtimeBin, 'node');
+    if (!fs.existsSync(candidate)) continue;
+    try {
+      execFileSync(candidate, ['-v'], { stdio: 'ignore' });
+      return candidate;
+    } catch (_) {}
+  }
   const candidates = [
     process.execPath,
     path.join(os.homedir(), '.screensync', 'deps', 'node', 'bin', 'node'),
@@ -204,6 +312,15 @@ function resolveNodeBinaryForUpdate() {
 
 function resolveNpmBinaryForUpdate() {
   addLocalDepsToPath();
+  const runtimeBins = collectBundledRuntimeBinDirs();
+  for (const runtimeBin of runtimeBins) {
+    const candidate = path.join(runtimeBin, 'npm');
+    if (!fs.existsSync(candidate)) continue;
+    try {
+      execFileSync(candidate, ['--version'], { stdio: 'ignore' });
+      return candidate;
+    } catch (_) {}
+  }
   const candidates = [
     path.join(os.homedir(), '.screensync', 'deps', 'node', 'bin', 'npm'),
     '/usr/local/bin/npm',
@@ -302,6 +419,13 @@ function triggerAutostartRepairAfterUpdate() {
 
 async function ensureUpdateDependencies(targetGroup) {
   addLocalDepsToPath();
+  const bundledRuntime = detectBundledOfflineRuntime();
+  console.log('   🔎 [UpdateDeps] 离线 runtime 探测:', bundledRuntime.ready ? '完整可用' : '不完整');
+  if (bundledRuntime.node) console.log(`   • node: ${bundledRuntime.node}`);
+  if (bundledRuntime.npm) console.log(`   • npm: ${bundledRuntime.npm}`);
+  if (bundledRuntime.ffmpeg) console.log(`   • ffmpeg: ${bundledRuntime.ffmpeg}`);
+  if (bundledRuntime.gifsicle) console.log(`   • gifsicle: ${bundledRuntime.gifsicle}`);
+  if (bundledRuntime.magick) console.log(`   • magick/convert: ${bundledRuntime.magick}`);
   const sendProgress = (status, message) => {
     if (targetGroup && targetGroup.figma && targetGroup.figma.readyState === WebSocket.OPEN) {
       sendToFigma(targetGroup, { type: 'update-progress', status, message });
@@ -339,6 +463,11 @@ async function ensureUpdateDependencies(targetGroup) {
 
   // 2) Runtime binaries required by update/new features
   addLocalDepsToPath();
+  if (bundledRuntime.ready) {
+    sendProgress('checking', '检测到离线胖包运行时，跳过系统依赖在线安装');
+    console.log('   ✅ [UpdateDeps] 命中胖包 runtime，跳过 brew 依赖补装');
+    return;
+  }
   const hasConvert = await commandExists('convert');
   const hasMagick = await commandExists('magick');
   const missingBinaries = [];
@@ -347,6 +476,7 @@ async function ensureUpdateDependencies(targetGroup) {
   if (!(await commandExists('gifsicle'))) missingBinaries.push('gifsicle');
 
   if (missingBinaries.length > 0) {
+    console.log(`   ⚠️  [UpdateDeps] 缺少系统依赖: ${missingBinaries.join(', ')}`);
     const isLegacyMode = isLegacyBrewSkippedUser();
     if (isLegacyMode) {
       // Legacy users intentionally skip Homebrew; keep update flow consistent with installer strategy.
@@ -356,12 +486,14 @@ async function ensureUpdateDependencies(targetGroup) {
     let hasBrew = await commandExists('brew');
     if (!hasBrew) {
       sendProgress('installing', '检测到缺少 Homebrew，正在自动安装...');
+      console.log('   ↪️  [UpdateDeps] 未检测到 brew，开始自动安装');
       hasBrew = await ensureHomebrewInstalledForUpdate(sendProgress);
     }
     if (!hasBrew) {
       throw new Error(`自动安装 Homebrew 失败，无法补齐运行依赖：${missingBinaries.join(', ')}。请先手动安装 Homebrew 后重试更新。`);
     }
     sendProgress('installing', `正在安装运行依赖（${missingBinaries.join(', ')}）...`);
+    console.log(`   ↪️  [UpdateDeps] brew install ${missingBinaries.join(' ')}`);
     await runWithAdminIfNeeded(`HOMEBREW_NO_AUTO_UPDATE=1 brew install ${missingBinaries.join(' ')}`, 20 * 60 * 1000);
     addLocalDepsToPath();
 
@@ -987,6 +1119,17 @@ async function handleFullUpdate(targetGroup, connectionId) {
       console.error(`   ❌ 更新包不完整，缺少以下文件/目录:`, missingItems);
       console.error(`   ❌ 目录内容:`, fs.readdirSync(extractedDir));
       throw new Error(`更新包不完整，缺少必需的文件: ${missingItems.join(', ')}`);
+    }
+
+    const runtimeSynced = syncBundledRuntimeFromExtractedDir(extractedDir);
+    if (runtimeSynced) {
+      console.log('   ✅ 已同步离线 runtime（胖包）');
+    } else {
+      console.log('   ℹ️  更新包未携带 runtime，保留当前本地运行时');
+    }
+    const nodeModulesSynced = syncBundledNodeModulesFromExtractedDir(extractedDir);
+    if (nodeModulesSynced) {
+      console.log('   ✅ 已同步离线 node_modules');
     }
     
     // 备份现有文件

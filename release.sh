@@ -12,7 +12,10 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-clear
+# 在无交互/无 TERM 环境下避免 clear 导致 set -e 直接退出
+if [ -n "${TERM:-}" ]; then
+  clear || true
+fi
 
 echo -e "${BLUE}"
 cat << "EOF"

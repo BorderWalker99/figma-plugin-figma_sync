@@ -21,13 +21,119 @@ REPO="BorderWalker99/figma-plugin-figma_sync"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BACKUP_DIR="$SCRIPT_DIR/.emergency-backup-$(date +%Y%m%d%H%M%S)"
 TEMP_DIR="$(mktemp -d)"
+HOST_ARCH="$(uname -m)"
+RUNTIME_ARCH_DIR="intel"
+if [ "$HOST_ARCH" = "arm64" ]; then
+  RUNTIME_ARCH_DIR="apple"
+fi
+OFFLINE_RUNTIME_READY=0
+OFFLINE_RUNTIME_NODE=""
+OFFLINE_RUNTIME_NPM=""
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
+get_package_root_dir() {
+  local base
+  base="$(basename "$SCRIPT_DIR")"
+  if [ "$base" = "项目文件" ]; then
+    dirname "$SCRIPT_DIR"
+  else
+    echo "$SCRIPT_DIR"
+  fi
+}
+
+collect_runtime_bin_dirs() {
+  local package_root
+  package_root="$(get_package_root_dir)"
+  local dirs=(
+    "$package_root/runtime/bin"
+    "$package_root/runtime/$RUNTIME_ARCH_DIR/bin"
+    "$SCRIPT_DIR/runtime/bin"
+    "$SCRIPT_DIR/runtime/$RUNTIME_ARCH_DIR/bin"
+  )
+  local seen=""
+  local d
+  for d in "${dirs[@]}"; do
+    if [ -d "$d" ]; then
+      case ":$seen:" in
+        *":$d:"*) ;;
+        *)
+          echo "$d"
+          seen="$seen:$d"
+          ;;
+      esac
+    fi
+  done
+}
+
+prepend_path_once() {
+  local target="$1"
+  if [ -n "$target" ] && [ -d "$target" ]; then
+    case ":$PATH:" in
+      *":$target:"*) ;;
+      *) export PATH="$target:$PATH" ;;
+    esac
+  fi
+}
+
+refresh_offline_runtime_state() {
+  OFFLINE_RUNTIME_READY=0
+  OFFLINE_RUNTIME_NODE=""
+  OFFLINE_RUNTIME_NPM=""
+  local runtime_node=""
+  local runtime_npm=""
+  local has_ffmpeg=0
+  local has_gifsicle=0
+  local has_magick=0
+  local runtime_bin
+
+  while IFS= read -r runtime_bin; do
+    [ -n "$runtime_bin" ] || continue
+    prepend_path_once "$runtime_bin"
+
+    if [ -z "$runtime_node" ] && [ -x "$runtime_bin/node" ]; then
+      runtime_node="$runtime_bin/node"
+    fi
+    if [ -z "$runtime_npm" ] && [ -x "$runtime_bin/npm" ]; then
+      runtime_npm="$runtime_bin/npm"
+    fi
+    [ -x "$runtime_bin/ffmpeg" ] && has_ffmpeg=1
+    [ -x "$runtime_bin/gifsicle" ] && has_gifsicle=1
+    if [ -x "$runtime_bin/magick" ] || [ -x "$runtime_bin/convert" ]; then
+      has_magick=1
+    fi
+  done < <(collect_runtime_bin_dirs)
+
+  if [ -n "$runtime_node" ] && [ -z "$runtime_npm" ]; then
+    if ensure_npm_from_node "$runtime_node"; then
+      runtime_npm="$(dirname "$runtime_node")/npm"
+    fi
+  fi
+
+  if [ -n "$runtime_node" ] && [ -n "$runtime_npm" ] && \
+     [ "$has_ffmpeg" -eq 1 ] && [ "$has_gifsicle" -eq 1 ] && [ "$has_magick" -eq 1 ]; then
+    OFFLINE_RUNTIME_READY=1
+    OFFLINE_RUNTIME_NODE="$runtime_node"
+    OFFLINE_RUNTIME_NPM="$runtime_npm"
+  fi
+}
+
 resolve_node_bin() {
+  if [ -n "$OFFLINE_RUNTIME_NODE" ] && [ -x "$OFFLINE_RUNTIME_NODE" ] && "$OFFLINE_RUNTIME_NODE" -v >/dev/null 2>&1; then
+    echo "$OFFLINE_RUNTIME_NODE"
+    return 0
+  fi
+  local runtime_bin
+  while IFS= read -r runtime_bin; do
+    if [ -x "$runtime_bin/node" ] && "$runtime_bin/node" -v >/dev/null 2>&1; then
+      echo "$runtime_bin/node"
+      return 0
+    fi
+  done < <(collect_runtime_bin_dirs)
+
   local candidates=(
     "$HOME/.screensync/deps/node/bin/node"
     "/usr/local/bin/node"
@@ -53,6 +159,18 @@ resolve_node_bin() {
 }
 
 resolve_npm_bin() {
+  if [ -n "$OFFLINE_RUNTIME_NPM" ] && [ -x "$OFFLINE_RUNTIME_NPM" ] && "$OFFLINE_RUNTIME_NPM" --version >/dev/null 2>&1; then
+    echo "$OFFLINE_RUNTIME_NPM"
+    return 0
+  fi
+  local runtime_bin
+  while IFS= read -r runtime_bin; do
+    if [ -x "$runtime_bin/npm" ] && "$runtime_bin/npm" --version >/dev/null 2>&1; then
+      echo "$runtime_bin/npm"
+      return 0
+    fi
+  done < <(collect_runtime_bin_dirs)
+
   local candidates=(
     "$HOME/.screensync/deps/node/bin/npm"
     "/usr/local/bin/npm"
@@ -214,7 +332,9 @@ ensure_local_bins_path() {
   local local_bin="$HOME/.screensync/bin"
   local local_node_bin="$HOME/.screensync/deps/node/bin"
   mkdir -p "$local_bin" "$HOME/.screensync/deps" 2>/dev/null || true
-  export PATH="$local_bin:$local_node_bin:$PATH"
+  prepend_path_once "$local_bin"
+  prepend_path_once "$local_node_bin"
+  refresh_offline_runtime_state
 }
 
 install_ffmpeg_fallback() {
@@ -861,6 +981,40 @@ fi
 
 echo -e "${GREEN}✅ 解压完成${NC}"
 
+# ─── 6.5 尝试接入胖包 runtime（优先离线运行时）────────────────────────────────
+echo ""
+echo -e "${YELLOW}🧱 正在检查胖包 runtime...${NC}"
+PACKAGE_ROOT_NOW="$(get_package_root_dir)"
+TARGET_RUNTIME_ROOT="$PACKAGE_ROOT_NOW/runtime"
+SOURCE_RUNTIME_ROOT=""
+for candidate in \
+  "$SOURCE_PACKAGE_DIR/runtime" \
+  "$SOURCE_DIR/runtime"; do
+  if [ -d "$candidate/bin" ] || [ -d "$candidate/$RUNTIME_ARCH_DIR/bin" ]; then
+    SOURCE_RUNTIME_ROOT="$candidate"
+    break
+  fi
+done
+
+if [ -n "$SOURCE_RUNTIME_ROOT" ]; then
+  mkdir -p "$TARGET_RUNTIME_ROOT"
+  rsync -a --delete "$SOURCE_RUNTIME_ROOT/" "$TARGET_RUNTIME_ROOT/" 2>/dev/null || true
+  echo -e "${GREEN}✅ 已同步离线 runtime 到: $TARGET_RUNTIME_ROOT${NC}"
+else
+  echo -e "${YELLOW}⚠️  更新包未携带 runtime，将回退本地/在线依赖策略${NC}"
+fi
+ensure_local_bins_path
+if [ "$OFFLINE_RUNTIME_READY" -eq 1 ]; then
+  echo -e "${GREEN}✅ 检测到完整胖包运行时（Node/FFmpeg/Gifsicle/ImageMagick）${NC}"
+  [ -n "$OFFLINE_RUNTIME_NODE" ] && echo "   • node: $OFFLINE_RUNTIME_NODE"
+  [ -n "$OFFLINE_RUNTIME_NPM" ] && echo "   • npm : $OFFLINE_RUNTIME_NPM"
+  command -v ffmpeg >/dev/null 2>&1 && echo "   • ffmpeg: $(command -v ffmpeg)"
+  command -v gifsicle >/dev/null 2>&1 && echo "   • gifsicle: $(command -v gifsicle)"
+  command -v magick >/dev/null 2>&1 && echo "   • magick: $(command -v magick)"
+else
+  echo -e "${YELLOW}⚠️  未检测到完整胖包运行时，后续按缺失依赖补装${NC}"
+fi
+
 # ─── 7. 备份现有文件 ──────────────────────────────────────────────────────────
 echo ""
 echo -e "${YELLOW}💾 正在备份现有文件...${NC}"
@@ -1040,6 +1194,15 @@ fi
 
 echo -e "${GREEN}✅ 已同步 ${UPDATED} 个代码文件${NC}"
 
+# 同步胖包内置 node_modules（若存在），避免每次都全量 npm install
+if [ -d "$SOURCE_DIR/node_modules" ]; then
+  echo ""
+  echo -e "${YELLOW}📚 正在同步内置 Node.js 依赖（node_modules）...${NC}"
+  mkdir -p "$SCRIPT_DIR/node_modules"
+  rsync -a --delete "$SOURCE_DIR/node_modules/" "$SCRIPT_DIR/node_modules/" 2>/dev/null || true
+  echo -e "${GREEN}✅ 已同步内置 node_modules${NC}"
+fi
+
 # 关键文件兜底校验：确保最新必需代码一定落地（防止旧包/异常同步导致缺失）
 echo ""
 echo -e "${YELLOW}🧩 正在校验关键必需文件...${NC}"
@@ -1145,9 +1308,13 @@ if [ -n "$NPM_BIN" ]; then
 fi
 
 if [ -n "$NPM_BIN" ]; then
-  cd "$SCRIPT_DIR"
-  "$NPM_BIN" install --production --omit=dev --legacy-peer-deps
-  echo -e "${GREEN}✅ Node.js 依赖安装完成${NC}"
+  if [ -n "$NODE_BIN" ] && has_required_node_modules "$NODE_BIN" "$SCRIPT_DIR"; then
+    echo -e "${GREEN}✅ Node.js 依赖已完整，跳过 npm 安装${NC}"
+  else
+    cd "$SCRIPT_DIR"
+    "$NPM_BIN" install --production --omit=dev --legacy-peer-deps
+    echo -e "${GREEN}✅ Node.js 依赖安装完成${NC}"
+  fi
 else
   if [ -n "$NODE_BIN" ] && has_required_node_modules "$NODE_BIN" "$SCRIPT_DIR"; then
     echo -e "${YELLOW}⚠️  未找到 npm，但检测到依赖已就绪，跳过安装步骤${NC}"
@@ -1163,6 +1330,21 @@ fi
 echo ""
 echo -e "${YELLOW}🔍 正在检查系统依赖...${NC}"
 ensure_local_bins_path
+
+if [ "$OFFLINE_RUNTIME_READY" -eq 1 ]; then
+  echo -e "${GREEN}✅ 已启用胖包 runtime，跳过系统依赖在线安装${NC}"
+  echo "   Node     : $OFFLINE_RUNTIME_NODE"
+  echo "   npm      : $OFFLINE_RUNTIME_NPM"
+  if command -v ffmpeg >/dev/null 2>&1; then
+    echo "   ffmpeg   : $(command -v ffmpeg)"
+  fi
+  if command -v gifsicle >/dev/null 2>&1; then
+    echo "   gifsicle : $(command -v gifsicle)"
+  fi
+  if command -v magick >/dev/null 2>&1; then
+    echo "   magick   : $(command -v magick)"
+  fi
+else
 
 check_dep_quick() {
   local cmd="$1"
@@ -1268,6 +1450,7 @@ if [ -n "$MISSING_DEPS" ]; then
   fi
 else
   echo -e "${GREEN}✅ 系统依赖完整${NC}"
+fi
 fi
 
 # ─── 13. 更新 launchd 服务配置 ───────────────────────────────────────────────
