@@ -89,17 +89,51 @@ let bundledRuntimeBinDirs = [];
 
 function resolvePackageRootFromInstallPath(installPath) {
   if (!installPath || typeof installPath !== 'string') return '';
+  return path.resolve(installPath);
+}
+
+function getLegacyRuntimeRootFromInstallPath(installPath) {
+  if (!installPath || typeof installPath !== 'string') return '';
   const normalized = path.resolve(installPath);
-  const base = path.basename(normalized);
-  if (base === '项目文件') {
-    return path.dirname(normalized);
+  if (path.basename(normalized) === '项目文件') {
+    return path.join(path.dirname(normalized), 'runtime');
   }
-  return normalized;
+  return '';
+}
+
+function ensureRuntimeInsideProject(installPath) {
+  if (!installPath || typeof installPath !== 'string') return false;
+  const projectRoot = path.resolve(installPath);
+  const projectRuntime = path.join(projectRoot, 'runtime');
+  const legacyRuntime = getLegacyRuntimeRootFromInstallPath(installPath);
+
+  if (!legacyRuntime || !fs.existsSync(legacyRuntime) || projectRuntime === legacyRuntime) return false;
+
+  try {
+    if (!fs.existsSync(projectRuntime)) {
+      try {
+        fs.renameSync(legacyRuntime, projectRuntime);
+        console.log('✅ 已将 runtime 迁移到项目目录:', projectRuntime);
+        return true;
+      } catch (_) {
+        // Rename may fail跨分区，回退到复制。
+      }
+    }
+    fs.mkdirSync(projectRuntime, { recursive: true });
+    fs.cpSync(legacyRuntime, projectRuntime, { recursive: true, force: true });
+    try { fs.rmSync(legacyRuntime, { recursive: true, force: true }); } catch (_) {}
+    console.log('✅ 已将 legacy runtime 同步到项目目录:', projectRuntime);
+    return true;
+  } catch (error) {
+    console.warn('⚠️ runtime 目录迁移失败，将继续使用现有路径:', error.message);
+    return false;
+  }
 }
 
 function collectBundledRuntimeBinDirs(installPath) {
   const packageRoot = resolvePackageRootFromInstallPath(installPath);
   if (!packageRoot) return [];
+  const legacyRuntimeRoot = getLegacyRuntimeRootFromInstallPath(installPath);
   const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
   const candidates = [
     path.join(packageRoot, 'runtime', 'bin'),
@@ -110,10 +144,61 @@ function collectBundledRuntimeBinDirs(installPath) {
     path.join(packageRoot, 'runtime', process.arch, 'node', 'bin'),
     path.join(packageRoot, 'embedded-runtime', 'bin')
   ];
+  if (legacyRuntimeRoot) {
+    candidates.push(
+      path.join(legacyRuntimeRoot, 'bin'),
+      path.join(legacyRuntimeRoot, arch, 'bin'),
+      path.join(legacyRuntimeRoot, process.arch, 'bin'),
+      path.join(legacyRuntimeRoot, 'node', 'bin'),
+      path.join(legacyRuntimeRoot, arch, 'node', 'bin'),
+      path.join(legacyRuntimeRoot, process.arch, 'node', 'bin')
+    );
+  }
   return candidates.filter((dir, index) => candidates.indexOf(dir) === index && fs.existsSync(dir));
 }
 
+function detectBundledRuntimeFolderStatus(installPath) {
+  const packageRoot = resolvePackageRootFromInstallPath(installPath || currentInstallPath);
+  const runtimeRoot = packageRoot ? path.join(packageRoot, 'runtime') : '';
+  const bins = collectBundledRuntimeBinDirs(installPath || currentInstallPath);
+  const result = {
+    complete: false,
+    packageRoot,
+    runtimeRoot,
+    bins,
+    node: null,
+    ffmpeg: null,
+    gifsicle: null,
+    magick: null,
+    missing: []
+  };
+  if (!runtimeRoot || !fs.existsSync(runtimeRoot)) {
+    result.missing = ['runtime-folder'];
+    return result;
+  }
+
+  for (const binDir of bins) {
+    if (!result.node && fs.existsSync(path.join(binDir, 'node'))) result.node = path.join(binDir, 'node');
+    if (!result.ffmpeg && fs.existsSync(path.join(binDir, 'ffmpeg'))) result.ffmpeg = path.join(binDir, 'ffmpeg');
+    if (!result.gifsicle && fs.existsSync(path.join(binDir, 'gifsicle'))) result.gifsicle = path.join(binDir, 'gifsicle');
+    if (!result.magick) {
+      const magickCandidate = fs.existsSync(path.join(binDir, 'magick'))
+        ? path.join(binDir, 'magick')
+        : (fs.existsSync(path.join(binDir, 'convert')) ? path.join(binDir, 'convert') : null);
+      if (magickCandidate) result.magick = magickCandidate;
+    }
+  }
+
+  if (!result.node) result.missing.push('node');
+  if (!result.ffmpeg) result.missing.push('ffmpeg');
+  if (!result.gifsicle) result.missing.push('gifsicle');
+  if (!result.magick) result.missing.push('imagemagick');
+  result.complete = result.missing.length === 0;
+  return result;
+}
+
 function applyBundledRuntimeEnv(installPath) {
+  ensureRuntimeInsideProject(installPath);
   bundledRuntimeBinDirs = collectBundledRuntimeBinDirs(installPath);
   if (bundledRuntimeBinDirs.length === 0) return false;
   for (const binDir of bundledRuntimeBinDirs.slice().reverse()) {
@@ -654,6 +739,14 @@ ipcMain.handle('check-homebrew', async (event, installPath = null) => {
     console.log('Check Homebrew: binary found but broken at', brewPath, e.message);
     return { installed: false };
   }
+});
+
+ipcMain.handle('check-fat-runtime', async (event, installPath = null) => {
+  if (installPath) {
+    currentInstallPath = installPath;
+    applyBundledRuntimeEnv(currentInstallPath);
+  }
+  return detectBundledRuntimeFolderStatus(currentInstallPath);
 });
 
 ipcMain.handle('check-node', async (event, installPath = null) => {
@@ -1500,6 +1593,19 @@ async function installLegacyDeps(event, dependencyStatus, options = {}) {
 
 // In-app dependency installation (no Terminal.app needed)
 ipcMain.handle('install-all-dependencies', async (event, dependencyStatus, options = {}) => {
+  const fatRuntimeStatus = detectBundledRuntimeFolderStatus(currentInstallPath);
+  if (fatRuntimeStatus && fatRuntimeStatus.complete) {
+    const sendProgress = (dep, status, message) => {
+      try { event.sender.send('dep-install-progress', { dep, status, message }); } catch (_) {}
+    };
+    sendProgress('homebrew', 'done', '已跳过（Fat Package）');
+    sendProgress('node', 'done', '已跳过（Fat Package）');
+    sendProgress('imagemagick', 'done', '已跳过（Fat Package）');
+    sendProgress('ffmpeg', 'done', '已跳过（Fat Package）');
+    sendProgress('gifsicle', 'done', '已跳过（Fat Package）');
+    return { success: true, message: 'Fat Package runtime 完整，跳过传统依赖安装', bundled: true, fatPackage: true };
+  }
+
   const bundledRuntime = await detectBundledOfflineRuntime(currentInstallPath);
   if (bundledRuntime && bundledRuntime.available) {
     const sendProgress = (dep, status, message) => {
@@ -1854,6 +1960,13 @@ ipcMain.handle('install-dependencies', async (event, installPath) => {
     const nodeModulesPath = path.join(installPath, 'node_modules');
     const lockFilePath = path.join(installPath, 'package-lock.json');
     const nodeBinForHealth = resolveNodeBinary();
+
+    const fatRuntimeStatus = detectBundledRuntimeFolderStatus(installPath);
+    if (fatRuntimeStatus && fatRuntimeStatus.complete && fs.existsSync(nodeModulesPath)) {
+      console.log('✅ Fat Package runtime 完整，跳过 npm install');
+      resolve({ success: true, bundled: true, fatPackage: true, skippedNpmInstall: true });
+      return;
+    }
 
     // 离线胖包模式：若已包含完整依赖且可运行，直接跳过 npm install
     const bundledRuntimeQuickCheck = bundledRuntimeBinDirs.length > 0 &&

@@ -14,11 +14,12 @@ const i18n = {
     btn_next: '下一步',
     btn_done: '我知道了',
     btn_checking: '检测中...',
+    recheck: '重新检测',
     btn_copy: '一键复制',
-    step2_title: '环境检查',
-    step2_desc: '检查系统环境是否满足运行要求',
-    step3_title: '安装依赖',
-    step3_desc: '安装项目所需的依赖包，请保持网络畅通',
+    step2_title: '安装检查',
+    step2_desc: '检查安装文件是否完整',
+    step3_title: '安装准备',
+    step3_desc: '正在完成安装前准备',
     step4_title: '系统配置',
     step4_desc: '应用配置并设置本地环境',
     step5_title: '安装完成',
@@ -54,6 +55,9 @@ const i18n = {
     all_installed_next: '所有依赖已安装',
     install_missing: '安装缺失依赖',
     downloading_deps: '正在下载依赖包...',
+    builtin_env_ready: '已检测到内置环境，可直接继续',
+    package_invalid: '安装资源不完整，请重新下载安装包后重试',
+    package_missing_detail: '安装资源校验失败'
   },
   en: {
     welcome_subtitle: 'Automate screenshot transfer & organization',
@@ -61,11 +65,12 @@ const i18n = {
     btn_next: 'Next',
     btn_done: 'Got it',
     btn_checking: 'Checking...',
+    recheck: 'Recheck',
     btn_copy: 'Copy',
-    step2_title: 'Environment Check',
-    step2_desc: 'Verify system requirements are met',
-    step3_title: 'Install Dependencies',
-    step3_desc: 'Installing required packages, keep network connected',
+    step2_title: 'Installation Check',
+    step2_desc: 'Verify installation files are complete',
+    step3_title: 'Setup Preparation',
+    step3_desc: 'Preparing required components',
     step4_title: 'System Configuration',
     step4_desc: 'Apply settings and configure local environment',
     step5_title: 'Installation Complete',
@@ -101,6 +106,9 @@ const i18n = {
     all_installed_next: 'All dependencies installed',
     install_missing: 'Install missing dependencies',
     downloading_deps: 'Downloading dependencies...',
+    builtin_env_ready: 'Built-in environment is ready, you can continue',
+    package_invalid: 'Installation package is incomplete. Please re-download and try again',
+    package_missing_detail: 'Installation resource validation failed'
   }
 };
 
@@ -382,202 +390,62 @@ async function checkSystemRequirements() {
   actionBtn.innerHTML = `<svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg> ${t('btn_checking')}`;
   
   try {
-    // ====== 首先检查 macOS 版本 ======
-    const macosInfo = await ipcRenderer.invoke('get-macos-version');
-    console.log('macOS 版本:', macosInfo);
-    
-    // 显示 macOS 版本警告（如果需要）
-    if (macosInfo.supported === false) {
-      // macOS 10.15 或更早：完全不支持
-      const oldSystemWarning = `⚠️ 检测到 macOS ${macosInfo.version} (${macosInfo.name})
+    const fat = await ipcRenderer.invoke('check-fat-runtime', installPath);
+    const ok = !!(fat && fat.complete);
 
-Homebrew 不支持此系统版本，自动安装将会失败。
-
-📋 手动安装方案：
-1. Node.js：访问 nodejs.org 下载官方 .pkg 安装包
-2. ImageMagick：下载官方二进制包或使用 MacPorts
-3. FFmpeg：从 evermeet.cx 下载静态编译版本
-
-💡 或者，强烈建议升级到 macOS 14 (Sonoma) 或更高版本。`;
-      
-      showToast(oldSystemWarning, 'error');
-      
-      // 存储系统信息供后续使用
-      window.macosInfo = macosInfo;
-    } else if (macosInfo.supported === 'limited') {
-      // macOS 11-13：有限支持，不弹 toast
-      window.macosInfo = macosInfo;
-    }
-    // macOS 14+ 不显示警告
-    
-    // 重置状态
     dependencyStatus = {
-      homebrew: null,
-      node: null,
-      imagemagick: null,
-      ffmpeg: null,
-      gifsicle: null
+      homebrew: ok,
+      node: ok,
+      imagemagick: ok,
+      ffmpeg: ok,
+      gifsicle: ok
     };
-    
-    // 检查 Homebrew
-    const homebrewCheck = checks.children[0];
-    const homebrewResult = await ipcRenderer.invoke('check-homebrew', installPath);
-    dependencyStatus.homebrew = homebrewResult.installed;
-    
-    if (homebrewResult.skipped) {
-      // Legacy macOS: Homebrew not needed, direct download mode
-      homebrewCheck.className = 'status-item success';
-      homebrewCheck.innerHTML = `
-        <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
-        <div class="status-content">
-          <div class="status-label">Homebrew</div>
-          <div class="status-detail" style="color: var(--text-tertiary);">${t('no_homebrew')}</div>
-        </div>
-      `;
-    } else if (homebrewResult.installed) {
-      homebrewCheck.className = 'status-item success';
-      homebrewCheck.innerHTML = `
-        <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
-        <div class="status-content">
-          <div class="status-label">Homebrew</div>
-          <div class="status-detail" style="color: var(--success);">${t('installed')}</div>
-        </div>
-      `;
-    } else {
-      homebrewCheck.className = 'status-item error';
-      homebrewCheck.innerHTML = `
-        <div class="status-icon"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
-        <div class="status-content">
-          <div class="status-label">Homebrew</div>
-          <div class="status-detail" style="color: var(--danger);">${t('not_installed')}</div>
-        </div>
-      `;
-    }
-    
-    // 检查 Node.js
-    const nodeCheck = checks.children[1];
-    const nodeResult = await ipcRenderer.invoke('check-node', installPath);
-    dependencyStatus.node = nodeResult.installed;
-    
-    if (nodeResult.installed) {
-      nodeCheck.className = 'status-item success';
-      nodeCheck.innerHTML = `
-        <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
-        <div class="status-content">
-          <div class="status-label">Node.js</div>
-          <div class="status-detail" style="color: var(--success);">${t('installed')}</div>
-        </div>
-      `;
-    } else {
-      nodeCheck.className = 'status-item error';
-      nodeCheck.innerHTML = `
-        <div class="status-icon"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
-        <div class="status-content">
-          <div class="status-label">Node.js</div>
-          <div class="status-detail" style="color: var(--danger);">${t('not_installed')}</div>
-        </div>
-      `;
-    }
-    
-    // 检查 ImageMagick
-    const imageMagickCheck = checks.children[2];
-    const imageMagickResult = await ipcRenderer.invoke('check-imagemagick', installPath);
-    dependencyStatus.imagemagick = imageMagickResult.installed;
-    
-    if (imageMagickResult.installed) {
-      imageMagickCheck.className = 'status-item success';
-      imageMagickCheck.innerHTML = `
-        <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
-        <div class="status-content">
-          <div class="status-label">ImageMagick</div>
-          <div class="status-detail" style="color: var(--success);">${t('installed')}</div>
-        </div>
-      `;
-    } else {
-      imageMagickCheck.className = 'status-item error';
-      imageMagickCheck.innerHTML = `
-        <div class="status-icon"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
-        <div class="status-content">
-          <div class="status-label">ImageMagick</div>
-          <div class="status-detail" style="color: var(--danger);">${t('not_installed')}</div>
-        </div>
-      `;
-    }
-    
-    // 检查 FFmpeg
-    const ffmpegCheck = checks.children[3];
-    const ffmpegResult = await ipcRenderer.invoke('check-ffmpeg', installPath);
-    dependencyStatus.ffmpeg = ffmpegResult.installed;
-    
-    if (ffmpegResult.installed) {
-      ffmpegCheck.className = 'status-item success';
-      ffmpegCheck.innerHTML = `
-        <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
-        <div class="status-content">
-          <div class="status-label">FFmpeg</div>
-          <div class="status-detail" style="color: var(--success);">${t('installed')}</div>
-        </div>
-      `;
-    } else {
-      ffmpegCheck.className = 'status-item error';
-      ffmpegCheck.innerHTML = `
-        <div class="status-icon"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
-        <div class="status-content">
-          <div class="status-label">FFmpeg</div>
-          <div class="status-detail" style="color: var(--danger);">${t('not_installed')}</div>
-        </div>
-      `;
-    }
-    
-    // 检查 Gifsicle
-    const gifsicleCheck = checks.children[4];
-    const gifsicleResult = await ipcRenderer.invoke('check-gifsicle', installPath);
-    dependencyStatus.gifsicle = gifsicleResult.installed;
-    
-    if (gifsicleResult.installed) {
-      gifsicleCheck.className = 'status-item success';
-      gifsicleCheck.innerHTML = `
-        <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
-        <div class="status-content">
-          <div class="status-label">Gifsicle</div>
-          <div class="status-detail" style="color: var(--success);">${t('installed')}</div>
-        </div>
-      `;
-    } else {
-      gifsicleCheck.className = 'status-item error';
-      gifsicleCheck.innerHTML = `
-        <div class="status-icon"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
-        <div class="status-content">
-          <div class="status-label">Gifsicle</div>
-          <div class="status-detail" style="color: var(--danger);">${t('not_installed')}</div>
-        </div>
-      `;
-    }
-    
-    // 判断是否所有依赖都已安装
-    const allInstalled = dependencyStatus.homebrew && dependencyStatus.node && dependencyStatus.imagemagick && dependencyStatus.ffmpeg && dependencyStatus.gifsicle;
-    
+
+    const labels = ['Homebrew', 'Node.js', 'ImageMagick', 'FFmpeg', 'Gifsicle'];
+    labels.forEach((label, idx) => {
+      const item = checks.children[idx];
+      if (!item) return;
+      if (ok) {
+        item.className = 'status-item success';
+        item.innerHTML = `
+          <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
+          <div class="status-content">
+            <div class="status-label">${label}</div>
+            <div class="status-detail" style="color: var(--success);">${t('installed')}</div>
+          </div>
+        `;
+      } else {
+        item.className = 'status-item error';
+        item.innerHTML = `
+          <div class="status-icon"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
+          <div class="status-content">
+            <div class="status-label">${label}</div>
+            <div class="status-detail" style="color: var(--danger);">${t('not_installed')}</div>
+          </div>
+        `;
+      }
+    });
+
     actionBtn.disabled = false;
-    
-    if (allInstalled) {
+    if (ok) {
       lastFailedDependency = null;
       actionBtn.innerHTML = `${t('btn_next')} <svg viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>`;
       actionBtn.style.padding = '10px 12px 10px 20px';
       actionBtn.onclick = window.nextStep;
       actionBtn.className = 'btn btn-primary';
     } else {
-      const failedStillMissing = !!(lastFailedDependency && dependencyStatus[lastFailedDependency] === false);
-      actionBtn.innerHTML = failedStillMissing ? t('reinstall') : t('install_missing');
+      showToast(t('package_invalid'), 'error');
+      actionBtn.innerHTML = t('recheck');
       actionBtn.style.padding = '10px 20px';
-      actionBtn.onclick = installMissingDependencies;
-      actionBtn.className = 'btn btn-primary';
+      actionBtn.onclick = checkSystemRequirements;
+      actionBtn.className = 'btn btn-secondary';
     }
   } catch (error) {
     console.error('Environment check failed:', error);
     showToast(error.message, 'error');
     
     actionBtn.disabled = false;
-    actionBtn.innerHTML = t('btn_checking');
+    actionBtn.innerHTML = t('recheck');
     actionBtn.onclick = checkSystemRequirements;
   }
 }
@@ -747,65 +615,25 @@ async function installDependencies() {
     statusLabel.textContent = t('installing');
   }
   
-  // 创建日志显示区域（默认隐藏，出错时显示）
-  let logOutput = '';
-  
-  let currentProgress = 10;
-  
-  const updateUi = (progress, message) => {
-    if (progress > currentProgress) {
-      currentProgress = Math.min(progress, 95);
-      progressBar.style.width = `${currentProgress}%`;
-    }
-    if (message && statusLabel) {
-      statusLabel.textContent = message;
-    }
-  };
-  
-  // 监听安装输出
-  ipcRenderer.on('install-output', (event, data) => {
-    logOutput += data.data;
-    // 实时更新进度（基于输出行数估算）
-    const lines = logOutput.split('\n').length;
-    // 提高灵敏度：每2行增加1%，上限90%
-    const progress = 10 + (lines / 2);
-    updateUi(progress);
-  });
-  
-  // 监听心跳 (处理长时间无输出的情况)
-  ipcRenderer.on('install-heartbeat', (event, data) => {
-    // 只要未完成（< 95%），就让进度条缓慢蠕动，让用户知道没死机
-    if (currentProgress < 95) {
-      // 进度越接近95，移动越慢
-      const increment = currentProgress < 50 ? 0.5 : 0.1;
-      updateUi(currentProgress + increment, data.message);
-    } else {
-      updateUi(currentProgress, data.message);
-    }
-  });
-  
-  const result = await ipcRenderer.invoke('install-dependencies', installPath);
-  
-  // 移除监听器
-  ipcRenderer.removeAllListeners('install-output');
-  ipcRenderer.removeAllListeners('install-heartbeat');
-  
-  if (result.success) {
+  // 使用内置环境时，跳过传统依赖安装。
+  const fat = await ipcRenderer.invoke('check-fat-runtime', installPath);
+  if (fat && fat.complete) {
     progressBar.style.width = '100%';
     progressBar.classList.add('success');
-    const statusLabel = document.getElementById('installStatusLabel');
     if (statusLabel) {
-      statusLabel.textContent = t('deps_installed');
+      statusLabel.textContent = t('builtin_env_ready');
     }
     document.getElementById('step3Next').disabled = false;
   } else {
-    logOutput += '\n--- 错误信息 ---\n' + (result.error || '未知错误');
+    const missing = (fat && Array.isArray(fat.missing) && fat.missing.length > 0)
+      ? fat.missing.join(', ')
+      : 'core-components';
     progressBar.style.width = '0%';
     if (statusLabel) {
       statusLabel.innerHTML = `<span style="color: var(--danger);">${t('install_failed')}</span><span style="display: inline-block; width: 12px;"></span><a id="viewErrorLink" href="#" style="color: var(--accent); font-size: 12px; text-decoration: underline; cursor: pointer;">${t('view_detail')}</a>`;
       document.getElementById('viewErrorLink').addEventListener('click', (e) => {
         e.preventDefault();
-        showErrorDetailModal(logOutput);
+        showErrorDetailModal(`${t('package_missing_detail')}\nMissing: ${missing}`);
       });
     }
   }

@@ -36,13 +36,34 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 get_package_root_dir() {
-  local base
-  base="$(basename "$SCRIPT_DIR")"
-  if [ "$base" = "项目文件" ]; then
-    dirname "$SCRIPT_DIR"
-  else
-    echo "$SCRIPT_DIR"
+  # 统一：runtime 始终放在项目目录（server.js 所在目录）内
+  echo "$SCRIPT_DIR"
+}
+
+get_legacy_runtime_root() {
+  local parent
+  parent="$(dirname "$SCRIPT_DIR")"
+  if [ "$(basename "$SCRIPT_DIR")" = "项目文件" ] && [ -d "$parent/runtime" ]; then
+    echo "$parent/runtime"
   fi
+}
+
+migrate_legacy_runtime_to_project_dir() {
+  local target_runtime="$SCRIPT_DIR/runtime"
+  local legacy_runtime
+  legacy_runtime="$(get_legacy_runtime_root || true)"
+
+  if [ -z "${legacy_runtime:-}" ] || [ ! -d "$legacy_runtime" ]; then
+    return 0
+  fi
+  if [ "$legacy_runtime" = "$target_runtime" ]; then
+    return 0
+  fi
+
+  mkdir -p "$target_runtime" 2>/dev/null || true
+  rsync -a "$legacy_runtime/" "$target_runtime/" 2>/dev/null || true
+  rm -rf "$legacy_runtime" 2>/dev/null || true
+  echo "   ↪️  已将旧版 runtime 迁移到项目目录: $target_runtime"
 }
 
 collect_runtime_bin_dirs() {
@@ -404,6 +425,7 @@ ensure_local_bins_path() {
   local local_bin="$HOME/.screensync/bin"
   local local_node_bin="$HOME/.screensync/deps/node/bin"
   mkdir -p "$local_bin" "$HOME/.screensync/deps" 2>/dev/null || true
+  migrate_legacy_runtime_to_project_dir
   prepend_path_once "$local_bin"
   prepend_path_once "$local_node_bin"
   refresh_offline_runtime_state
@@ -1059,9 +1081,14 @@ echo -e "${YELLOW}🧱 正在检查胖包 runtime...${NC}"
 PACKAGE_ROOT_NOW="$(get_package_root_dir)"
 TARGET_RUNTIME_ROOT="$PACKAGE_ROOT_NOW/runtime"
 SOURCE_RUNTIME_ROOT=""
+LEGACY_RUNTIME_ROOT="$(dirname "$SCRIPT_DIR")/runtime"
+if [ "$(basename "$SCRIPT_DIR")" != "项目文件" ]; then
+  LEGACY_RUNTIME_ROOT=""
+fi
 for candidate in \
   "$SOURCE_PACKAGE_DIR/runtime" \
-  "$SOURCE_DIR/runtime"; do
+  "$SOURCE_DIR/runtime" \
+  "$LEGACY_RUNTIME_ROOT"; do
   if [ -d "$candidate/bin" ] || [ -d "$candidate/$RUNTIME_ARCH_DIR/bin" ]; then
     SOURCE_RUNTIME_ROOT="$candidate"
     break
@@ -1072,6 +1099,10 @@ if [ -n "$SOURCE_RUNTIME_ROOT" ]; then
   mkdir -p "$TARGET_RUNTIME_ROOT"
   rsync -a --delete "$SOURCE_RUNTIME_ROOT/" "$TARGET_RUNTIME_ROOT/" 2>/dev/null || true
   echo -e "${GREEN}✅ 已同步离线 runtime 到: $TARGET_RUNTIME_ROOT${NC}"
+  if [ "$SOURCE_RUNTIME_ROOT" = "$LEGACY_RUNTIME_ROOT" ] && [ "$LEGACY_RUNTIME_ROOT" != "$TARGET_RUNTIME_ROOT" ]; then
+    rm -rf "$LEGACY_RUNTIME_ROOT" 2>/dev/null || true
+    echo -e "${GREEN}✅ 已将旧路径 runtime 迁移到项目目录${NC}"
+  fi
 else
   echo -e "${YELLOW}⚠️  更新包未携带 runtime，将回退本地/在线依赖策略${NC}"
 fi
