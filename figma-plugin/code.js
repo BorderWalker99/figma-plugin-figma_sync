@@ -44,6 +44,7 @@ let screenshotCount = 0;
 let screenshotIndex = 0; // 截屏图片计数器
 let screenRecordingIndex = 0; // 录屏计数器
 const SCREENSYNC_FRAME_BASE_NAME = 'ScreenSync Screenshots';
+const SCREENSYNC_AUTO_LAYOUT_MARK_KEY = 'screensyncAutoLayoutCreated';
 let activeBatchFrameName = SCREENSYNC_FRAME_BASE_NAME;
 let activeBatchSerial = 1;
 let pendingFirstLooseNodeId = '';
@@ -335,13 +336,27 @@ function isFrameValid() {
 function findFrameByName(name) {
   try {
     const page = figma.currentPage;
-    if (!page || !page.children) return null;
-    for (const node of page.children) {
-      if (node.type === 'FRAME' && node.name === name) {
-        return node;
+    if (!page) return null;
+    if (typeof page.findAllWithCriteria === 'function') {
+      const frames = page.findAllWithCriteria({ types: ['FRAME'] }) || [];
+      for (const frame of frames) {
+        if (frame && frame.name === name) return frame;
       }
+      return null;
     }
-    return null;
+    if (!page.children) return null;
+    const walk = (nodes) => {
+      for (const node of nodes || []) {
+        if (!node) continue;
+        if (node.type === 'FRAME' && node.name === name) return node;
+        if ('children' in node && node.children) {
+          const found = walk(node.children);
+          if (found) return found;
+        }
+      }
+      return null;
+    };
+    return walk(page.children);
   } catch (e) {
     return null;
   }
@@ -355,11 +370,88 @@ function isScreenSyncFrameName(name) {
 function listScreenSyncFrames() {
   try {
     const page = figma.currentPage;
-    if (!page || !page.children) return [];
-    return page.children.filter(node => node.type === 'FRAME' && isScreenSyncFrameName(node.name));
+    if (!page) return [];
+    if (typeof page.findAllWithCriteria === 'function') {
+      const frames = page.findAllWithCriteria({ types: ['FRAME'] }) || [];
+      return frames.filter(node => isScreenSyncFrameName(node.name));
+    }
+    if (!page.children) return [];
+    const result = [];
+    const walk = (nodes) => {
+      for (const node of nodes || []) {
+        if (!node) continue;
+        if (node.type === 'FRAME' && isScreenSyncFrameName(node.name)) {
+          result.push(node);
+        }
+        if ('children' in node && node.children) {
+          walk(node.children);
+        }
+      }
+    };
+    walk(page.children);
+    return result;
   } catch (_) {
     return [];
   }
+}
+
+function markFrameAsPluginCreated(frame) {
+  try {
+    if (!frame || frame.type !== 'FRAME' || !frame.setPluginData) return;
+    frame.setPluginData(SCREENSYNC_AUTO_LAYOUT_MARK_KEY, '1');
+  } catch (_) {}
+}
+
+function isPluginCreatedAutoLayoutFrame(frame) {
+  try {
+    if (!frame || frame.type !== 'FRAME') return false;
+    if (!frame.getPluginData) return false;
+    if (frame.getPluginData(SCREENSYNC_AUTO_LAYOUT_MARK_KEY) !== '1') return false;
+    return !!(frame.layoutMode && frame.layoutMode !== 'NONE');
+  } catch (_) {
+    return false;
+  }
+}
+
+function listPluginCreatedAutoLayoutFrames() {
+  try {
+    const page = figma.currentPage;
+    if (!page) return [];
+    if (typeof page.findAllWithCriteria === 'function') {
+      const frames = page.findAllWithCriteria({ types: ['FRAME'] }) || [];
+      return frames.filter(frame => isPluginCreatedAutoLayoutFrame(frame));
+    }
+    if (!page.children) return [];
+    const result = [];
+    const walk = (nodes) => {
+      for (const node of nodes || []) {
+        if (!node) continue;
+        if (node.type === 'FRAME' && isPluginCreatedAutoLayoutFrame(node)) {
+          result.push(node);
+        }
+        if ('children' in node && node.children) {
+          walk(node.children);
+        }
+      }
+    };
+    walk(page.children);
+    return result;
+  } catch (_) {
+    return [];
+  }
+}
+
+function findPreferredAutoLayoutFrameForScreenshots() {
+  // 只看“插件创建过”的 AutoLayout，不依赖名称。
+  if (isPluginCreatedAutoLayoutFrame(currentFrame)) {
+    return currentFrame;
+  }
+
+  const frames = listPluginCreatedAutoLayoutFrames();
+  for (const frame of frames) {
+    if (frame) return frame;
+  }
+  return null;
 }
 
 function getActiveFrameName() {
@@ -395,13 +487,6 @@ function syncActiveBatchStateFromCanvas() {
   activeBatchFrameName = maxName;
 }
 
-function startNewAutoLayoutBatch() {
-  syncActiveBatchStateFromCanvas();
-  activeBatchSerial += 1;
-  activeBatchFrameName = `${SCREENSYNC_FRAME_BASE_NAME} #${activeBatchSerial}`;
-  currentFrame = null;
-}
-
 // 确保有有效的画板
 function ensureFrame(options = {}) {
   const forceCreateForActiveBatch = !!(options && options.forceCreateForActiveBatch);
@@ -416,6 +501,7 @@ function ensureFrame(options = {}) {
   const existingFrame = forceCreateForActiveBatch ? null : findFrameByName(targetFrameName);
   if (existingFrame && existingFrame.name === targetFrameName) {
     currentFrame = existingFrame;
+    markFrameAsPluginCreated(currentFrame);
     
     // 确保画板使用 Auto Layout（如果还没有设置，或者设置不完整）
     if (currentFrame.layoutMode === 'NONE' || currentFrame.layoutMode !== 'HORIZONTAL') {
@@ -503,6 +589,7 @@ function ensureFrame(options = {}) {
     
     currentFrame = frame;
     figma.currentPage.appendChild(frame);
+    markFrameAsPluginCreated(frame);
     
     return true;
   } catch (error) {
@@ -1958,6 +2045,7 @@ figma.ui.onmessage = async (msg) => {
   if (msg.type === 'add-screenshot') {
     try {
       const { bytes, gifUrl, imageWidth, imageHeight, timestamp, filename, driveFileId, ossFileId, gifCacheId, taskId } = msg;
+      const syncSource = msg.syncSource === 'manual' ? 'manual' : 'realtime';
       
       // ✅ 缓存文件信息（即使后续创建失败，也要保留信息以便手动拖入后关联）
       if (filename) {
@@ -2135,108 +2223,123 @@ figma.ui.onmessage = async (msg) => {
         rect.setPluginData('gifCacheId', msg.gifCacheId);
       }
 
-      const existingAutoLayoutFrame = (() => {
-        if (isFrameValid() && currentFrame && currentFrame.layoutMode !== 'NONE') {
-          return currentFrame;
+      // ━━━ Auto Layout 放置决策（完整规则） ━━━━━━━━━━━━━━━━━━━━━━━━━
+      //
+      // 手动同步 → 始终放入 AutoLayout（从第一张起，无条件）
+      //
+      // 实时同步 →
+      //   A) 插件已创建过 AutoLayout → 直接放入
+      //   B) 存在散放首图 且 未被用户移动 → 创建 AutoLayout，收拢首图 + 当前图
+      //   C) 存在散放首图 但 已被用户移动 → 清除首图标记，当前图成为新散放首图
+      //   D) 无散放首图、无 AutoLayout → 当前图散放，等待下一张决策
+
+      const pluginAutoLayout = findPreferredAutoLayoutFrameForScreenshots()
+        || (isFrameValid() && currentFrame && currentFrame.layoutMode !== 'NONE' ? currentFrame : null);
+      const looseFirstNode = findLooseFirstScreenshotNode();
+
+      const appendToAutoLayout = (targetFrame, rectNode, looseNode) => {
+        if (!isFrameValid() || currentFrame !== targetFrame) {
+          currentFrame = targetFrame;
         }
-        const frames = listScreenSyncFrames();
-        for (const frame of frames) {
-          if (frame && frame.layoutMode && frame.layoutMode !== 'NONE') {
-            return frame;
-          }
+        markFrameAsPluginCreated(currentFrame);
+        if (currentFrame.layoutMode === 'NONE') {
+          currentFrame.layoutMode = 'HORIZONTAL';
+          currentFrame.itemSpacing = 10;
+          currentFrame.paddingLeft = 0;
+          currentFrame.paddingRight = 0;
+          currentFrame.paddingTop = 0;
+          currentFrame.paddingBottom = 0;
         }
-        return null;
-      })();
-      if (existingAutoLayoutFrame) {
-        currentFrame = existingAutoLayoutFrame;
-      }
-      const frameAlreadyExists = !!existingAutoLayoutFrame;
-      let looseFirstNode = findLooseFirstScreenshotNode();
-      let shouldUseAutoLayout = frameAlreadyExists || !!looseFirstNode;
+        const wasEmpty = currentFrame.children.length === 0;
+        const center = { x: figma.viewport.center.x, y: figma.viewport.center.y };
 
-      // 仅在“第一张 + 第二张”建组阶段判断：
-      // - 若首图被用户手动移动，则第二张不并组
-      // - 否则第二张与第一张进入同一 Auto Layout
-      // - 一旦 Auto Layout 已存在，后续默认直接追加，不再受本规则影响
-      if (!frameAlreadyExists && looseFirstNode) {
-        const shouldSplitSecond = waitingSecondScreenshotDecision &&
-          pendingFirstLooseNodeId &&
-          pendingFirstLooseNodeId === looseFirstNode.id &&
-          firstLooseNodeMovedByUser;
-        if (shouldSplitSecond) {
-          clearLooseFirstScreenshotMark(looseFirstNode);
-          looseFirstNode = null;
-          shouldUseAutoLayout = false;
-        }
-      }
-
-      // 第一个图层不进自动布局：直接散放在画布
-      if (!shouldUseAutoLayout) {
-        suppressLooseNodeMoveTracking = true;
-        markLooseFirstScreenshotNode(rect);
-        rect.x = figma.viewport.center.x - (finalWidth / 2);
-        rect.y = figma.viewport.center.y - (finalHeight / 2);
-        figma.currentPage.appendChild(rect);
-        setTimeout(() => { suppressLooseNodeMoveTracking = false; }, 500);
-      } else {
-        ensureFrame();
-        if (isFrameValid()) {
-          const wasFrameEmpty = currentFrame.children.length === 0;
-          const viewportCenterAtInsert = { x: figma.viewport.center.x, y: figma.viewport.center.y };
-
-          if (currentFrame.layoutMode === 'NONE') {
-            currentFrame.layoutMode = 'HORIZONTAL';
-            currentFrame.itemSpacing = 10;
-            currentFrame.paddingLeft = 0;
-            currentFrame.paddingRight = 0;
-            currentFrame.paddingTop = 0;
-            currentFrame.paddingBottom = 0;
-          }
-
-          const applyChildLayout = (node, nodeWidth) => {
-            if (currentFrame.layoutMode === 'NONE') return;
-            try {
-              if (customSizeSettings.columns && customSizeSettings.columns > 0) {
-                node.layoutSizingHorizontal = 'FIXED';
-                node.layoutSizingVertical = 'HUG';
-                const itemSpacing = currentFrame.itemSpacing || 10;
-                const frameWidth = (nodeWidth * customSizeSettings.columns) + (itemSpacing * (customSizeSettings.columns - 1));
-                if (currentFrame.children.length === 1 || currentFrame.layoutSizingHorizontal === 'HUG') {
-                  currentFrame.layoutSizingHorizontal = 'FIXED';
-                  currentFrame.resize(frameWidth, currentFrame.height || 800);
-                }
-              } else {
-                node.layoutSizingHorizontal = 'HUG';
-                node.layoutSizingVertical = 'HUG';
-                if (currentFrame.layoutSizingHorizontal !== 'HUG') {
-                  currentFrame.layoutSizingHorizontal = 'HUG';
-                }
+        const applyChildLayout = (node, nodeWidth) => {
+          if (currentFrame.layoutMode === 'NONE') return;
+          try {
+            if (customSizeSettings.columns && customSizeSettings.columns > 0) {
+              node.layoutSizingHorizontal = 'FIXED';
+              node.layoutSizingVertical = 'HUG';
+              const spacing = currentFrame.itemSpacing || 10;
+              const fw = (nodeWidth * customSizeSettings.columns) + (spacing * (customSizeSettings.columns - 1));
+              if (currentFrame.children.length === 1 || currentFrame.layoutSizingHorizontal === 'HUG') {
+                currentFrame.layoutSizingHorizontal = 'FIXED';
+                currentFrame.resize(fw, currentFrame.height || 800);
               }
-            } catch (_) {}
-          };
+            } else {
+              node.layoutSizingHorizontal = 'HUG';
+              node.layoutSizingVertical = 'HUG';
+              if (currentFrame.layoutSizingHorizontal !== 'HUG') {
+                currentFrame.layoutSizingHorizontal = 'HUG';
+              }
+            }
+          } catch (_) {}
+        };
 
-          // 第二张开始：先把散放的第一张图层精确收拢进自动布局
-          if (looseFirstNode && looseFirstNode.parent !== currentFrame) {
-            clearLooseFirstScreenshotMark(looseFirstNode);
-            currentFrame.appendChild(looseFirstNode);
-            applyChildLayout(looseFirstNode, looseFirstNode.width || finalWidth);
+        if (looseNode && looseNode.parent !== currentFrame) {
+          clearLooseFirstScreenshotMark(looseNode);
+          currentFrame.appendChild(looseNode);
+          applyChildLayout(looseNode, looseNode.width || finalWidth);
+        }
+        currentFrame.appendChild(rectNode);
+        applyChildLayout(rectNode, finalWidth);
+
+        if (wasEmpty) {
+          currentFrame.x = center.x - (currentFrame.width / 2);
+          currentFrame.y = center.y - (currentFrame.height / 2);
+        }
+      };
+
+      const placeLooseOnCanvas = (rectNode) => {
+        suppressLooseNodeMoveTracking = true;
+        markLooseFirstScreenshotNode(rectNode);
+        rectNode.x = figma.viewport.center.x - (finalWidth / 2);
+        rectNode.y = figma.viewport.center.y - (finalHeight / 2);
+        figma.currentPage.appendChild(rectNode);
+        setTimeout(() => { suppressLooseNodeMoveTracking = false; }, 500);
+      };
+
+      const getOrCreateAutoLayout = () => {
+        ensureFrame();
+        return isFrameValid() ? currentFrame : null;
+      };
+
+      if (syncSource === 'manual') {
+        // ── 手动同步：始终进 AutoLayout ──
+        if (pluginAutoLayout) {
+          appendToAutoLayout(pluginAutoLayout, rect, looseFirstNode);
+        } else {
+          const frame = getOrCreateAutoLayout();
+          if (frame) {
+            appendToAutoLayout(frame, rect, looseFirstNode);
+          } else {
+            placeLooseOnCanvas(rect);
           }
-
-          currentFrame.appendChild(rect);
-          applyChildLayout(rect, finalWidth);
-
-          // 首次向 Frame 放入内容时，保持 Frame 视口居中
-          if (wasFrameEmpty) {
-            currentFrame.x = viewportCenterAtInsert.x - (currentFrame.width / 2);
-            currentFrame.y = viewportCenterAtInsert.y - (currentFrame.height / 2);
+        }
+      } else {
+        // ── 实时同步 ──
+        if (pluginAutoLayout) {
+          // A) 已有插件 AutoLayout → 直接追加
+          appendToAutoLayout(pluginAutoLayout, rect, looseFirstNode);
+        } else if (looseFirstNode) {
+          if (firstLooseNodeMovedByUser) {
+            // C) 首图已被移动 → 当前图成为新散放首图
+            clearLooseFirstScreenshotMark(looseFirstNode);
+            placeLooseOnCanvas(rect);
+          } else {
+            // B) 首图未被移动 → 建 AutoLayout，收拢两张
+            const frame = getOrCreateAutoLayout();
+            if (frame) {
+              appendToAutoLayout(frame, rect, looseFirstNode);
+            } else {
+              placeLooseOnCanvas(rect);
+            }
           }
         } else {
-          rect.x = figma.viewport.center.x - (finalWidth / 2);
-          rect.y = figma.viewport.center.y - (finalHeight / 2);
-          figma.currentPage.appendChild(rect);
+          // D) 无首图、无 AutoLayout → 散放
+          placeLooseOnCanvas(rect);
         }
       }
-      
+
       screenshotCount++;
       
       scheduleFocusOnNode(rect);

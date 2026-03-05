@@ -5892,7 +5892,8 @@
           taskId: data.taskId || null,
           driveFileId: data.driveFileId,
           ossFileId: data.ossFileId,
-          gifCacheId: data.gifCacheId
+          gifCacheId: data.gifCacheId,
+          syncSource: data.syncSource || null
         }
       }, '*');
       } catch (error) {
