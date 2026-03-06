@@ -1440,6 +1440,7 @@ REQUIRED_FILES=(
   "drive-watcher.js"
   "icloud-watcher.js"
   "gif-composer.js"
+  "adaptive-processing.js"
   "media-processing-tuning.js"
   "figma-plugin/manifest.json"
   "update-manifest.json"

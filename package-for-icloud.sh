@@ -77,7 +77,7 @@ mkdir -p "$PROJECT_DIR"
 
 # 核心服务器文件（不含 Google Drive 相关）
 echo -e "${YELLOW}📄 复制核心文件...${NC}"
-for f in server.js userConfig.js start.js setup-autostart.js gif-composer.js icloud-watcher.js; do
+for f in server.js userConfig.js start.js setup-autostart.js gif-composer.js adaptive-processing.js icloud-watcher.js; do
     if [ -f "$f" ]; then
         cp "$f" "$PROJECT_DIR/"
         echo "   ✅ $f"

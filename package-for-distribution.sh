@@ -245,6 +245,7 @@ create_package() {
     cp update-manager.js "$TEMP_DIR/项目文件/"
     cp update-handlers.js "$TEMP_DIR/项目文件/"
     cp gif-composer.js "$TEMP_DIR/项目文件/"
+    cp adaptive-processing.js "$TEMP_DIR/项目文件/"
     cp drive-watcher.js "$TEMP_DIR/项目文件/"
     cp icloud-watcher.js "$TEMP_DIR/项目文件/" 2>/dev/null || true
     cp media-processing-tuning.js "$TEMP_DIR/项目文件/" 2>/dev/null || true
