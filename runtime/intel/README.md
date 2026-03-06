@@ -6,5 +6,6 @@ Required files:
 
 - `node`
 - `ffmpeg`
+- `ffprobe`
 - `gifsicle`
 - `magick` (or `convert`)

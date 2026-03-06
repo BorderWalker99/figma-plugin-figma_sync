@@ -303,6 +303,7 @@ create_package() {
 
     require_file "$TEMP_DIR/runtime/bin/node" "runtime/bin/node 必须存在"
     require_file "$TEMP_DIR/runtime/bin/ffmpeg" "runtime/bin/ffmpeg 必须存在"
+    require_file "$TEMP_DIR/runtime/bin/ffprobe" "runtime/bin/ffprobe 必须存在"
     require_file "$TEMP_DIR/runtime/bin/gifsicle" "runtime/bin/gifsicle 必须存在"
     if [ ! -f "$TEMP_DIR/runtime/bin/magick" ] && [ ! -f "$TEMP_DIR/runtime/bin/convert" ]; then
         echo -e "${RED}❌ runtime/bin 下缺少 magick/convert${NC}"
@@ -314,6 +315,7 @@ create_package() {
     fi
     require_runtime_arch "$TEMP_DIR/runtime/bin/node" "$expected_bin_arch"
     require_runtime_arch "$TEMP_DIR/runtime/bin/ffmpeg" "$expected_bin_arch"
+    require_runtime_arch "$TEMP_DIR/runtime/bin/ffprobe" "$expected_bin_arch"
     require_runtime_arch "$TEMP_DIR/runtime/bin/gifsicle" "$expected_bin_arch"
     if [ -f "$TEMP_DIR/runtime/bin/magick" ]; then
         require_runtime_arch "$TEMP_DIR/runtime/bin/magick" "$expected_bin_arch"
@@ -323,10 +325,8 @@ create_package() {
     # 强约束：胖包依赖必须可在 macOS 13 使用，避免低版本用户导出失败
     require_runtime_max_macos "$TEMP_DIR/runtime/bin/node" 13
     require_runtime_max_macos "$TEMP_DIR/runtime/bin/ffmpeg" 13
+    require_runtime_max_macos "$TEMP_DIR/runtime/bin/ffprobe" 13
     require_runtime_max_macos "$TEMP_DIR/runtime/bin/gifsicle" 13
-    if [ -f "$TEMP_DIR/runtime/bin/ffprobe" ]; then
-        require_runtime_max_macos "$TEMP_DIR/runtime/bin/ffprobe" 13
-    fi
     if [ -f "$TEMP_DIR/runtime/bin/magick" ]; then
         require_runtime_max_macos "$TEMP_DIR/runtime/bin/magick" 13
     else

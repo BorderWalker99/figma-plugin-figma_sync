@@ -11,12 +11,12 @@ Each `bin` directory must contain:
 
 - `node`
 - `ffmpeg`
+- `ffprobe`
 - `gifsicle`
 - `magick` (or `convert`)
 
 Optional but recommended:
 
-- `ffprobe`
 - `npm`
 - `npx`
 
@@ -35,6 +35,7 @@ Each `bin` directory must contain:
 
 - `node`
 - `ffmpeg`
+- `ffprobe`
 - `gifsicle`
 - `magick` (or `convert`)
 
@@ -42,7 +43,6 @@ Optional but recommended:
 
 - `npm`
 - `npx`
-- `ffprobe`
 
 The installer and release scripts will validate these files before packaging.
 # Offline Runtime Layout
@@ -56,6 +56,7 @@ Each architecture folder must contain:
 
 - `bin/node`
 - `bin/ffmpeg`
+- `bin/ffprobe`
 - `bin/gifsicle`
 - `bin/magick` (or `bin/convert`)
 

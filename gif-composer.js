@@ -480,13 +480,45 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
     }
     return name;
   };
+  const _resolveHealthy = async (name, verifyArgs = ['-version']) => {
+    const seen = new Set();
+    const candidates = [];
+
+    if (process.env.MAGICK_HOME) {
+      candidates.push(path.join(process.env.MAGICK_HOME, 'bin', name));
+    }
+    for (const sp of searchPaths) {
+      candidates.push(path.join(sp, name));
+    }
+    candidates.push(name);
+
+    let lastErr = null;
+    for (const candidate of candidates) {
+      const key = candidate || '';
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+
+      const command = path.isAbsolute(candidate) ? `"${candidate}"` : candidate;
+      try {
+        await execAsync(`${command} ${verifyArgs.join(' ')}`, { timeout: TOOL_CHECK_TIMEOUT });
+        return command;
+      } catch (err) {
+        lastErr = err;
+      }
+    }
+
+    if (lastErr) {
+      console.warn(`   ⚠️  未找到可用的 ${name}: ${lastErr.message}`);
+    }
+    return name;
+  };
   const MAGICK_BIN = _resolve('magick');
   const IDENTIFY_CMD = `${MAGICK_BIN} identify`;
   const CONVERT_CMD = `${MAGICK_BIN} convert`;
-  const FFMPEG_BIN = _resolve('ffmpeg');
-  const FFPROBE_BIN = _resolve('ffprobe');
-  const GIFSICLE_BIN = _resolve('gifsicle');
-  console.log(`   🔧 工具路径: magick=${MAGICK_BIN}, ffmpeg=${FFMPEG_BIN}, gifsicle=${GIFSICLE_BIN}`);
+  const FFMPEG_BIN = await _resolveHealthy('ffmpeg', ['-version']);
+  const FFPROBE_BIN = await _resolveHealthy('ffprobe', ['-version']);
+  const GIFSICLE_BIN = await _resolveHealthy('gifsicle', ['--version']);
+  console.log(`   🔧 工具路径: magick=${MAGICK_BIN}, ffmpeg=${FFMPEG_BIN}, ffprobe=${FFPROBE_BIN}, gifsicle=${GIFSICLE_BIN}`);
   
   // 1. 获取必要的配置 (userConfig injected via factory)
   

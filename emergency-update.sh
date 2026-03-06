@@ -212,6 +212,7 @@ refresh_offline_runtime_state() {
   local runtime_node=""
   local runtime_npm=""
   local has_ffmpeg=0
+  local has_ffprobe=0
   local has_gifsicle=0
   local has_magick=0
   local magick_checked=0
@@ -227,7 +228,12 @@ refresh_offline_runtime_state() {
     if [ -z "$runtime_npm" ] && [ -x "$runtime_bin/npm" ]; then
       runtime_npm="$runtime_bin/npm"
     fi
-    [ -x "$runtime_bin/ffmpeg" ] && has_ffmpeg=1
+    if [ -x "$runtime_bin/ffmpeg" ] && timeout_cmd 5 "$runtime_bin/ffmpeg" -version >/dev/null 2>&1; then
+      has_ffmpeg=1
+    fi
+    if [ -x "$runtime_bin/ffprobe" ] && timeout_cmd 5 "$runtime_bin/ffprobe" -version >/dev/null 2>&1; then
+      has_ffprobe=1
+    fi
     [ -x "$runtime_bin/gifsicle" ] && has_gifsicle=1
     if [ "$magick_checked" -eq 0 ] && { [ -x "$runtime_bin/magick" ] || [ -x "$runtime_bin/convert" ]; }; then
       magick_checked=1
@@ -246,7 +252,7 @@ refresh_offline_runtime_state() {
   fi
 
   if [ -n "$runtime_node" ] && [ -n "$runtime_npm" ] && \
-     [ "$has_ffmpeg" -eq 1 ] && [ "$has_gifsicle" -eq 1 ] && [ "$has_magick" -eq 1 ]; then
+     [ "$has_ffmpeg" -eq 1 ] && [ "$has_ffprobe" -eq 1 ] && [ "$has_gifsicle" -eq 1 ] && [ "$has_magick" -eq 1 ]; then
     OFFLINE_RUNTIME_READY=1
     OFFLINE_RUNTIME_NODE="$runtime_node"
     OFFLINE_RUNTIME_NPM="$runtime_npm"
@@ -1232,10 +1238,11 @@ else
 fi
 ensure_local_bins_path
 if [ "$OFFLINE_RUNTIME_READY" -eq 1 ]; then
-  echo -e "${GREEN}✅ 检测到完整胖包运行时（Node/FFmpeg/Gifsicle/ImageMagick）${NC}"
+  echo -e "${GREEN}✅ 检测到完整胖包运行时（Node/FFmpeg/FFprobe/Gifsicle/ImageMagick）${NC}"
   [ -n "$OFFLINE_RUNTIME_NODE" ] && echo "   • node: $OFFLINE_RUNTIME_NODE"
   [ -n "$OFFLINE_RUNTIME_NPM" ] && echo "   • npm : $OFFLINE_RUNTIME_NPM"
   command -v ffmpeg >/dev/null 2>&1 && echo "   • ffmpeg: $(command -v ffmpeg)"
+  command -v ffprobe >/dev/null 2>&1 && echo "   • ffprobe: $(command -v ffprobe)"
   command -v gifsicle >/dev/null 2>&1 && echo "   • gifsicle: $(command -v gifsicle)"
   command -v magick >/dev/null 2>&1 && echo "   • magick: $(command -v magick)"
 else

@@ -136,6 +136,7 @@ fill_arch() {
   local missing=0
   [ -x "$out_dir/node" ] || { echo "   ❌ missing: node"; missing=1; }
   [ -x "$out_dir/ffmpeg" ] || { echo "   ❌ missing: ffmpeg"; missing=1; }
+  [ -x "$out_dir/ffprobe" ] || { echo "   ❌ missing: ffprobe"; missing=1; }
   [ -x "$out_dir/gifsicle" ] || { echo "   ❌ missing: gifsicle"; missing=1; }
   if [ ! -x "$out_dir/magick" ] && [ ! -x "$out_dir/convert" ]; then
     echo "   ❌ missing: magick/convert"
