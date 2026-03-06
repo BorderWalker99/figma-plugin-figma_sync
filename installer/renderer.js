@@ -614,26 +614,25 @@ async function installDependencies() {
   if (statusLabel) {
     statusLabel.textContent = t('installing');
   }
-  
-  // 使用内置环境时，跳过传统依赖安装。
-  const fat = await ipcRenderer.invoke('check-fat-runtime', installPath);
-  if (fat && fat.complete) {
+
+  const result = await ipcRenderer.invoke('install-dependencies', installPath);
+  if (result && result.success) {
     progressBar.style.width = '100%';
     progressBar.classList.add('success');
     if (statusLabel) {
-      statusLabel.textContent = t('builtin_env_ready');
+      statusLabel.textContent = result.bundled
+        ? t('builtin_env_ready')
+        : t('all_deps_installed');
     }
     document.getElementById('step3Next').disabled = false;
   } else {
-    const missing = (fat && Array.isArray(fat.missing) && fat.missing.length > 0)
-      ? fat.missing.join(', ')
-      : 'core-components';
     progressBar.style.width = '0%';
+    const detail = (result && result.error) || t('install_failed');
     if (statusLabel) {
       statusLabel.innerHTML = `<span style="color: var(--danger);">${t('install_failed')}</span><span style="display: inline-block; width: 12px;"></span><a id="viewErrorLink" href="#" style="color: var(--accent); font-size: 12px; text-decoration: underline; cursor: pointer;">${t('view_detail')}</a>`;
       document.getElementById('viewErrorLink').addEventListener('click', (e) => {
         e.preventDefault();
-        showErrorDetailModal(`${t('package_missing_detail')}\nMissing: ${missing}`);
+        showErrorDetailModal(detail);
       });
     }
   }

@@ -66,6 +66,55 @@ const { checkUpdateAsync } = require('./update-manager');
     }
   }
 })();
+
+function collectBundledSharpVendorNodeModulesDirs() {
+  const archKey = process.arch === 'arm64' ? 'apple' : 'intel';
+  const candidates = [
+    path.join(__dirname, 'runtime', 'sharp-vendor', 'node_modules'),
+    path.join(__dirname, 'runtime', archKey, 'sharp-vendor', 'node_modules'),
+    path.join(__dirname, 'runtime', process.arch, 'sharp-vendor', 'node_modules'),
+    path.join(__dirname, 'sharp-vendor', 'node_modules')
+  ];
+  return candidates.filter((dir, index) => candidates.indexOf(dir) === index && fs.existsSync(dir));
+}
+
+function restoreBundledSharpForCurrentArch() {
+  const cpu = process.arch === 'arm64' ? 'arm64' : 'x64';
+  const requiredPackages = [
+    'sharp',
+    'detect-libc',
+    'semver',
+    path.join('@img', 'colour'),
+    path.join('@img', `sharp-darwin-${cpu}`),
+    path.join('@img', `sharp-libvips-darwin-${cpu}`)
+  ];
+  const sourceRoot = collectBundledSharpVendorNodeModulesDirs()
+    .find((root) => requiredPackages.every((pkgPath) => fs.existsSync(path.join(root, pkgPath))));
+  if (!sourceRoot) return false;
+
+  const targetNodeModules = path.join(__dirname, 'node_modules');
+  const targetImgDir = path.join(targetNodeModules, '@img');
+  try {
+    fs.mkdirSync(targetImgDir, { recursive: true });
+    fs.rmSync(path.join(targetNodeModules, 'sharp'), { recursive: true, force: true });
+    fs.rmSync(path.join(targetNodeModules, 'detect-libc'), { recursive: true, force: true });
+    fs.rmSync(path.join(targetNodeModules, 'semver'), { recursive: true, force: true });
+    fs.rmSync(path.join(targetImgDir, `sharp-darwin-${cpu}`), { recursive: true, force: true });
+    fs.rmSync(path.join(targetImgDir, `sharp-libvips-darwin-${cpu}`), { recursive: true, force: true });
+
+    fs.cpSync(path.join(sourceRoot, 'sharp'), path.join(targetNodeModules, 'sharp'), { recursive: true, force: true });
+    fs.cpSync(path.join(sourceRoot, 'detect-libc'), path.join(targetNodeModules, 'detect-libc'), { recursive: true, force: true });
+    fs.cpSync(path.join(sourceRoot, 'semver'), path.join(targetNodeModules, 'semver'), { recursive: true, force: true });
+    fs.cpSync(path.join(sourceRoot, '@img', 'colour'), path.join(targetImgDir, 'colour'), { recursive: true, force: true });
+    fs.cpSync(path.join(sourceRoot, '@img', `sharp-darwin-${cpu}`), path.join(targetImgDir, `sharp-darwin-${cpu}`), { recursive: true, force: true });
+    fs.cpSync(path.join(sourceRoot, '@img', `sharp-libvips-darwin-${cpu}`), path.join(targetImgDir, `sharp-libvips-darwin-${cpu}`), { recursive: true, force: true });
+    console.log(`✅ 已从 runtime/sharp-vendor 恢复 sharp (darwin-${cpu})`);
+    return true;
+  } catch (error) {
+    console.error('❌ 离线 sharp bundle 恢复失败:', error.message);
+    return false;
+  }
+}
 let chokidar;
 try {
   chokidar = require('chokidar');
@@ -320,6 +369,11 @@ function checkEnvironment() {
   }
 
   if (!canLoadSharp()) {
+    if (restoreBundledSharpForCurrentArch() && canLoadSharp()) {
+      console.log('✅ 已通过内置离线 sharp 运行时完成修复');
+      console.log('✅ 环境检查通过');
+      return true;
+    }
     console.log('   🔧 检测到 sharp 架构或原生模块异常，正在尝试重新安装依赖...');
     try {
       installProductionDeps();

@@ -475,6 +475,68 @@ check_sharp_runtime_health() {
     "$project_dir" >/dev/null 2>&1
 }
 
+collect_sharp_vendor_node_modules_dirs() {
+  local package_root
+  package_root="$(get_package_root_dir)"
+  local dirs=(
+    "$package_root/runtime/sharp-vendor/node_modules"
+    "$package_root/runtime/$RUNTIME_ARCH_DIR/sharp-vendor/node_modules"
+    "$SCRIPT_DIR/runtime/sharp-vendor/node_modules"
+    "$SCRIPT_DIR/runtime/$RUNTIME_ARCH_DIR/sharp-vendor/node_modules"
+  )
+  local seen=""
+  local d
+  for d in "${dirs[@]}"; do
+    if [ -d "$d" ]; then
+      case ":$seen:" in
+        *":$d:"*) ;;
+        *)
+          echo "$d"
+          seen="$seen:$d"
+          ;;
+      esac
+    fi
+  done
+}
+
+restore_bundled_sharp_for_current_arch() {
+  local project_dir="$1"
+  local cpu source_root vendor_root
+  cpu="$(get_host_npm_cpu)"
+  source_root=""
+
+  while IFS= read -r vendor_root; do
+    [ -n "$vendor_root" ] || continue
+    if [ -d "$vendor_root/sharp" ] && \
+       [ -d "$vendor_root/detect-libc" ] && \
+       [ -d "$vendor_root/semver" ] && \
+       [ -d "$vendor_root/@img/colour" ] && \
+       [ -d "$vendor_root/@img/sharp-darwin-$cpu" ] && \
+       [ -d "$vendor_root/@img/sharp-libvips-darwin-$cpu" ]; then
+      source_root="$vendor_root"
+      break
+    fi
+  done < <(collect_sharp_vendor_node_modules_dirs)
+
+  [ -n "$source_root" ] || return 1
+
+  mkdir -p "$project_dir/node_modules/@img"
+  rm -rf \
+    "$project_dir/node_modules/sharp" \
+    "$project_dir/node_modules/detect-libc" \
+    "$project_dir/node_modules/semver" \
+    "$project_dir/node_modules/@img/sharp-darwin-$cpu" \
+    "$project_dir/node_modules/@img/sharp-libvips-darwin-$cpu" 2>/dev/null || true
+
+  rsync -a "$source_root/sharp" "$project_dir/node_modules/" || return 1
+  rsync -a "$source_root/detect-libc" "$project_dir/node_modules/" || return 1
+  rsync -a "$source_root/semver" "$project_dir/node_modules/" || return 1
+  rsync -a "$source_root/@img/colour" "$project_dir/node_modules/@img/" || return 1
+  rsync -a "$source_root/@img/sharp-darwin-$cpu" "$project_dir/node_modules/@img/" || return 1
+  rsync -a "$source_root/@img/sharp-libvips-darwin-$cpu" "$project_dir/node_modules/@img/" || return 1
+  return 0
+}
+
 repair_sharp_for_current_arch() {
   local node_bin="$1"
   local npm_bin="$2"
@@ -485,11 +547,21 @@ repair_sharp_for_current_arch() {
   if [ -z "${node_bin:-}" ] || [ ! -x "$node_bin" ]; then
     return 1
   fi
+
+  echo "   ↪️  检测到 sharp 架构不匹配，正在修复（darwin-$cpu）..."
+  if restore_bundled_sharp_for_current_arch "$project_dir"; then
+    echo "   ↪️  已从安装包内置 sharp 离线运行时恢复依赖"
+    if check_sharp_runtime_health "$node_bin" "$project_dir"; then
+      echo "   ✅ sharp 离线恢复成功（darwin-$cpu）"
+      return 0
+    fi
+    echo "   ⚠️  离线 sharp bundle 恢复后仍不可用，继续尝试 npm 定向修复..."
+  fi
+
   if [ -z "${npm_bin:-}" ] || [ ! -x "$npm_bin" ]; then
     return 1
   fi
 
-  echo "   ↪️  检测到 sharp 架构不匹配，正在修复（darwin-$cpu）..."
   rm -rf "$project_dir/node_modules/sharp" "$project_dir/node_modules/@img" 2>/dev/null || true
 
   set +e
