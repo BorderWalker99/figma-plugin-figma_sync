@@ -286,5 +286,26 @@ module.exports = {
       maxHeight: envNumber('ULTRA_SPEED_UPLOAD_MAX_HEIGHT', 900),
       audioBitrate: envString('ULTRA_SPEED_UPLOAD_AUDIO_BITRATE', '112k')
     }
+  },
+
+  // D. 运行时自适应降档（根据机器负载/核心数动态提速）
+  adaptiveRuntime: {
+    mediumLoadPerCpu: envNumber('ADAPTIVE_MEDIUM_LOAD_PER_CPU', 0.6),
+    highLoadPerCpu: envNumber('ADAPTIVE_HIGH_LOAD_PER_CPU', 0.9),
+    criticalLoadPerCpu: envNumber('ADAPTIVE_CRITICAL_LOAD_PER_CPU', 1.15),
+    lowCoreCount: envNumber('ADAPTIVE_LOW_CORE_COUNT', 4),
+
+    // 当机器较慢或负载较高时，允许更早触发“类极速档”。
+    softUltraTriggerMb: envNumber('ADAPTIVE_SOFT_ULTRA_TRIGGER_MB', 90),
+    criticalUltraTriggerMb: envNumber('ADAPTIVE_CRITICAL_ULTRA_TRIGGER_MB', 60),
+
+    // 外层总超时也按压力自适应放宽，避免内部已降档但被总超时提前杀掉。
+    baseVideoTimeoutMs: envNumber('ADAPTIVE_BASE_VIDEO_TIMEOUT_MS', 480000),
+    highPressureVideoTimeoutMs: envNumber('ADAPTIVE_HIGH_PRESSURE_VIDEO_TIMEOUT_MS', 600000),
+    criticalPressureVideoTimeoutMs: envNumber('ADAPTIVE_CRITICAL_PRESSURE_VIDEO_TIMEOUT_MS', 720000),
+
+    // 导出链路在高压机器上可更早切 fast。
+    exportFastMinFrames: envNumber('ADAPTIVE_EXPORT_FAST_MIN_FRAMES', 180),
+    exportFastMinPixels: envNumber('ADAPTIVE_EXPORT_FAST_MIN_PIXELS', 3000000)
   }
 };

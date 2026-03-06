@@ -4368,6 +4368,7 @@
         status_connecting: '正在连接',
         status_reconnect: '点击重连',
         status_connected: '已连接',
+        status_network_offline: '网络断开',
         status_sync_done: '同步完成',
         status_sync_fail: '同步失败',
         status_sync_timeout: '同步超时',
@@ -4579,6 +4580,7 @@
         status_connecting: 'Connecting',
         status_reconnect: 'Tap to reconnect',
         status_connected: 'Connected',
+        status_network_offline: 'Offline',
         status_sync_done: 'Synced',
         status_sync_fail: 'Sync failed',
         status_sync_timeout: 'Sync timeout',
@@ -4828,7 +4830,7 @@
       }
       // 刷新 status pill（它由 JS 动态控制，不使用 data-i18n）
       if (typeof updateStatus === 'function' && typeof _lastStatusType !== 'undefined') {
-        updateStatus(_lastStatusType, '');
+        updateStatus(_lastStatusType, _lastStatusText || '');
       }
     }
     
@@ -4975,7 +4977,16 @@
     let _wsConnectTimeoutId = null;
     let initialConnectFallbackTimer = null; // 首次打开 5 秒兜底：仍未连上则显示帮助态
 
+    function isBrowserOffline() {
+      return typeof navigator !== 'undefined' && navigator.onLine === false;
+    }
+
+    function getOfflineStatusText() {
+      return t('status_network_offline');
+    }
+
     function scheduleReconnectAttempt(delayMs = 500) {
+      if (isBrowserOffline()) return;
       if (reconnectAttemptTimer) return;
       reconnectAttemptTimer = setTimeout(() => {
         reconnectAttemptTimer = null;
@@ -4986,6 +4997,7 @@
     function scheduleBackgroundReconnect() {
       if (backgroundReconnectTimer) return;
       backgroundReconnectTimer = setInterval(() => {
+        if (isBrowserOffline()) return;
         if (ws && ws.readyState === WebSocket.OPEN) {
           clearInterval(backgroundReconnectTimer);
           backgroundReconnectTimer = null;
@@ -4997,6 +5009,10 @@
     }
     
     function attemptReconnect() {
+      if (isBrowserOffline()) {
+        updateStatus('offline', getOfflineStatusText());
+        return;
+      }
       reconnectAttempts++;
       log(`🔄 尝试重新连接 (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`);
       updateStatus('waiting', t('status_connecting'));
@@ -5039,6 +5055,10 @@
     
     // 修复服务器连接（尝试检测服务器是否可达后重连）
     function repairServerConnection() {
+      if (isBrowserOffline()) {
+        updateStatus('offline', getOfflineStatusText());
+        return;
+      }
       log('🔧 正在检测服务器状态...');
       
       fetch('http://localhost:8888/health', { mode: 'no-cors' })
@@ -5117,6 +5137,11 @@
     function connect() {
       if (isWsConnecting) return;
       if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+      if (isBrowserOffline()) {
+        isWsConnecting = false;
+        updateStatus('offline', getOfflineStatusText());
+        return;
+      }
       // 不要在连接开始时立即更新status，避免重连时频繁切换
       // 只有在真正连接成功后才更新status
 
@@ -5846,6 +5871,7 @@
         
         resetManualSyncUI();
         hideRealtimeConversionSubtitle();
+        updateStatus(isBrowserOffline() ? 'offline' : 'disconnected', isBrowserOffline() ? getOfflineStatusText() : t('status_reconnect'));
       };
 
       ws.onclose = function () {
@@ -5869,7 +5895,9 @@
         hideRealtimeConversionSubtitle();
         
         // ✅ 智能重连逻辑 - 🚀 优化：更短的延迟
-        if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+        if (isBrowserOffline()) {
+          updateStatus('offline', getOfflineStatusText());
+        } else if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
           reconnectAttempts++;
           // 🚀 优化：固定 500ms 延迟，不再递增（原来是 1s, 2s, 3s...）
           const delay = 500;
@@ -6116,16 +6144,24 @@
 
     // 记录最后一次 updateStatus 的 type，供 applyLanguage 后刷新
     let _lastStatusType = 'waiting';
+    let _lastStatusText = '';
     
     function updateStatus(type, text) {
       // 🛡️ 防止初始化未完成时崩溃
       try {
+        const browserOffline = isBrowserOffline();
+        if (browserOffline) {
+          type = 'offline';
+          text = getOfflineStatusText();
+        }
         _lastStatusType = type;
+        _lastStatusText = text || '';
         const statusEl = document.getElementById('status');
         if (!statusEl) return; // 元素不存在时直接返回
 
         // 只要处于未连接态（断开/重连中/WS 不可用），实时同步按钮立即灭灯
         const isDisconnectedLikeState =
+          type === 'offline' ||
           type === 'disconnected' ||
           type === 'waiting' ||
           !ws ||
@@ -6147,11 +6183,11 @@
           pendingStates.savedGif = { count: 0, active: false };
         }
         if (type === 'connected') {
-        type = 'disconnected';
-        if (!text || text === '') {
-          text = t('status_disconnected');
+          type = 'disconnected';
+          if (!text || text === '') {
+            text = t('status_disconnected');
+          }
         }
-      }
       }
 
       // Wrap the content update in our animation helper
@@ -6164,15 +6200,16 @@
           statusEl.innerHTML = '';
 
           // 1. Disconnected / Waiting - Always highest priority when not connected
-          if (type === 'disconnected' || (type === 'waiting' && (!ws || ws.readyState !== WebSocket.OPEN))) {
+          if (type === 'offline' || type === 'disconnected' || (type === 'waiting' && (!ws || ws.readyState !== WebSocket.OPEN))) {
+            const isOffline = type === 'offline';
             const isDisconnected = type === 'disconnected';
-            const displayText = text || (isDisconnected ? t('status_reconnect') : t('status_connecting'));
+            const displayText = text || (isOffline ? getOfflineStatusText() : (isDisconnected ? t('status_reconnect') : t('status_connecting')));
             
-            let pillClass = 'connection-pill interactive';
+            let pillClass = isOffline ? 'connection-pill offline' : 'connection-pill interactive';
             if (type === 'waiting') {
                 pillClass += ' waiting';
-            } else if (displayText === t('status_disconnected')) {
-                pillClass += ' offline'; // Gray, no glow
+            } else if (isOffline || displayText === t('status_disconnected')) {
+                if (!pillClass.includes('offline')) pillClass += ' offline'; // Gray, no glow
             } else {
                 pillClass += ' reconnect'; // Red, glow
             }
@@ -6193,14 +6230,19 @@
         }
         
             statusEl.className = pillClass;
-        statusEl.style.cursor = 'pointer';
-        statusEl.style.display = 'flex';
-        statusEl.style.alignItems = 'center';
-        statusEl.onclick = function() {
-          attemptReconnect();
-        };
-        return;
-      }
+            statusEl.style.display = 'flex';
+            statusEl.style.alignItems = 'center';
+            if (isOffline) {
+              statusEl.style.cursor = 'default';
+              statusEl.onclick = null;
+            } else {
+              statusEl.style.cursor = 'pointer';
+              statusEl.onclick = function() {
+                attemptReconnect();
+              };
+            }
+            return;
+          }
 
           // ========================================
           // ✅ 新的状态管理逻辑
@@ -6382,9 +6424,12 @@
           // 7. Default: Connected (Screen Style)
           // No counts, show connected state
           currentButtonState = null; // Ensure state is unlocked
+          const connectedDisplayText = (typeof text === 'string' && text.trim())
+            ? text.trim()
+            : t('status_connected');
           statusEl.innerHTML = `
             <span class="status-dot" style="position: relative; z-index: 2;"></span>
-            <span style="position: relative; z-index: 2;">${t('status_connected')}</span>
+            <span style="position: relative; z-index: 2;">${connectedDisplayText}</span>
           `;
           statusEl.className = 'connection-pill connected';
       });
@@ -6479,6 +6524,20 @@
             console.error('❌ toggleRealtimeSync 错误:', error);
         }
     }
+
+    window.addEventListener('offline', function() {
+      updateStatus('offline', getOfflineStatusText());
+    });
+
+    window.addEventListener('online', function() {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        updateStatus('connected', t('status_connected'));
+        return;
+      }
+      reconnectAttempts = 0;
+      updateStatus('waiting', t('status_connecting'));
+      scheduleReconnectAttempt(0);
+    });
 
     function startRealtimeSync() {
         // 🛡️ 防止初始化未完成时崩溃

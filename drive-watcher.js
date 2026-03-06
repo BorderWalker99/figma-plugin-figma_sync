@@ -53,6 +53,12 @@ const {
 
 const userConfig = require('./userConfig');
 const mediaTuning = require('./media-processing-tuning');
+const {
+  getSystemPressure,
+  getDynamicUltraTriggerMb,
+  getAdaptiveVideoTimeoutMs,
+  buildWatcherAttemptProfiles
+} = require('./adaptive-processing');
 
 const {
   getUserIdentifier,
@@ -599,14 +605,15 @@ async function drainDriveRealtimeVideoQueue() {
   if (isDriveRealtimeVideoQueueRunning) return;
   isDriveRealtimeVideoQueueRunning = true;
   try {
-    const VIDEO_TIMEOUT_MS = 480000; // 视频→GIF 转换(含降级策略)需要更多时间：8 分钟
     while (realtimeVideoQueue.length > 0 && isRealTimeMode) {
       const file = realtimeVideoQueue.shift();
       if (!file) continue;
       realtimeQueuedVideoFileIds.delete(file.id);
+      const fileSizeMB = Math.max(0, Number(file.size || 0) / 1024 / 1024);
+      const videoTimeoutMs = getAdaptiveVideoTimeoutMs(mediaTuning, { fileSizeMB });
       let _timeoutId;
       const fileTimeout = new Promise((_, reject) => {
-        _timeoutId = setTimeout(() => reject(new Error(`SYNC_TIMEOUT:${file.name}`)), VIDEO_TIMEOUT_MS);
+        _timeoutId = setTimeout(() => reject(new Error(`SYNC_TIMEOUT:${file.name}`)), videoTimeoutMs);
       });
       try {
         await Promise.race([handleDriveFile(file, true, null, null, 'realtime'), fileTimeout]);
@@ -1084,11 +1091,22 @@ async function handleDriveFile(file, deleteAfterSync = false, progressCb = null,
     
     if (isVideo) {
       const videoSizeBytes = originalBuffer.length;
-      const videoSizeMB = (videoSizeBytes / 1024 / 1024).toFixed(1);
+      const videoSizeMBNum = videoSizeBytes / 1024 / 1024;
+      const videoSizeMB = videoSizeMBNum.toFixed(1);
       const isLargeFile = videoSizeBytes >= mediaTuning.thresholds.largeVideoMb * 1024 * 1024;
-      const isUltraLargeFile = videoSizeBytes >= ULTRA_SPEED_VIDEO_THRESHOLD_BYTES;
+      const pressure = getSystemPressure(mediaTuning);
+      const dynamicUltraTriggerMb = getDynamicUltraTriggerMb(mediaTuning, {
+        sizeMB: videoSizeMBNum,
+        pressure
+      });
+      const adaptivePlan = buildWatcherAttemptProfiles(mediaTuning, {
+        videoSizeMB: videoSizeMBNum,
+        isLargeFile,
+        pressure
+      });
+      const isUltraLargeFile = videoSizeBytes >= ULTRA_SPEED_VIDEO_THRESHOLD_BYTES || videoSizeMBNum >= dynamicUltraTriggerMb;
       const convStartTime = Date.now();
-      console.log(`   🎬 [Video→GIF] 开始转换 ${file.name} (${videoSizeMB}MB) [${isUltraLargeFile ? '极速两遍' : (isLargeFile ? '大文件两遍' : '小文件两遍')}]...`);
+      console.log(`   🎬 [Video→GIF] 开始转换 ${file.name} (${videoSizeMB}MB) [${isUltraLargeFile ? '自适应极速' : (isLargeFile ? '大文件两遍' : '小文件两遍')}] (${pressure.label}, trigger=${dynamicUltraTriggerMb.toFixed(1)}MB)...`);
       
       const estimatedSec = Math.max(
         5,
@@ -1130,9 +1148,12 @@ async function handleDriveFile(file, deleteAfterSync = false, progressCb = null,
         const _sourceFps = _meta?.fps || 999;
         emitProgress('converting', 30, { estimatedSec, isVideo: true });
 
-        const buildFilterChain = (targetFps) => {
+        const buildFilterChain = (targetFps, scaleDivisor = 1) => {
           const parts = ['setpts=PTS'];
           if (_sourceFps > targetFps + 0.5) parts.push(`fps=${targetFps}`);
+          if (scaleDivisor > 1) {
+            parts.push(`scale='max(2,trunc(iw/${scaleDivisor}/2)*2)':'max(2,trunc(ih/${scaleDivisor}/2)*2)':flags=lanczos`);
+          }
           return parts.join(',');
         };
         
@@ -1159,63 +1180,57 @@ async function handleDriveFile(file, deleteAfterSync = false, progressCb = null,
         const isAbortError = (err) => err && err.code === 'CONVERSION_ABORTED';
 
         // 大/超大文件专用两遍法：消除 split 帧缓冲，内存从 O(n_frames) 降至 O(1)
-        const runLargeTwoPass = async (sourceVideoPath, targetFps, maxColors, dither, totalTimeout) => {
-          const filterBase = buildFilterChain(targetFps);
+        const runLargeTwoPass = async (sourceVideoPath, profile) => {
+          const filterBase = buildFilterChain(profile.fps, profile.scaleDivisor);
+          const totalTimeout = profile.timeoutMs;
           const pass1Timeout = Math.ceil(totalTimeout * 0.45);
           const pass2Timeout = Math.ceil(totalTimeout * 0.7);
-          const pass1Cmd = `ffmpeg -hwaccel auto -an ${FF_OPT} -threads 0 -i "${sourceVideoPath}" -vf "${filterBase},palettegen=max_colors=${maxColors}:stats_mode=diff:reserve_transparent=0" -y "${tempPalette}"`;
+          const pass1Cmd = `ffmpeg -hwaccel auto -an ${FF_OPT} -threads 0 -i "${sourceVideoPath}" -vf "${filterBase},palettegen=max_colors=${profile.maxColors}:stats_mode=diff:reserve_transparent=0" -y "${tempPalette}"`;
           await execAsync(pass1Cmd, { timeout: pass1Timeout, maxBuffer: 50 * 1024 * 1024 });
           throwIfAborted();
           emitProgress('converting', 50, { estimatedSec, isVideo: true });
-          const pass2Cmd = `ffmpeg -hwaccel auto -an ${FF_OPT} -threads 0 -i "${sourceVideoPath}" -i "${tempPalette}" -lavfi "${filterBase}[v];[v][1:v]paletteuse=dither=${dither}:diff_mode=rectangle" -loop 0 -y "${tempGifOut}"`;
+          const pass2Cmd = `ffmpeg -hwaccel auto -an ${FF_OPT} -threads 0 -i "${sourceVideoPath}" -i "${tempPalette}" -lavfi "${filterBase}[v];[v][1:v]paletteuse=dither=${profile.dither}:diff_mode=rectangle" -loop 0 -y "${tempGifOut}"`;
           await execAsync(pass2Cmd, { timeout: pass2Timeout, maxBuffer: 200 * 1024 * 1024 });
         };
 
-        // 小文件两遍（保留 lanczos 高质量 + sierra2_4a 抖动）
-        const runSmallTwoPass = async (sourceVideoPath, targetFps, pass1Timeout, pass2Timeout) => {
-          const filterBase = buildFilterChain(targetFps);
-          const pass1Cmd = `ffmpeg -hwaccel auto -an ${FF_OPT} -threads 0 -i "${sourceVideoPath}" -vf "${filterBase},palettegen=max_colors=256:stats_mode=full:reserve_transparent=0" -y "${tempPalette}"`;
-          await execAsync(pass1Cmd, { timeout: pass1Timeout, maxBuffer: 50 * 1024 * 1024 });
+        // 小文件两遍：仍保质量，但在慢机上允许同步降低帧率/分辨率。
+        const runSmallTwoPass = async (sourceVideoPath, profile) => {
+          const filterBase = buildFilterChain(profile.fps, profile.scaleDivisor);
+          const pass1Cmd = `ffmpeg -hwaccel auto -an ${FF_OPT} -threads 0 -i "${sourceVideoPath}" -vf "${filterBase},palettegen=max_colors=${profile.maxColors}:stats_mode=full:reserve_transparent=0" -y "${tempPalette}"`;
+          await execAsync(pass1Cmd, { timeout: profile.pass1TimeoutMs, maxBuffer: 50 * 1024 * 1024 });
           throwIfAborted();
           emitProgress('converting', 55, { estimatedSec, isVideo: true });
-          const pass2Cmd = `ffmpeg -hwaccel auto -an ${FF_OPT} -threads 0 -i "${sourceVideoPath}" -i "${tempPalette}" -lavfi "${filterBase}[v];[v][1:v]paletteuse=dither=sierra2_4a:diff_mode=rectangle" -loop 0 -y "${tempGifOut}"`;
-          await execAsync(pass2Cmd, { timeout: pass2Timeout, maxBuffer: 200 * 1024 * 1024 });
+          const pass2Cmd = `ffmpeg -hwaccel auto -an ${FF_OPT} -threads 0 -i "${sourceVideoPath}" -i "${tempPalette}" -lavfi "${filterBase}[v];[v][1:v]paletteuse=dither=${profile.dither}:diff_mode=rectangle" -loop 0 -y "${tempGifOut}"`;
+          await execAsync(pass2Cmd, { timeout: profile.pass2TimeoutMs, maxBuffer: 200 * 1024 * 1024 });
         };
 
         // 回退用单遍（已压缩过的小源文件，split 缓冲压力可接受）
-        const runFallbackSinglePass = async (sourceVideoPath, fps, maxColors, dither, timeout) => {
-          const baseFilter = buildFilterChain(fps);
-          const cmd = `ffmpeg -hwaccel auto -an ${FF_OPT} -threads 0 -i "${sourceVideoPath}" -lavfi "${baseFilter},split[s0][s1];[s0]palettegen=max_colors=${maxColors}:stats_mode=diff:reserve_transparent=0[p];[s1][p]paletteuse=dither=${dither}:diff_mode=rectangle" -loop 0 -y "${tempGifOut}"`;
-          await execAsync(cmd, { timeout, maxBuffer: 200 * 1024 * 1024 });
+        const runFallbackSinglePass = async (sourceVideoPath, profile) => {
+          const baseFilter = buildFilterChain(profile.fps, profile.scaleDivisor);
+          const cmd = `ffmpeg -hwaccel auto -an ${FF_OPT} -threads 0 -i "${sourceVideoPath}" -lavfi "${baseFilter},split[s0][s1];[s0]palettegen=max_colors=${profile.maxColors}:stats_mode=diff:reserve_transparent=0[p];[s1][p]paletteuse=dither=${profile.dither}:diff_mode=rectangle" -loop 0 -y "${tempGifOut}"`;
+          await execAsync(cmd, { timeout: profile.timeoutMs, maxBuffer: 200 * 1024 * 1024 });
         };
 
         let converted = false;
+        let lastAdaptiveProfile = adaptivePlan.profiles[Math.max(0, adaptivePlan.profiles.length - 1)];
         try {
-          if (isUltraLargeFile) {
-            await runLargeTwoPass(
-              conversionSourceVideo,
-              mediaTuning.watcher.ultra.fps,
-              mediaTuning.watcher.ultra.maxColors,
-              mediaTuning.watcher.ultra.dither,
-              mediaTuning.watcher.ultra.timeoutMs
-            );
-          } else if (isLargeFile) {
-            await runLargeTwoPass(
-              conversionSourceVideo,
-              mediaTuning.watcher.largeSinglePass.fps,
-              mediaTuning.watcher.largeSinglePass.maxColors,
-              mediaTuning.watcher.largeSinglePass.dither,
-              mediaTuning.watcher.largeSinglePass.timeoutMs
-            );
-          } else {
-            await runSmallTwoPass(
-              conversionSourceVideo,
-              mediaTuning.watcher.smallTwoPass.fps,
-              mediaTuning.watcher.smallTwoPass.pass1TimeoutMs,
-              mediaTuning.watcher.smallTwoPass.pass2TimeoutMs
-            );
+          for (let attemptIndex = 0; attemptIndex < adaptivePlan.profiles.length; attemptIndex++) {
+            const profile = adaptivePlan.profiles[attemptIndex];
+            lastAdaptiveProfile = profile;
+            emitProgress('converting', 30, {
+              estimatedSec,
+              isVideo: true,
+              stageDetail: `adaptive-profile:${profile.label}`
+            });
+            console.log(`   ⚙️  [Video→GIF] 尝试档位 ${attemptIndex + 1}/${adaptivePlan.profiles.length}: ${profile.label} fps=${profile.fps} scale=${profile.scaleDivisor} colors=${profile.maxColors}`);
+            if (profile.strategy === 'smallTwoPass') {
+              await runSmallTwoPass(conversionSourceVideo, profile);
+            } else {
+              await runLargeTwoPass(conversionSourceVideo, profile);
+            }
+            converted = true;
+            break;
           }
-          converted = true;
         } catch (primaryErr) {
           if (isAbortError(primaryErr)) throw primaryErr;
           const reason = isTimeoutLike(primaryErr) ? 'progress-stalled-at-5' : 'primary-conversion-failed';
@@ -1234,13 +1249,13 @@ async function handleDriveFile(file, deleteAfterSync = false, progressCb = null,
               throw new Error('视频压缩输出为空');
             }
             emitProgress('converting', 35, { estimatedSec, isVideo: true, degraded: true, stageDetail: 'converting-compressed-video' });
-            await runFallbackSinglePass(
-              tempCompressedVideo,
-              mediaTuning.watcher.fallbackAfterCompressToGif.fps,
-              mediaTuning.watcher.fallbackAfterCompressToGif.maxColors,
-              mediaTuning.watcher.fallbackAfterCompressToGif.dither,
-              mediaTuning.watcher.fallbackAfterCompressToGif.timeoutMs
-            );
+            await runFallbackSinglePass(tempCompressedVideo, {
+              fps: Math.min(lastAdaptiveProfile.fps, mediaTuning.watcher.fallbackAfterCompressToGif.fps),
+              scaleDivisor: Math.max(lastAdaptiveProfile.scaleDivisor, mediaTuning.watcher.fallbackAfterCompressToGif.scaleDivisor || 2),
+              maxColors: Math.min(lastAdaptiveProfile.maxColors, mediaTuning.watcher.fallbackAfterCompressToGif.maxColors),
+              dither: lastAdaptiveProfile.dither === 'none' ? 'none' : mediaTuning.watcher.fallbackAfterCompressToGif.dither,
+              timeoutMs: mediaTuning.watcher.fallbackAfterCompressToGif.timeoutMs
+            });
             converted = true;
           } catch (fallbackErr) {
             if (isAbortError(fallbackErr)) throw fallbackErr;
@@ -1252,19 +1267,21 @@ async function handleDriveFile(file, deleteAfterSync = false, progressCb = null,
           throwIfAborted();
           emitProgress('converting', 45, { estimatedSec, isVideo: true, degraded: true, stageDetail: 'lossy-gif-fallback' });
           const lossySource = fs.existsSync(tempCompressedVideo) ? tempCompressedVideo : conversionSourceVideo;
-          await runFallbackSinglePass(
-            lossySource,
-            isUltraLargeFile
-              ? Math.max(mediaTuning.watcher.ultra.fallbackMinFps, mediaTuning.watcher.ultra.fps - 1)
-              : mediaTuning.watcher.fallbackLossy.fps,
-            isUltraLargeFile
-              ? Math.max(mediaTuning.watcher.ultra.fallbackMinColors, mediaTuning.watcher.ultra.maxColors - 16)
-              : mediaTuning.watcher.fallbackLossy.maxColors,
-            isUltraLargeFile ? mediaTuning.watcher.ultra.fallbackDither : mediaTuning.watcher.fallbackLossy.dither,
-            isUltraLargeFile
-              ? Math.max(mediaTuning.watcher.ultra.fallbackTimeoutFloorMs, mediaTuning.watcher.ultra.timeoutMs - mediaTuning.watcher.ultra.fallbackTimeoutReduceMs)
+          await runFallbackSinglePass(lossySource, {
+            fps: isUltraLargeFile
+              ? Math.max(mediaTuning.watcher.ultra.fallbackMinFps, lastAdaptiveProfile.fps - 1)
+              : Math.min(lastAdaptiveProfile.fps, mediaTuning.watcher.fallbackLossy.fps),
+            scaleDivisor: isUltraLargeFile
+              ? Math.max(mediaTuning.watcher.ultra.fallbackScaleDivisorMin, lastAdaptiveProfile.scaleDivisor + 1)
+              : Math.max(lastAdaptiveProfile.scaleDivisor, mediaTuning.watcher.fallbackLossy.scaleDivisor || 2),
+            maxColors: isUltraLargeFile
+              ? Math.max(mediaTuning.watcher.ultra.fallbackMinColors, lastAdaptiveProfile.maxColors - 16)
+              : Math.min(lastAdaptiveProfile.maxColors, mediaTuning.watcher.fallbackLossy.maxColors),
+            dither: isUltraLargeFile ? mediaTuning.watcher.ultra.fallbackDither : mediaTuning.watcher.fallbackLossy.dither,
+            timeoutMs: isUltraLargeFile
+              ? Math.max(mediaTuning.watcher.ultra.fallbackTimeoutFloorMs, lastAdaptiveProfile.timeoutMs - mediaTuning.watcher.ultra.fallbackTimeoutReduceMs)
               : mediaTuning.watcher.fallbackLossy.timeoutMs
-          );
+          });
           converted = true;
         }
 
@@ -1798,7 +1815,9 @@ async function performManualSync() {
       const fName = file.name.toLowerCase();
       const fMime = (file.mimeType || '').toLowerCase();
       const isVideoItem = fName.endsWith('.mp4') || fName.endsWith('.mov') || fMime.startsWith('video/');
-      const timeoutMs = isVideoItem ? 480000 : 60000;
+      const timeoutMs = isVideoItem
+        ? getAdaptiveVideoTimeoutMs(mediaTuning, { fileSizeMB: Math.max(0, Number(file.size || 0) / 1024 / 1024) })
+        : 60000;
       
       const fileProgressCb = (stage, percent) => {
         if (shouldAbort()) {
