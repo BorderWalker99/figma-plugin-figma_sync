@@ -390,7 +390,7 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
         }
         const filterDir = path.join(imHome, 'lib', 'ImageMagick', 'modules-Q16HDRI', 'filters');
         if (fs.existsSync(filterDir)) {
-          process.env.MAGICK_CODER_FILTER_PATH = filterDir;
+          process.env.MAGICK_FILTER_MODULE_PATH = filterDir;
         }
         const etcDir = path.join(imHome, 'etc', 'ImageMagick-7');
         const cfgDir = path.join(imHome, 'lib', 'ImageMagick', 'config-Q16HDRI');

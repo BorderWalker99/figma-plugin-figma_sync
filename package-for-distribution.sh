@@ -45,6 +45,39 @@ require_runtime_arch() {
     fi
 }
 
+require_runtime_max_macos() {
+    local bin_path="$1"
+    local max_major="$2" # e.g. 13
+    local line minos major
+    if [ ! -x "$bin_path" ]; then
+        echo -e "${RED}❌ 缺少可执行文件: $bin_path${NC}"
+        exit 1
+    fi
+
+    line="$(otool -l "$bin_path" 2>/dev/null | awk '/minos/{print $2; exit}')"
+    if [ -z "$line" ]; then
+        line="$(otool -l "$bin_path" 2>/dev/null | awk '/LC_VERSION_MIN_MACOSX/{f=1; next} f&&/version/{print $2; exit}')"
+    fi
+    if [ -z "$line" ]; then
+        # 某些二进制可能不含 minos 字段，保守起见直接失败，避免发布不兼容包
+        echo -e "${RED}❌ 无法解析最小系统版本: $bin_path${NC}"
+        echo -e "${YELLOW}   请替换为明确支持 macOS ${max_major} 的二进制。${NC}"
+        exit 1
+    fi
+
+    minos="$line"
+    major="${minos%%.*}"
+    if [ -z "$major" ]; then
+        echo -e "${RED}❌ 无法解析最小系统版本: $bin_path (minos=$minos)${NC}"
+        exit 1
+    fi
+    if [ "$major" -gt "$max_major" ]; then
+        echo -e "${RED}❌ 最小系统版本不兼容: $bin_path${NC}"
+        echo -e "${YELLOW}   期望支持 ≤ macOS ${max_major}.x，实际 minos=${minos}${NC}"
+        exit 1
+    fi
+}
+
 ensure_sharp_matches_arch() {
     local project_dir="$1"
     local runtime_bin_dir="$2"
@@ -285,6 +318,18 @@ create_package() {
         require_runtime_arch "$TEMP_DIR/runtime/bin/magick" "$expected_bin_arch"
     else
         require_runtime_arch "$TEMP_DIR/runtime/bin/convert" "$expected_bin_arch"
+    fi
+    # 强约束：胖包依赖必须可在 macOS 13 使用，避免低版本用户导出失败
+    require_runtime_max_macos "$TEMP_DIR/runtime/bin/node" 13
+    require_runtime_max_macos "$TEMP_DIR/runtime/bin/ffmpeg" 13
+    require_runtime_max_macos "$TEMP_DIR/runtime/bin/gifsicle" 13
+    if [ -f "$TEMP_DIR/runtime/bin/ffprobe" ]; then
+        require_runtime_max_macos "$TEMP_DIR/runtime/bin/ffprobe" 13
+    fi
+    if [ -f "$TEMP_DIR/runtime/bin/magick" ]; then
+        require_runtime_max_macos "$TEMP_DIR/runtime/bin/magick" 13
+    else
+        require_runtime_max_macos "$TEMP_DIR/runtime/bin/convert" 13
     fi
 
     local expected_npm_cpu="arm64"

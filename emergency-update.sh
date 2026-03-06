@@ -21,8 +21,9 @@ REPO="BorderWalker99/figma-plugin-figma_sync"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BACKUP_DIR="$SCRIPT_DIR/.emergency-backup-$(date +%Y%m%d%H%M%S)"
 TEMP_DIR="$(mktemp -d)"
+HOST_ARCH="$(uname -m)"
 RUNTIME_ARCH_DIR="intel"
-if [ "$HOST_ARCH" = "arm64" ]; then
+if [ "$HOST_ARCH" = "arm64" ] || [ "$(sysctl -n hw.optional.arm64 2>/dev/null || echo 0)" = "1" ]; then
   RUNTIME_ARCH_DIR="apple"
 fi
 OFFLINE_RUNTIME_READY=0
@@ -99,6 +100,111 @@ prepend_path_once() {
   fi
 }
 
+append_env_path_once() {
+  local var_name="$1"
+  local target="$2"
+  local current
+  [ -n "$var_name" ] || return 0
+  [ -n "$target" ] || return 0
+  [ -d "$target" ] || return 0
+  current="$(eval "printf '%s' \"\${$var_name:-}\"")"
+  case ":$current:" in
+    *":$target:"*) ;;
+    *)
+      if [ -n "$current" ]; then
+        eval "export $var_name=\"\$target:\$current\""
+      else
+        eval "export $var_name=\"\$target\""
+      fi
+      ;;
+  esac
+}
+
+configure_runtime_imagemagick_env() {
+  local runtime_bin="$1"
+  local runtime_root=""
+  local magick_home=""
+  [ -n "$runtime_bin" ] || return 1
+
+  runtime_root="$(dirname "$runtime_bin")"
+  if [ "$(basename "$runtime_root")" != "bin" ]; then
+    return 1
+  fi
+  magick_home="$(dirname "$runtime_root")"
+  [ -d "$magick_home" ] || return 1
+  [ -x "$magick_home/bin/magick" ] || [ -x "$magick_home/bin/convert" ] || return 1
+
+  export MAGICK_HOME="$magick_home"
+  prepend_path_once "$magick_home/bin"
+  append_env_path_once "DYLD_LIBRARY_PATH" "$magick_home/lib"
+
+  if [ -d "$magick_home/lib/ImageMagick/modules-Q16HDRI/coders" ]; then
+    export MAGICK_CODER_MODULE_PATH="$magick_home/lib/ImageMagick/modules-Q16HDRI/coders"
+  fi
+  if [ -d "$magick_home/lib/ImageMagick/modules-Q16HDRI/filters" ]; then
+    export MAGICK_FILTER_MODULE_PATH="$magick_home/lib/ImageMagick/modules-Q16HDRI/filters"
+  fi
+
+  local cfg_parts=""
+  if [ -d "$magick_home/etc/ImageMagick-7" ]; then
+    cfg_parts="$magick_home/etc/ImageMagick-7"
+  fi
+  if [ -d "$magick_home/lib/ImageMagick/config-Q16HDRI" ]; then
+    if [ -n "$cfg_parts" ]; then
+      cfg_parts="$cfg_parts:$magick_home/lib/ImageMagick/config-Q16HDRI"
+    else
+      cfg_parts="$magick_home/lib/ImageMagick/config-Q16HDRI"
+    fi
+  fi
+  if [ -n "$cfg_parts" ]; then
+    export MAGICK_CONFIGURE_PATH="$cfg_parts"
+  fi
+  return 0
+}
+
+runtime_imagemagick_healthy() {
+  local runtime_bin="$1"
+  local magick_cmd=""
+  local tmp_dir probe_in probe_out
+  [ -n "$runtime_bin" ] || return 1
+
+  if [ -x "$runtime_bin/magick" ]; then
+    magick_cmd="$runtime_bin/magick"
+  elif [ -x "$runtime_bin/convert" ]; then
+    magick_cmd="$runtime_bin/convert"
+  else
+    return 1
+  fi
+
+  configure_runtime_imagemagick_env "$runtime_bin" >/dev/null 2>&1 || true
+
+  if ! timeout_cmd 5 "$magick_cmd" -version >/dev/null 2>&1; then
+    return 1
+  fi
+
+  # 尽量做一次 PNG 读写健康检查，避免“可执行存在但 coder 模块不可用”的误判。
+  if [ -x "$runtime_bin/magick" ]; then
+    tmp_dir="$(mktemp -d)"
+    probe_in="$tmp_dir/probe.png"
+    probe_out="$tmp_dir/probe_out.png"
+    if ! timeout_cmd 6 "$runtime_bin/magick" -size 2x2 xc:none "$probe_in" >/dev/null 2>&1; then
+      rm -rf "$tmp_dir" 2>/dev/null || true
+      return 1
+    fi
+    if ! timeout_cmd 6 "$runtime_bin/magick" "$probe_in" -resize 1x1 "$probe_out" >/dev/null 2>&1; then
+      rm -rf "$tmp_dir" 2>/dev/null || true
+      return 1
+    fi
+    if ! timeout_cmd 6 "$runtime_bin/magick" identify "$probe_out" >/dev/null 2>&1; then
+      rm -rf "$tmp_dir" 2>/dev/null || true
+      return 1
+    fi
+    rm -rf "$tmp_dir" 2>/dev/null || true
+  fi
+
+  return 0
+}
+
 refresh_offline_runtime_state() {
   OFFLINE_RUNTIME_READY=0
   OFFLINE_RUNTIME_NODE=""
@@ -108,6 +214,7 @@ refresh_offline_runtime_state() {
   local has_ffmpeg=0
   local has_gifsicle=0
   local has_magick=0
+  local magick_checked=0
   local runtime_bin
 
   while IFS= read -r runtime_bin; do
@@ -122,8 +229,13 @@ refresh_offline_runtime_state() {
     fi
     [ -x "$runtime_bin/ffmpeg" ] && has_ffmpeg=1
     [ -x "$runtime_bin/gifsicle" ] && has_gifsicle=1
-    if [ -x "$runtime_bin/magick" ] || [ -x "$runtime_bin/convert" ]; then
-      has_magick=1
+    if [ "$magick_checked" -eq 0 ] && { [ -x "$runtime_bin/magick" ] || [ -x "$runtime_bin/convert" ]; }; then
+      magick_checked=1
+      if runtime_imagemagick_healthy "$runtime_bin"; then
+        has_magick=1
+      else
+        echo "   ⚠️  检测到 runtime 内 ImageMagick 但健康检查失败，将继续走依赖修复"
+      fi
     fi
   done < <(collect_runtime_bin_dirs)
 
@@ -804,7 +916,8 @@ run_with_timeout() {
 }
 
 verify_imagemagick_health() {
-  local mode tmp_dir probe_in probe_out magick_path
+  local mode tmp_dir probe_in probe_out magick_path convert_path identify_path
+  local write_cmd identify_cmd
   local cache_file cache_ttl
   mode="${1:-full}"
   cache_file="$HOME/.screensync/deps/imagemagick/.health-ok"
@@ -822,14 +935,26 @@ verify_imagemagick_health() {
   }
 
   magick_path="$(command -v magick 2>/dev/null || true)"
-  [ -n "$magick_path" ] && [ -x "$magick_path" ] || return 1
+  if [ -n "$magick_path" ] && [ -x "$magick_path" ]; then
+    write_cmd="$magick_path"
+    identify_cmd="$magick_path identify"
+  else
+    convert_path="$(command -v convert 2>/dev/null || true)"
+    identify_path="$(command -v identify 2>/dev/null || true)"
+    if [ -n "$convert_path" ] && [ -x "$convert_path" ] && [ -n "$identify_path" ] && [ -x "$identify_path" ]; then
+      write_cmd="$convert_path"
+      identify_cmd="$identify_path"
+    else
+      return 1
+    fi
+  fi
 
   # 快速检测：用于“检查系统依赖”阶段，避免在异常机型上长时间卡住。
   if [ "$mode" = "quick" ]; then
     if is_cache_fresh "$cache_file" "$cache_ttl"; then
       return 0
     fi
-    timeout_cmd 3 magick -version >/dev/null 2>&1
+    timeout_cmd 3 "$write_cmd" -version >/dev/null 2>&1
     return $?
   fi
 
@@ -837,19 +962,19 @@ verify_imagemagick_health() {
   probe_in="$tmp_dir/probe.png"
   probe_out="$tmp_dir/probe_out.png"
 
-  if ! timeout_cmd 5 magick -version >/dev/null 2>&1; then
+  if ! timeout_cmd 5 "$write_cmd" -version >/dev/null 2>&1; then
     rm -f "$cache_file" 2>/dev/null || true
     rm -rf "$tmp_dir"; return 1
   fi
-  if ! timeout_cmd 5 magick -size 2x2 xc:none "$probe_in" >/dev/null 2>&1; then
+  if ! timeout_cmd 5 "$write_cmd" -size 2x2 xc:none "$probe_in" >/dev/null 2>&1; then
     rm -f "$cache_file" 2>/dev/null || true
     rm -rf "$tmp_dir"; return 1
   fi
-  if ! timeout_cmd 5 magick "$probe_in" -resize 1x1 "$probe_out" >/dev/null 2>&1; then
+  if ! timeout_cmd 5 "$write_cmd" "$probe_in" -resize 1x1 "$probe_out" >/dev/null 2>&1; then
     rm -f "$cache_file" 2>/dev/null || true
     rm -rf "$tmp_dir"; return 1
   fi
-  if ! timeout_cmd 5 magick identify "$probe_out" >/dev/null 2>&1; then
+  if ! timeout_cmd 5 $identify_cmd "$probe_out" >/dev/null 2>&1; then
     rm -f "$cache_file" 2>/dev/null || true
     rm -rf "$tmp_dir"; return 1
   fi
@@ -1459,19 +1584,26 @@ echo -e "${YELLOW}🔍 正在检查系统依赖...${NC}"
 ensure_local_bins_path
 
 if [ "$OFFLINE_RUNTIME_READY" -eq 1 ]; then
-  echo -e "${GREEN}✅ 已启用胖包 runtime，跳过系统依赖在线安装${NC}"
-  echo "   Node     : $OFFLINE_RUNTIME_NODE"
-  echo "   npm      : $OFFLINE_RUNTIME_NPM"
-  if command -v ffmpeg >/dev/null 2>&1; then
-    echo "   ffmpeg   : $(command -v ffmpeg)"
+  if verify_imagemagick_health quick 2>/dev/null && verify_imagemagick_health 2>/dev/null; then
+    echo -e "${GREEN}✅ 已启用胖包 runtime，跳过系统依赖在线安装${NC}"
+    echo "   Node     : $OFFLINE_RUNTIME_NODE"
+    echo "   npm      : $OFFLINE_RUNTIME_NPM"
+    if command -v ffmpeg >/dev/null 2>&1; then
+      echo "   ffmpeg   : $(command -v ffmpeg)"
+    fi
+    if command -v gifsicle >/dev/null 2>&1; then
+      echo "   gifsicle : $(command -v gifsicle)"
+    fi
+    if command -v magick >/dev/null 2>&1; then
+      echo "   magick   : $(command -v magick)"
+    fi
+  else
+    echo -e "${YELLOW}⚠️  runtime 中 ImageMagick 健康检查失败，改为执行依赖修复${NC}"
+    OFFLINE_RUNTIME_READY=0
   fi
-  if command -v gifsicle >/dev/null 2>&1; then
-    echo "   gifsicle : $(command -v gifsicle)"
-  fi
-  if command -v magick >/dev/null 2>&1; then
-    echo "   magick   : $(command -v magick)"
-  fi
-else
+fi
+
+if [ "$OFFLINE_RUNTIME_READY" -ne 1 ]; then
 
 check_dep_quick() {
   local cmd="$1"
@@ -1543,7 +1675,7 @@ if [ -n "$MISSING_DEPS" ]; then
         if check_dep_quick "$dep_cmd"; then
           echo -e "   ${GREEN}✅ $dep 安装成功${NC}"
         else
-          if [ "$dep" = "imagemagick" ] && [ "${ALLOW_SKIP_MAGICK_ON_FAILURE:-1}" = "1" ]; then
+          if [ "$dep" = "imagemagick" ] && [ "${ALLOW_SKIP_MAGICK_ON_FAILURE:-0}" = "1" ]; then
             MAGICK_SKIPPED="1"
             echo -e "   ${YELLOW}⚠️  $dep 仍不可用，已按策略跳过（后续 GIF 将回退 FFmpeg）${NC}"
           else
@@ -1551,7 +1683,7 @@ if [ -n "$MISSING_DEPS" ]; then
           fi
         fi
       else
-        if [ "$dep" = "imagemagick" ] && [ "${ALLOW_SKIP_MAGICK_ON_FAILURE:-1}" = "1" ]; then
+        if [ "$dep" = "imagemagick" ] && [ "${ALLOW_SKIP_MAGICK_ON_FAILURE:-0}" = "1" ]; then
           MAGICK_SKIPPED="1"
           echo -e "   ${YELLOW}⚠️  $dep 安装失败，已按策略跳过（后续 GIF 将回退 FFmpeg）${NC}"
         else
@@ -1578,6 +1710,26 @@ if [ -n "$MISSING_DEPS" ]; then
 else
   echo -e "${GREEN}✅ 系统依赖完整${NC}"
 fi
+fi
+
+# ─── 12.5 最终 ImageMagick 硬校验（默认强制）──────────────────────────────────
+if [ "${ALLOW_SKIP_MAGICK_ON_FAILURE:-0}" = "1" ]; then
+  echo -e "${YELLOW}⚠️  已启用 ALLOW_SKIP_MAGICK_ON_FAILURE=1，跳过最终 ImageMagick 硬校验${NC}"
+else
+  echo ""
+  echo -e "${YELLOW}🧪 正在执行最终 ImageMagick 硬校验...${NC}"
+  ensure_local_bins_path
+  if verify_imagemagick_health; then
+    echo -e "${GREEN}✅ ImageMagick 最终校验通过${NC}"
+  else
+    echo -e "${RED}❌ ImageMagick 最终校验失败：更新已中止，避免出现“更新成功但导出失败”${NC}"
+    echo "   当前命令解析："
+    command -v magick >/dev/null 2>&1 && echo "   • magick : $(command -v magick)" || echo "   • magick : 未找到"
+    command -v convert >/dev/null 2>&1 && echo "   • convert: $(command -v convert)" || echo "   • convert: 未找到"
+    command -v identify >/dev/null 2>&1 && echo "   • identify: $(command -v identify)" || echo "   • identify: 未找到"
+    echo "   请重新运行 emergency-update.sh，或改用安装器完整安装。"
+    exit 1
+  fi
 fi
 
 # ─── 13. 更新 launchd 服务配置 ───────────────────────────────────────────────
