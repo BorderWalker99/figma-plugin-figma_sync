@@ -258,17 +258,27 @@ function shutdown(reason = 'SIGINT') {
 function checkEnvironment() {
   console.log('🔍 检查环境...');
   const nodeModulesPath = path.join(__dirname, 'node_modules');
+  const installProductionDeps = () => execSync('npm install --production', {
+    cwd: __dirname,
+    stdio: 'inherit',
+    timeout: 300000
+  });
+  const canLoadSharp = () => {
+    try {
+      require('sharp');
+      return true;
+    } catch (error) {
+      console.error('❌ sharp 运行时加载失败:', error.message);
+      return false;
+    }
+  };
   if (!fs.existsSync(nodeModulesPath)) {
     console.warn('⚠️  警告: 未找到 node_modules 文件夹');
     console.log('   🔧 正在尝试自动安装依赖...');
     
     try {
       // 尝试自动安装依赖
-      execSync('npm install --production', {
-        cwd: __dirname,
-        stdio: 'inherit',
-        timeout: 300000 // 5 分钟超时
-      });
+      installProductionDeps();
       
       console.log('✅ 依赖安装成功！');
       
@@ -293,11 +303,7 @@ function checkEnvironment() {
       console.log('   🔧 正在尝试重新安装依赖...');
       
       try {
-        execSync('npm install --production', {
-          cwd: __dirname,
-          stdio: 'inherit',
-          timeout: 300000
-        });
+        installProductionDeps();
         
         // 再次检查
         if (!fs.existsSync(depPath)) {
@@ -310,6 +316,21 @@ function checkEnvironment() {
         console.error(`❌ 安装依赖 "${dep}" 失败:`, error.message);
       return false;
       }
+    }
+  }
+
+  if (!canLoadSharp()) {
+    console.log('   🔧 检测到 sharp 架构或原生模块异常，正在尝试重新安装依赖...');
+    try {
+      installProductionDeps();
+      if (!canLoadSharp()) {
+        console.error('❌ 重新安装依赖后 sharp 仍无法加载');
+        return false;
+      }
+      console.log('✅ sharp 运行时检查已恢复正常');
+    } catch (error) {
+      console.error('❌ 重新安装 sharp 相关依赖失败:', error.message);
+      return false;
     }
   }
   console.log('✅ 环境检查通过');

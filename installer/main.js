@@ -1973,18 +1973,36 @@ ipcMain.handle('install-dependencies', async (event, installPath) => {
     
     const nodeModulesPath = path.join(installPath, 'node_modules');
     const lockFilePath = path.join(installPath, 'package-lock.json');
-    const nodeBinForHealth = resolveNodeBinary();
+    const nodeBinForHealth = resolveNodeBinary(installPath);
 
     const fatRuntimeStatus = detectBundledRuntimeFolderStatus(installPath);
     if (fatRuntimeStatus && fatRuntimeStatus.complete && fs.existsSync(nodeModulesPath)) {
-      console.log('✅ Fat Package runtime 完整，跳过 npm install');
-      resolve({ success: true, bundled: true, fatPackage: true, skippedNpmInstall: true });
-      return;
+      const fatSharpHealthy = await checkSharpRuntimeHealth(nodeBinForHealth, installPath);
+      if (fatSharpHealthy) {
+        console.log('✅ Fat Package runtime 完整，且 sharp 可运行，跳过 npm install');
+        resolve({ success: true, bundled: true, fatPackage: true, skippedNpmInstall: true });
+        return;
+      }
+      console.warn('⚠️ Fat Package 中 sharp 与当前系统架构不兼容，尝试先修复...');
+      const quickNpm = resolveNpmBinary();
+      if (quickNpm && nodeBinForHealth) {
+        const fixed = await repairSharpRuntimeForCurrentArch({
+          installPath,
+          npmPath: quickNpm,
+          nodePath: nodeBinForHealth,
+          sendOutput: (msg) => event.sender.send('install-output', { type: 'stdout', data: msg })
+        });
+        if (fixed) {
+          resolve({ success: true, bundled: true, fatPackage: true, skippedNpmInstall: true, sharpFixed: true });
+          return;
+        }
+      }
+      console.warn('⚠️ Fat Package sharp 自修复失败，将继续走完整依赖安装流程');
     }
 
     // 离线胖包模式：若已包含完整依赖且可运行，直接跳过 npm install
     const bundledRuntimeQuickCheck = bundledRuntimeBinDirs.length > 0 &&
-      !!resolveNodeBinary() &&
+      !!resolveNodeBinary(installPath) &&
       !!(findExecutable('magick') || findExecutable('convert')) &&
       !!findExecutable('ffmpeg') &&
       !!findExecutable('gifsicle');
