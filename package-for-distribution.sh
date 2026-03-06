@@ -100,8 +100,8 @@ ensure_sharp_matches_arch() {
     fi
 
     if [ -z "$npm_bin" ]; then
-        echo -e "${YELLOW}⚠️  未找到可用 npm，跳过打包期 sharp 预修复（安装时会自动修复）${NC}"
-        return 0
+        echo -e "${RED}❌ 未找到可用 npm，无法准备 darwin-${npm_cpu} 的 sharp 预编译包${NC}"
+        exit 1
     fi
 
     echo "   ⚠️  sharp 目标架构包缺失，尝试预修复为 darwin-${npm_cpu}..."
@@ -122,9 +122,9 @@ ensure_sharp_matches_arch() {
         return 0
     fi
 
-    echo -e "${YELLOW}⚠️  sharp 预修复未完成（darwin-${npm_cpu}），继续打包${NC}"
-    echo -e "${YELLOW}   安装器/emergency-update 启动时会执行 sharp 运行时自愈。${NC}"
-    return 0
+    echo -e "${RED}❌ sharp 预修复失败（darwin-${npm_cpu}）${NC}"
+    echo -e "${YELLOW}   目标目录缺失: $expected_pkg_dir 或 $expected_libvips_dir${NC}"
+    exit 1
 }
 
 bundle_sharp_vendor_for_arch() {
@@ -162,8 +162,8 @@ bundle_sharp_vendor_for_arch() {
                 set -e
             fi
             if [ ! -d "$dir" ]; then
-                echo -e "${YELLOW}⚠️  无法准备 sharp 离线 bundle（darwin-${npm_cpu}），跳过；安装时将走在线修复。${NC}"
-                return 0
+                echo -e "${RED}❌ 无法准备 sharp 离线 bundle（darwin-${npm_cpu}）${NC}"
+                exit 1
             fi
         fi
     done
@@ -177,6 +177,28 @@ bundle_sharp_vendor_for_arch() {
     rsync -a "$project_dir/node_modules/@img/sharp-darwin-${npm_cpu}" "$vendor_root/@img/"
     rsync -a "$project_dir/node_modules/@img/sharp-libvips-darwin-${npm_cpu}" "$vendor_root/@img/"
     echo "   ✅ 已写入 runtime/sharp-vendor (darwin-${npm_cpu})"
+}
+
+require_sharp_vendor_for_arch() {
+    local runtime_root="$1"
+    local npm_cpu="$2" # x64 | arm64
+    local vendor_root="$runtime_root/sharp-vendor/node_modules"
+    local required_paths=(
+        "$vendor_root/sharp/package.json"
+        "$vendor_root/detect-libc/package.json"
+        "$vendor_root/semver/package.json"
+        "$vendor_root/@img/colour/package.json"
+        "$vendor_root/@img/sharp-darwin-${npm_cpu}/package.json"
+        "$vendor_root/@img/sharp-libvips-darwin-${npm_cpu}/package.json"
+    )
+    local p
+    for p in "${required_paths[@]}"; do
+        if [ ! -f "$p" ]; then
+            echo -e "${RED}❌ 缺少 sharp 离线依赖: $p${NC}"
+            exit 1
+        fi
+    done
+    echo "   ✅ sharp-vendor 校验通过 (darwin-${npm_cpu})"
 }
 
 resolve_runtime_source() {
@@ -391,6 +413,7 @@ create_package() {
     fi
     ensure_sharp_matches_arch "$TEMP_DIR/项目文件" "$TEMP_DIR/runtime/bin" "$expected_npm_cpu"
     bundle_sharp_vendor_for_arch "$TEMP_DIR/项目文件" "$TEMP_DIR/runtime" "$expected_npm_cpu"
+    require_sharp_vendor_for_arch "$TEMP_DIR/runtime" "$expected_npm_cpu"
     
     # 3. 复制对应架构的 DMG (不再需要 .command 脚本, 安装器内部自动清除隔离)
     echo -e "${YELLOW}🖥️  复制 ${ARCH_TYPE} 安装器...${NC}"

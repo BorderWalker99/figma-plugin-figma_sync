@@ -12,6 +12,120 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
+require_file() {
+    local file_path="$1"
+    local hint="$2"
+    if [ ! -f "$file_path" ]; then
+        echo -e "${RED}❌ 缺少文件: $file_path${NC}"
+        if [ -n "$hint" ]; then
+            echo -e "${YELLOW}$hint${NC}"
+        fi
+        exit 1
+    fi
+}
+
+require_runtime_arch() {
+    local bin_path="$1"
+    local expected_arch="$2" # x86_64 | arm64
+    if [ ! -x "$bin_path" ]; then
+        echo -e "${RED}❌ 缺少可执行文件: $bin_path${NC}"
+        exit 1
+    fi
+    local info
+    info="$(file "$bin_path" 2>/dev/null || true)"
+    if [[ "$info" != *"$expected_arch"* ]]; then
+        echo -e "${RED}❌ 架构不匹配: $bin_path${NC}"
+        echo -e "${YELLOW}   期望: $expected_arch, 实际: $info${NC}"
+        exit 1
+    fi
+}
+
+require_runtime_max_macos() {
+    local bin_path="$1"
+    local max_major="$2"
+    local line minos major
+    if [ ! -x "$bin_path" ]; then
+        echo -e "${RED}❌ 缺少可执行文件: $bin_path${NC}"
+        exit 1
+    fi
+    line="$(otool -l "$bin_path" 2>/dev/null | awk '/minos/{print $2; exit}')"
+    if [ -z "$line" ]; then
+        line="$(otool -l "$bin_path" 2>/dev/null | awk '/LC_VERSION_MIN_MACOSX/{f=1; next} f&&/version/{print $2; exit}')"
+    fi
+    if [ -z "$line" ]; then
+        echo -e "${RED}❌ 无法解析最小系统版本: $bin_path${NC}"
+        exit 1
+    fi
+    minos="$line"
+    major="${minos%%.*}"
+    if [ -z "$major" ] || [ "$major" -gt "$max_major" ]; then
+        echo -e "${RED}❌ 最小系统版本不兼容: $bin_path${NC}"
+        echo -e "${YELLOW}   期望支持 ≤ macOS ${max_major}.x，实际 minos=${minos}${NC}"
+        exit 1
+    fi
+}
+
+require_sharp_vendor_for_arch() {
+    local runtime_root="$1"
+    local npm_cpu="$2" # x64 | arm64
+    local vendor_root="$runtime_root/sharp-vendor/node_modules"
+    local required_paths=(
+        "$vendor_root/sharp/package.json"
+        "$vendor_root/detect-libc/package.json"
+        "$vendor_root/semver/package.json"
+        "$vendor_root/@img/colour/package.json"
+        "$vendor_root/@img/sharp-darwin-${npm_cpu}/package.json"
+        "$vendor_root/@img/sharp-libvips-darwin-${npm_cpu}/package.json"
+    )
+    local p
+    for p in "${required_paths[@]}"; do
+        if [ ! -f "$p" ]; then
+            echo -e "${RED}❌ 缺少 sharp 离线依赖: $p${NC}"
+            exit 1
+        fi
+    done
+    echo "   ✅ sharp-vendor 校验通过 (darwin-${npm_cpu})"
+}
+
+validate_runtime_arch_bundle() {
+    local runtime_root="$1"
+    local arch_dir="$2"      # intel | apple
+    local expected_arch="$3" # x86_64 | arm64
+    local npm_cpu="$4"       # x64 | arm64
+    local bin_root="$runtime_root/$arch_dir/bin"
+
+    require_file "$bin_root/node" "$arch_dir runtime/bin/node 必须存在"
+    require_file "$bin_root/ffmpeg" "$arch_dir runtime/bin/ffmpeg 必须存在"
+    require_file "$bin_root/ffprobe" "$arch_dir runtime/bin/ffprobe 必须存在"
+    require_file "$bin_root/gifsicle" "$arch_dir runtime/bin/gifsicle 必须存在"
+    if [ ! -f "$bin_root/magick" ] && [ ! -f "$bin_root/convert" ]; then
+        echo -e "${RED}❌ $bin_root 下缺少 magick/convert${NC}"
+        exit 1
+    fi
+
+    require_runtime_arch "$bin_root/node" "$expected_arch"
+    require_runtime_arch "$bin_root/ffmpeg" "$expected_arch"
+    require_runtime_arch "$bin_root/ffprobe" "$expected_arch"
+    require_runtime_arch "$bin_root/gifsicle" "$expected_arch"
+    if [ -f "$bin_root/magick" ]; then
+        require_runtime_arch "$bin_root/magick" "$expected_arch"
+    else
+        require_runtime_arch "$bin_root/convert" "$expected_arch"
+    fi
+
+    require_runtime_max_macos "$bin_root/node" 13
+    require_runtime_max_macos "$bin_root/ffmpeg" 13
+    require_runtime_max_macos "$bin_root/ffprobe" 13
+    require_runtime_max_macos "$bin_root/gifsicle" 13
+    if [ -f "$bin_root/magick" ]; then
+        require_runtime_max_macos "$bin_root/magick" 13
+    else
+        require_runtime_max_macos "$bin_root/convert" 13
+    fi
+
+    require_sharp_vendor_for_arch "$runtime_root" "$npm_cpu"
+}
+
 echo -e "${BLUE}"
 cat << "EOF"
 ╔════════════════════════════════════════════════════════╗
@@ -88,6 +202,34 @@ done
 cp package.json "$PROJECT_DIR/"
 cp package-lock.json "$PROJECT_DIR/" 2>/dev/null || true
 cp README.md "$PROJECT_DIR/" 2>/dev/null || true
+
+# 离线 runtime + sharp vendor（供安装器 / start.js / emergency-update 离线自愈）
+if [ -d "runtime" ]; then
+    echo -e "${YELLOW}🧰 复制离线 runtime...${NC}"
+    rsync -a "runtime/" "$PROJECT_DIR/runtime/"
+    mkdir -p "$PROJECT_DIR/runtime/sharp-vendor/node_modules/@img"
+    for d in \
+        "sharp" \
+        "detect-libc" \
+        "semver"; do
+        if [ -d "node_modules/$d" ]; then
+            rsync -a "node_modules/$d" "$PROJECT_DIR/runtime/sharp-vendor/node_modules/"
+        fi
+    done
+    for d in \
+        "colour" \
+        "sharp-darwin-arm64" \
+        "sharp-libvips-darwin-arm64" \
+        "sharp-darwin-x64" \
+        "sharp-libvips-darwin-x64"; do
+        if [ -d "node_modules/@img/$d" ]; then
+            rsync -a "node_modules/@img/$d" "$PROJECT_DIR/runtime/sharp-vendor/node_modules/@img/"
+        fi
+    done
+fi
+
+validate_runtime_arch_bundle "$PROJECT_DIR/runtime" "intel" "x86_64" "x64"
+validate_runtime_arch_bundle "$PROJECT_DIR/runtime" "apple" "arm64" "arm64"
 
 # Figma 插件（完整目录）
 echo -e "${YELLOW}🎨 复制 Figma 插件...${NC}"
