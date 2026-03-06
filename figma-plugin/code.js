@@ -658,8 +658,7 @@ function markLooseFirstScreenshotNode(node) {
 function clearLooseFirstScreenshotRef(nodeId) {
   try {
     const trackedId = figma.currentPage.getPluginData(LOOSE_FIRST_NODE_ID_KEY);
-    if (!trackedId) return;
-    if (!nodeId || trackedId === nodeId) {
+    if (!trackedId || !nodeId || trackedId === nodeId) {
       figma.currentPage.setPluginData(LOOSE_FIRST_NODE_ID_KEY, '');
       pendingFirstLooseNodeId = '';
       waitingSecondScreenshotDecision = false;
@@ -2053,7 +2052,6 @@ figma.ui.onmessage = async (msg) => {
   if (msg.type === 'add-screenshot') {
     try {
       const { bytes, gifUrl, imageWidth, imageHeight, timestamp, filename, driveFileId, ossFileId, gifCacheId, taskId } = msg;
-      const syncSource = msg.syncSource === 'manual' ? 'manual' : 'realtime';
       
       // ✅ 缓存文件信息（即使后续创建失败，也要保留信息以便手动拖入后关联）
       if (filename) {
@@ -2231,15 +2229,12 @@ figma.ui.onmessage = async (msg) => {
         rect.setPluginData('gifCacheId', msg.gifCacheId);
       }
 
-      // ━━━ Auto Layout 放置决策（完整规则） ━━━━━━━━━━━━━━━━━━━━━━━━━
+      // ━━━ Auto Layout 放置决策（实时 / 手动同步统一规则） ━━━━━━━━━━━━━━━━━━
       //
-      // 手动同步 → 始终放入 AutoLayout（从第一张起，无条件）
-      //
-      // 实时同步 →
-      //   A) 插件已创建过 AutoLayout → 直接放入
-      //   B) 存在散放首图 且 未被用户移动 → 创建 AutoLayout，收拢首图 + 当前图
-      //   C) 存在散放首图 但 已被用户移动 → 清除首图标记，当前图成为新散放首图
-      //   D) 无散放首图、无 AutoLayout → 当前图散放，等待下一张决策
+      // A) 插件已创建过 AutoLayout → 直接放入
+      // B) 存在散放首图 且 未被用户移动 → 创建 AutoLayout，收拢首图 + 当前图
+      // C) 存在散放首图 但 已被用户移动 → 清除首图标记，当前图成为新散放首图
+      // D) 无散放首图、无 AutoLayout → 当前图散放，等待下一张决策
 
       const pluginAutoLayout = findPreferredAutoLayoutFrameForScreenshots()
         || (isFrameValid() && currentFrame && currentFrame.layoutMode !== 'NONE' ? currentFrame : null);
@@ -2283,8 +2278,10 @@ figma.ui.onmessage = async (msg) => {
           } catch (_) {}
         };
 
-        if (looseNode && looseNode.parent !== currentFrame) {
+        if (looseNode) {
           clearLooseFirstScreenshotMark(looseNode);
+        }
+        if (looseNode && looseNode.parent !== currentFrame) {
           currentFrame.appendChild(looseNode);
           applyChildLayout(looseNode, looseNode.width || finalWidth);
         }
@@ -2311,11 +2308,16 @@ figma.ui.onmessage = async (msg) => {
         return isFrameValid() ? currentFrame : null;
       };
 
-      if (syncSource === 'manual') {
-        // ── 手动同步：始终进 AutoLayout ──
-        if (pluginAutoLayout) {
-          appendToAutoLayout(pluginAutoLayout, rect, looseFirstNode);
+      if (pluginAutoLayout) {
+        // A) 已有插件 AutoLayout → 直接追加
+        appendToAutoLayout(pluginAutoLayout, rect, looseFirstNode);
+      } else if (looseFirstNode) {
+        if (firstLooseNodeMovedByUser) {
+          // C) 首图已被移动 → 当前图成为新散放首图
+          clearLooseFirstScreenshotMark(looseFirstNode);
+          placeLooseOnCanvas(rect);
         } else {
+          // B) 首图未被移动 → 建 AutoLayout，收拢两张
           const frame = getOrCreateAutoLayout();
           if (frame) {
             appendToAutoLayout(frame, rect, looseFirstNode);
@@ -2324,28 +2326,8 @@ figma.ui.onmessage = async (msg) => {
           }
         }
       } else {
-        // ── 实时同步 ──
-        if (pluginAutoLayout) {
-          // A) 已有插件 AutoLayout → 直接追加
-          appendToAutoLayout(pluginAutoLayout, rect, looseFirstNode);
-        } else if (looseFirstNode) {
-          if (firstLooseNodeMovedByUser) {
-            // C) 首图已被移动 → 当前图成为新散放首图
-            clearLooseFirstScreenshotMark(looseFirstNode);
-            placeLooseOnCanvas(rect);
-          } else {
-            // B) 首图未被移动 → 建 AutoLayout，收拢两张
-            const frame = getOrCreateAutoLayout();
-            if (frame) {
-              appendToAutoLayout(frame, rect, looseFirstNode);
-            } else {
-              placeLooseOnCanvas(rect);
-            }
-          }
-        } else {
-          // D) 无首图、无 AutoLayout → 散放
-          placeLooseOnCanvas(rect);
-        }
+        // D) 无首图、无 AutoLayout → 散放
+        placeLooseOnCanvas(rect);
       }
 
       screenshotCount++;
@@ -3017,13 +2999,19 @@ figma.on('drop', (event) => {
 // 🛡️ 使用 try-catch 包裹整个监听器，防止切换文件时崩溃
 figma.on('documentchange', (event) => {
   try {
-    if (waitingSecondScreenshotDecision && pendingFirstLooseNodeId && !suppressLooseNodeMoveTracking) {
+    if (
+      waitingSecondScreenshotDecision &&
+      pendingFirstLooseNodeId &&
+      !firstLooseNodeMovedByUser &&
+      !suppressLooseNodeMoveTracking
+    ) {
       const pairingPropertyChanges = event.documentChanges.filter(change => change.type === 'PROPERTY_CHANGE');
       for (const change of pairingPropertyChanges) {
         if (change.id !== pendingFirstLooseNodeId) continue;
         const props = Array.isArray(change.properties) ? change.properties : [];
         if (props.includes('x') || props.includes('y')) {
           firstLooseNodeMovedByUser = true;
+          waitingSecondScreenshotDecision = false;
           break;
         }
       }

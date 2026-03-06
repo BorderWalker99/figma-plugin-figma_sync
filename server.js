@@ -855,7 +855,7 @@ const connections = new Map();
 const cancelFlags = new Map(); // 跟踪每个连接的取消状态
 
 // 用户实例映射（用于单实例限制）
-// Key: connectionId, Value: { figmaWs, registeredAt }
+// Key: connectionId, Value: { figmaWs, instanceId, registeredAt }
 const userInstances = new Map();
 
 function closeOtherFigmaPlugins(currentWs, currentConnectionId) {
@@ -2877,24 +2877,41 @@ wss.on('connection', (ws, req) => {
     
     // 插件实例注册（单实例限制）
     if (data.type === 'register-instance' && clientType === 'figma') {
+      const instanceId = typeof data.instanceId === 'string' ? data.instanceId : '';
       
       // 检查是否有旧实例
       const oldInstance = userInstances.get(connectionId);
+      if (oldInstance && oldInstance.figmaWs === ws && oldInstance.instanceId === instanceId) {
+        oldInstance.registeredAt = Date.now();
+        return;
+      }
       if (oldInstance && oldInstance.figmaWs && oldInstance.figmaWs !== ws) {
         // 如果旧实例的连接仍然有效，向其发送关闭命令
         if (oldInstance.figmaWs.readyState === 1) { // OPEN
           console.log(`   ⚠️  检测到旧实例，发送关闭命令`);
           try {
-            wsSend(oldInstance.figmaWs, { type: 'force-close' });
+            wsSend(oldInstance.figmaWs, {
+              type: 'force-close',
+              targetInstanceId: oldInstance.instanceId || null,
+              replacementInstanceId: instanceId || null
+            });
           } catch (error) {
             console.log(`   ❌ 发送关闭命令失败:`, error.message);
           }
         }
+        setTimeout(() => {
+          try {
+            if (oldInstance.figmaWs.readyState === WebSocket.OPEN || oldInstance.figmaWs.readyState === WebSocket.CONNECTING) {
+              oldInstance.figmaWs.close();
+            }
+          } catch (_) {}
+        }, 600);
       }
       
       // 注册新实例
       userInstances.set(connectionId, {
         figmaWs: ws,
+        instanceId,
         registeredAt: Date.now()
       });
       console.log(`   ✅ 新实例已注册，活跃实例数: ${userInstances.size}`);
@@ -4282,8 +4299,9 @@ wss.on('connection', (ws, req) => {
   ws.on('close', () => {
     const group = connections.get(connectionId);
     if (group) {
+      const isActiveSocket = group[clientType] === ws;
       // 如果 Figma 插件关闭，主动通知 Mac 端停止监听
-      if (clientType === 'figma') {
+      if (clientType === 'figma' && isActiveSocket) {
         try {
           console.log('   📤 [Server] Figma 插件已关闭，通知 Mac 端停止监听');
           sendToMac(group, { type: 'stop-realtime' });
@@ -4301,7 +4319,9 @@ wss.on('connection', (ws, req) => {
         }
       }
       
-      delete group[clientType];
+      if (isActiveSocket) {
+        delete group[clientType];
+      }
       if (!group.figma && !group.mac) {
         connections.delete(connectionId);
         // 清理取消标志和活动进程
