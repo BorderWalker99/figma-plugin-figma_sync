@@ -254,6 +254,13 @@ function main() {
     process.exit(1);
   }
 
+  if (uidRes.ok && uidRes.out) {
+    const domain = `gui/${uidRes.out}`;
+    run(`launchctl kickstart -k ${domain}/${label} 2>/dev/null`);
+  } else {
+    run(`launchctl start ${label} 2>/dev/null`);
+  }
+
   // Poll for server to be ready (LaunchAgent's RunAtLoad starts it)
   for (let i = 0; i < 20; i++) {
     sleepSec(1);

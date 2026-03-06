@@ -550,8 +550,22 @@ function isUsableNodeBinary(nodePath) {
   }
 }
 
-function resolveNodeBinary() {
+function resolveNodeBinary(installPath = currentInstallPath) {
   const candidates = [];
+
+  try {
+    const runtimeStatus = detectBundledRuntimeFolderStatus(installPath);
+    if (runtimeStatus && runtimeStatus.node) {
+      candidates.push(runtimeStatus.node);
+    }
+  } catch (_) {}
+
+  try {
+    const runtimeBins = collectBundledRuntimeBinDirs(installPath);
+    for (const binDir of runtimeBins) {
+      candidates.push(path.join(binDir, 'node'));
+    }
+  } catch (_) {}
 
   const found = findExecutable('node');
   if (found) candidates.push(found);
@@ -755,7 +769,7 @@ ipcMain.handle('check-node', async (event, installPath = null) => {
     applyBundledRuntimeEnv(currentInstallPath);
   }
   return new Promise((resolve) => {
-    const nodePath = resolveNodeBinary();
+    const nodePath = resolveNodeBinary(installPath);
     
     if (nodePath) {
       exec(`"${nodePath}" -v`, (error, version) => {
@@ -2309,25 +2323,35 @@ function checkPort(port) {
 
 ipcMain.handle('start-server', async (event, installPath) => {
   return new Promise(async (resolve) => {
+    currentInstallPath = installPath || currentInstallPath;
+    applyBundledRuntimeEnv(currentInstallPath);
+
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+
     // 1. 先检查服务是否已经在运行 (端口 8888)
     const isRunning = await checkPort(8888);
     if (isRunning) {
       console.log('Server already running on port 8888');
-      resolve({ success: true, message: '服务器已在运行' });
+      finish({ success: true, message: '服务器已在运行' });
       return;
     }
 
-    const nodePath = resolveNodeBinary();
+    const nodePath = resolveNodeBinary(installPath);
     
     const startScript = path.join(installPath, 'start.js');
     
     if (!fs.existsSync(startScript)) {
-      resolve({ success: false, error: '未找到 start.js 文件' });
+      finish({ success: false, error: '未找到 start.js 文件' });
       return;
     }
 
     if (!nodePath) {
-      resolve({ success: false, error: '未找到可用的 Node.js 可执行文件（请检查 Node 安装）' });
+      finish({ success: false, error: '未找到可用的 Node.js 可执行文件（请检查 Node 安装）' });
       return;
     }
     
@@ -2335,10 +2359,12 @@ ipcMain.handle('start-server', async (event, installPath) => {
       cwd: installPath,
       stdio: 'pipe',
       detached: true,
-      shell: false
+      shell: false,
+      env: { ...process.env }
     });
     
     let output = '';
+    let exitSummary = '';
     
     child.stdout.on('data', (data) => {
       output += data.toString();
@@ -2349,18 +2375,36 @@ ipcMain.handle('start-server', async (event, installPath) => {
       output += data.toString();
       event.sender.send('server-output', { data: data.toString() });
     });
+
+    child.on('exit', (code, signal) => {
+      exitSummary = `server exited early (code=${code}, signal=${signal || 'none'})`;
+    });
     
-    // 等待几秒并多次检查服务器是否正常启动（最多 30 秒）
+    // 等待几秒并多次检查服务器是否正常启动（最多 60 秒，兼容较慢的 Intel 机器）
     let checkAttempts = 0;
-    const maxCheckAttempts = 10;
+    const maxCheckAttempts = 20;
     const checkInterval = setInterval(async () => {
+      if (settled) {
+        clearInterval(checkInterval);
+        return;
+      }
       checkAttempts++;
       
       const isRunning = await checkPort(8888);
       if (isRunning) {
         clearInterval(checkInterval);
         console.log(`✅ 服务器启动验证成功（第 ${checkAttempts} 次检查）`);
-        resolve({ success: true, pid: child.pid });
+        finish({ success: true, pid: child.pid });
+        return;
+      }
+
+      if (exitSummary) {
+        clearInterval(checkInterval);
+        const outputTail = output.trim().slice(-2000);
+        finish({
+          success: false,
+          error: `服务器启动失败\n${exitSummary}\n\n${outputTail ? '启动输出:\n' + outputTail : ''}`
+        });
         return;
       }
       
@@ -2379,10 +2423,11 @@ ipcMain.handle('start-server', async (event, installPath) => {
             // 忽略
           }
         }
+        const outputTail = output.trim().slice(-2000);
         
-        resolve({ 
+        finish({ 
           success: false, 
-          error: `服务器启动失败\n端口 8888 在 30 秒内未响应\n\n${errorDetails ? '错误日志:\n' + errorDetails : ''}` 
+          error: `服务器启动失败\n端口 8888 在 60 秒内未响应\n\n${outputTail ? '启动输出:\n' + outputTail + '\n\n' : ''}${errorDetails ? '错误日志:\n' + errorDetails : ''}` 
         });
       } else {
         console.log(`   检查服务器状态... (${checkAttempts}/${maxCheckAttempts})`);
@@ -2390,7 +2435,8 @@ ipcMain.handle('start-server', async (event, installPath) => {
     }, 3000);
     
     child.on('error', (error) => {
-      resolve({ success: false, error: error.message });
+      clearInterval(checkInterval);
+      finish({ success: false, error: error.message });
     });
   });
 });
@@ -2404,7 +2450,7 @@ ipcMain.handle('copy-to-clipboard', async (event, text) => {
 ipcMain.handle('setup-autostart', async (event, installPath) => {
   return new Promise((resolve) => {
     try {
-      const nodePath = resolveNodeBinary();
+      const nodePath = resolveNodeBinary(installPath);
       if (!nodePath) {
         throw new Error('无法找到 Node.js 可执行文件。请确保 Node.js 已正确安装。');
       }
