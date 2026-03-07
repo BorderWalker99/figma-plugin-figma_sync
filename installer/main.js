@@ -652,63 +652,6 @@ async function checkSharpRuntimeHealth(nodePath, installPath) {
   }
 }
 
-function collectBundledSharpVendorNodeModulesDirs(installPath) {
-  const packageRoot = resolvePackageRootFromInstallPath(installPath || currentInstallPath);
-  const legacyRuntimeRoot = getLegacyRuntimeRootFromInstallPath(installPath || currentInstallPath);
-  const archKey = process.arch === 'arm64' ? 'apple' : 'intel';
-  const candidates = [
-    packageRoot ? path.join(packageRoot, 'runtime', 'sharp-vendor', 'node_modules') : '',
-    packageRoot ? path.join(packageRoot, 'runtime', archKey, 'sharp-vendor', 'node_modules') : '',
-    packageRoot ? path.join(packageRoot, 'runtime', process.arch, 'sharp-vendor', 'node_modules') : '',
-    packageRoot ? path.join(packageRoot, 'sharp-vendor', 'node_modules') : ''
-  ];
-  if (legacyRuntimeRoot) {
-    candidates.push(
-      path.join(legacyRuntimeRoot, 'sharp-vendor', 'node_modules'),
-      path.join(legacyRuntimeRoot, archKey, 'sharp-vendor', 'node_modules'),
-      path.join(legacyRuntimeRoot, process.arch, 'sharp-vendor', 'node_modules')
-    );
-  }
-  return candidates.filter((dir, index) => dir && candidates.indexOf(dir) === index && fs.existsSync(dir));
-}
-
-function restoreBundledSharpForCurrentArch(installPath) {
-  const cpu = process.arch === 'arm64' ? 'arm64' : 'x64';
-  const vendorRoots = collectBundledSharpVendorNodeModulesDirs(installPath);
-  const requiredPackages = [
-    'sharp',
-    'detect-libc',
-    'semver',
-    path.join('@img', 'colour'),
-    path.join('@img', `sharp-darwin-${cpu}`),
-    path.join('@img', `sharp-libvips-darwin-${cpu}`)
-  ];
-  const sourceRoot = vendorRoots.find((root) => requiredPackages.every((pkgPath) => fs.existsSync(path.join(root, pkgPath))));
-  if (!sourceRoot) return false;
-
-  const targetNodeModules = path.join(installPath, 'node_modules');
-  const targetImgDir = path.join(targetNodeModules, '@img');
-  try {
-    fs.mkdirSync(targetImgDir, { recursive: true });
-    fs.rmSync(path.join(targetNodeModules, 'sharp'), { recursive: true, force: true });
-    fs.rmSync(path.join(targetNodeModules, 'detect-libc'), { recursive: true, force: true });
-    fs.rmSync(path.join(targetNodeModules, 'semver'), { recursive: true, force: true });
-    fs.rmSync(path.join(targetImgDir, `sharp-darwin-${cpu}`), { recursive: true, force: true });
-    fs.rmSync(path.join(targetImgDir, `sharp-libvips-darwin-${cpu}`), { recursive: true, force: true });
-
-    fs.cpSync(path.join(sourceRoot, 'sharp'), path.join(targetNodeModules, 'sharp'), { recursive: true, force: true });
-    fs.cpSync(path.join(sourceRoot, 'detect-libc'), path.join(targetNodeModules, 'detect-libc'), { recursive: true, force: true });
-    fs.cpSync(path.join(sourceRoot, 'semver'), path.join(targetNodeModules, 'semver'), { recursive: true, force: true });
-    fs.cpSync(path.join(sourceRoot, '@img', 'colour'), path.join(targetImgDir, 'colour'), { recursive: true, force: true });
-    fs.cpSync(path.join(sourceRoot, '@img', `sharp-darwin-${cpu}`), path.join(targetImgDir, `sharp-darwin-${cpu}`), { recursive: true, force: true });
-    fs.cpSync(path.join(sourceRoot, '@img', `sharp-libvips-darwin-${cpu}`), path.join(targetImgDir, `sharp-libvips-darwin-${cpu}`), { recursive: true, force: true });
-    return true;
-  } catch (error) {
-    console.warn('⚠️ 离线 sharp bundle 恢复失败:', error.message);
-    return false;
-  }
-}
-
 async function repairSharpRuntimeForCurrentArch({ installPath, npmPath, nodePath, sendOutput }) {
   if (!installPath || !npmPath || !nodePath) return false;
   const cpu = process.arch === 'arm64' ? 'arm64' : 'x64';
@@ -717,41 +660,53 @@ async function repairSharpRuntimeForCurrentArch({ installPath, npmPath, nodePath
   };
 
   log(`⚠️ 检测到 sharp 架构不匹配，正在修复（darwin-${cpu}）...\n`);
-  if (restoreBundledSharpForCurrentArch(installPath)) {
-    log('   ↪️ 已从安装包内置 sharp 离线运行时恢复依赖...\n');
-    if (await checkSharpRuntimeHealth(nodePath, installPath)) {
-      log(`✅ sharp 离线恢复成功（darwin-${cpu}）\n`);
-      return true;
-    }
-    log('   ⚠️ 离线 sharp bundle 恢复后仍不可用，回退到 npm 定向修复...\n');
-  }
   try {
     fs.rmSync(path.join(installPath, 'node_modules', 'sharp'), { recursive: true, force: true });
     fs.rmSync(path.join(installPath, 'node_modules', '@img'), { recursive: true, force: true });
   } catch (_) {}
 
+  const registries = [
+    'https://registry.npmmirror.com',
+    'https://registry.npmjs.org'
+  ];
+
   try {
-    await execPromise(
-      `"${npmPath}" --prefix "${installPath}" install --no-save --include=optional --legacy-peer-deps --os=darwin --cpu=${cpu} sharp --registry=https://registry.npmmirror.com`,
-      { timeout: 8 * 60 * 1000, env: { ...process.env } }
-    );
-  } catch (_) {
-    try {
-      log('   ↪️ sharp 定向安装失败，尝试 rebuild...\n');
-      await execPromise(
-        `"${npmPath}" --prefix "${installPath}" rebuild sharp --include=optional --os=darwin --cpu=${cpu}`,
-        { timeout: 5 * 60 * 1000, env: { ...process.env } }
-      );
-    } catch (__ ) {
-      return false;
+    let lastInstallErr = null;
+    for (const registry of registries) {
+      try {
+        log(`   ↪️ 正在下载并安装 sharp（registry=${registry}）...\n`);
+        await execPromise(
+          `"${npmPath}" --prefix "${installPath}" install --no-save --include=optional --legacy-peer-deps --os=darwin --cpu=${cpu} sharp --no-audit --no-fund --registry=${registry}`,
+          { timeout: 10 * 60 * 1000, env: { ...process.env } }
+        );
+        lastInstallErr = null;
+        break;
+      } catch (e) {
+        lastInstallErr = e;
+      }
     }
+
+    if (lastInstallErr) {
+      try {
+        log('   ↪️ sharp 定向安装失败，尝试 rebuild...\n');
+        await execPromise(
+          `"${npmPath}" --prefix "${installPath}" rebuild sharp --include=optional --os=darwin --cpu=${cpu} --no-audit --no-fund`,
+          { timeout: 6 * 60 * 1000, env: { ...process.env } }
+        );
+      } catch (__ ) {
+        // continue to offline restore below if available
+      }
+    }
+  } catch (_) {
+    // ignore and rely on health check + offline restore below
   }
 
   const ok = await checkSharpRuntimeHealth(nodePath, installPath);
   if (ok) {
     log(`✅ sharp 修复成功（darwin-${cpu}）\n`);
+    return true;
   }
-  return ok;
+  return false;
 }
 
 function ensureNpmShimFromNode(nodePath) {
@@ -2039,6 +1994,10 @@ ipcMain.handle('install-dependencies', async (event, installPath) => {
     const nodeModulesPath = path.join(installPath, 'node_modules');
     const lockFilePath = path.join(installPath, 'package-lock.json');
     const nodeBinForHealth = resolveNodeBinary(installPath);
+    // Prefer bundled Node + npm (ensures arch match for native addons like sharp)
+    if (nodeBinForHealth) {
+      try { ensureNpmShimFromNode(nodeBinForHealth); } catch (_) {}
+    }
 
     const fatRuntimeStatus = detectBundledRuntimeFolderStatus(installPath);
     if (fatRuntimeStatus && fatRuntimeStatus.complete && fs.existsSync(nodeModulesPath)) {
@@ -2188,7 +2147,8 @@ ipcMain.handle('install-dependencies', async (event, installPath) => {
     // exec 直接在 shell 中执行字符串，兼容性更好
     // 使用 --prefix 来规避 cwd 在只读卷下的问题
     // 添加 --omit=dev 以跳过开发依赖，加快安装速度
-    const commandStr = `"${npmPath}" install --legacy-peer-deps --omit=dev --registry=https://registry.npmmirror.com --prefix "${installPath}"`;
+    // 明确包含 optionalDependencies（sharp 的预编译包依赖它）
+    const commandStr = `"${npmPath}" install --legacy-peer-deps --omit=dev --include=optional --no-audit --no-fund --registry=https://registry.npmmirror.com --prefix "${installPath}"`;
     console.log(`[DEBUG] Executing command: ${commandStr}`);
 
     // 重要：将 cwd 设置为 /tmp，避免 ENOTDIR

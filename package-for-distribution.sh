@@ -127,80 +127,6 @@ ensure_sharp_matches_arch() {
     exit 1
 }
 
-bundle_sharp_vendor_for_arch() {
-    local project_dir="$1"
-    local runtime_root="$2"
-    local npm_cpu="$3" # x64 | arm64
-    local vendor_root="$runtime_root/sharp-vendor/node_modules"
-    local required_dirs=(
-        "$project_dir/node_modules/sharp"
-        "$project_dir/node_modules/detect-libc"
-        "$project_dir/node_modules/semver"
-        "$project_dir/node_modules/@img/colour"
-        "$project_dir/node_modules/@img/sharp-darwin-${npm_cpu}"
-        "$project_dir/node_modules/@img/sharp-libvips-darwin-${npm_cpu}"
-    )
-    local dir npm_bin
-
-    echo "   📦 正在封装离线 sharp 运行时（darwin-${npm_cpu}）..."
-    for dir in "${required_dirs[@]}"; do
-        if [ ! -d "$dir" ]; then
-            echo -e "${YELLOW}⚠️  缺少 sharp 目标架构目录: $dir${NC}"
-            npm_bin=""
-            if command -v npm >/dev/null 2>&1; then
-                npm_bin="$(command -v npm)"
-            elif [ -x "$runtime_root/bin/npm" ]; then
-                npm_bin="$runtime_root/bin/npm"
-            fi
-            if [ -n "$npm_bin" ]; then
-                echo "   ↪️  尝试 npm 定向安装 darwin-${npm_cpu}..."
-                set +e
-                "$npm_bin" --prefix "$project_dir" install \
-                  --no-save --include=optional --legacy-peer-deps \
-                  --platform=darwin --arch="$npm_cpu" sharp \
-                  --registry=https://registry.npmmirror.com >/dev/null 2>&1
-                set -e
-            fi
-            if [ ! -d "$dir" ]; then
-                echo -e "${RED}❌ 无法准备 sharp 离线 bundle（darwin-${npm_cpu}）${NC}"
-                exit 1
-            fi
-        fi
-    done
-
-    rm -rf "$runtime_root/sharp-vendor" 2>/dev/null || true
-    mkdir -p "$vendor_root/@img"
-    rsync -a "$project_dir/node_modules/sharp" "$vendor_root/"
-    rsync -a "$project_dir/node_modules/detect-libc" "$vendor_root/"
-    rsync -a "$project_dir/node_modules/semver" "$vendor_root/"
-    rsync -a "$project_dir/node_modules/@img/colour" "$vendor_root/@img/"
-    rsync -a "$project_dir/node_modules/@img/sharp-darwin-${npm_cpu}" "$vendor_root/@img/"
-    rsync -a "$project_dir/node_modules/@img/sharp-libvips-darwin-${npm_cpu}" "$vendor_root/@img/"
-    echo "   ✅ 已写入 runtime/sharp-vendor (darwin-${npm_cpu})"
-}
-
-require_sharp_vendor_for_arch() {
-    local runtime_root="$1"
-    local npm_cpu="$2" # x64 | arm64
-    local vendor_root="$runtime_root/sharp-vendor/node_modules"
-    local required_paths=(
-        "$vendor_root/sharp/package.json"
-        "$vendor_root/detect-libc/package.json"
-        "$vendor_root/semver/package.json"
-        "$vendor_root/@img/colour/package.json"
-        "$vendor_root/@img/sharp-darwin-${npm_cpu}/package.json"
-        "$vendor_root/@img/sharp-libvips-darwin-${npm_cpu}/package.json"
-    )
-    local p
-    for p in "${required_paths[@]}"; do
-        if [ ! -f "$p" ]; then
-            echo -e "${RED}❌ 缺少 sharp 离线依赖: $p${NC}"
-            exit 1
-        fi
-    done
-    echo "   ✅ sharp-vendor 校验通过 (darwin-${npm_cpu})"
-}
-
 resolve_runtime_source() {
     local arch="$1" # intel / apple
     local candidates=()
@@ -407,13 +333,9 @@ create_package() {
         require_runtime_max_macos "$TEMP_DIR/runtime/bin/convert" 13
     fi
 
-    local expected_npm_cpu="arm64"
-    if [ "$ARCH_KEY" = "intel" ]; then
-        expected_npm_cpu="x64"
-    fi
-    ensure_sharp_matches_arch "$TEMP_DIR/项目文件" "$TEMP_DIR/runtime/bin" "$expected_npm_cpu"
-    bundle_sharp_vendor_for_arch "$TEMP_DIR/项目文件" "$TEMP_DIR/runtime" "$expected_npm_cpu"
-    require_sharp_vendor_for_arch "$TEMP_DIR/runtime" "$expected_npm_cpu"
+    # sharp 不再作为 runtime 的离线依赖强制打包：安装阶段将使用 runtime 内置 Node + npm
+    # 在用户本机按架构在线安装 sharp，从而避免离线包与系统/架构不匹配导致安装失败。
+    echo "   ℹ️  跳过 sharp-vendor 强制封装与校验（改为安装阶段在线安装 sharp）"
     
     # 3. 复制对应架构的 DMG (不再需要 .command 脚本, 安装器内部自动清除隔离)
     echo -e "${YELLOW}🖥️  复制 ${ARCH_TYPE} 安装器...${NC}"

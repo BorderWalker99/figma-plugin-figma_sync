@@ -70,10 +70,7 @@ const { checkUpdateAsync } = require('./update-manager');
 function collectBundledSharpVendorNodeModulesDirs() {
   const archKey = process.arch === 'arm64' ? 'apple' : 'intel';
   const candidates = [
-    path.join(__dirname, 'runtime', 'sharp-vendor', 'node_modules'),
-    path.join(__dirname, 'runtime', archKey, 'sharp-vendor', 'node_modules'),
-    path.join(__dirname, 'runtime', process.arch, 'sharp-vendor', 'node_modules'),
-    path.join(__dirname, 'sharp-vendor', 'node_modules')
+    // sharp-vendor 已不再随安装包分发，这里保留空候选列表以兼容旧逻辑调用
   ];
   return candidates.filter((dir, index) => candidates.indexOf(dir) === index && fs.existsSync(dir));
 }
@@ -108,7 +105,7 @@ function restoreBundledSharpForCurrentArch() {
     fs.cpSync(path.join(sourceRoot, '@img', 'colour'), path.join(targetImgDir, 'colour'), { recursive: true, force: true });
     fs.cpSync(path.join(sourceRoot, '@img', `sharp-darwin-${cpu}`), path.join(targetImgDir, `sharp-darwin-${cpu}`), { recursive: true, force: true });
     fs.cpSync(path.join(sourceRoot, '@img', `sharp-libvips-darwin-${cpu}`), path.join(targetImgDir, `sharp-libvips-darwin-${cpu}`), { recursive: true, force: true });
-    console.log(`✅ 已从 runtime/sharp-vendor 恢复 sharp (darwin-${cpu})`);
+    console.log('✅ 已从离线 sharp 运行时恢复依赖');
     return true;
   } catch (error) {
     console.error('❌ 离线 sharp bundle 恢复失败:', error.message);
@@ -369,11 +366,6 @@ function checkEnvironment() {
   }
 
   if (!canLoadSharp()) {
-    if (restoreBundledSharpForCurrentArch() && canLoadSharp()) {
-      console.log('✅ 已通过内置离线 sharp 运行时完成修复');
-      console.log('✅ 环境检查通过');
-      return true;
-    }
     console.log('   🔧 检测到 sharp 架构或原生模块异常，正在尝试重新安装依赖...');
     try {
       installProductionDeps();

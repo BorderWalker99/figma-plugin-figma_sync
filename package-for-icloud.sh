@@ -65,28 +65,6 @@ require_runtime_max_macos() {
     fi
 }
 
-require_sharp_vendor_for_arch() {
-    local runtime_root="$1"
-    local npm_cpu="$2" # x64 | arm64
-    local vendor_root="$runtime_root/sharp-vendor/node_modules"
-    local required_paths=(
-        "$vendor_root/sharp/package.json"
-        "$vendor_root/detect-libc/package.json"
-        "$vendor_root/semver/package.json"
-        "$vendor_root/@img/colour/package.json"
-        "$vendor_root/@img/sharp-darwin-${npm_cpu}/package.json"
-        "$vendor_root/@img/sharp-libvips-darwin-${npm_cpu}/package.json"
-    )
-    local p
-    for p in "${required_paths[@]}"; do
-        if [ ! -f "$p" ]; then
-            echo -e "${RED}❌ 缺少 sharp 离线依赖: $p${NC}"
-            exit 1
-        fi
-    done
-    echo "   ✅ sharp-vendor 校验通过 (darwin-${npm_cpu})"
-}
-
 validate_runtime_arch_bundle() {
     local runtime_root="$1"
     local arch_dir="$2"      # intel | apple
@@ -122,8 +100,6 @@ validate_runtime_arch_bundle() {
     else
         require_runtime_max_macos "$bin_root/convert" 13
     fi
-
-    require_sharp_vendor_for_arch "$runtime_root" "$npm_cpu"
 }
 
 echo -e "${BLUE}"
@@ -203,29 +179,10 @@ cp package.json "$PROJECT_DIR/"
 cp package-lock.json "$PROJECT_DIR/" 2>/dev/null || true
 cp README.md "$PROJECT_DIR/" 2>/dev/null || true
 
-# 离线 runtime + sharp vendor（供安装器 / start.js / emergency-update 离线自愈）
+# 离线 runtime（供安装器 / start.js / emergency-update 使用）
 if [ -d "runtime" ]; then
     echo -e "${YELLOW}🧰 复制离线 runtime...${NC}"
     rsync -a "runtime/" "$PROJECT_DIR/runtime/"
-    mkdir -p "$PROJECT_DIR/runtime/sharp-vendor/node_modules/@img"
-    for d in \
-        "sharp" \
-        "detect-libc" \
-        "semver"; do
-        if [ -d "node_modules/$d" ]; then
-            rsync -a "node_modules/$d" "$PROJECT_DIR/runtime/sharp-vendor/node_modules/"
-        fi
-    done
-    for d in \
-        "colour" \
-        "sharp-darwin-arm64" \
-        "sharp-libvips-darwin-arm64" \
-        "sharp-darwin-x64" \
-        "sharp-libvips-darwin-x64"; do
-        if [ -d "node_modules/@img/$d" ]; then
-            rsync -a "node_modules/@img/$d" "$PROJECT_DIR/runtime/sharp-vendor/node_modules/@img/"
-        fi
-    done
 fi
 
 validate_runtime_arch_bundle "$PROJECT_DIR/runtime" "intel" "x86_64" "x64"
