@@ -621,15 +621,18 @@ function isUsableNpmBinary(npmPath) {
 
 function resolveNpmBinary() {
   const candidates = [];
+  // 优先使用基于内置 Node 的 npm shim，确保 npm 与运行时 Node 架构/版本一致
+  candidates.push(
+    path.join(os.homedir(), '.screensync', 'bin', 'npm'),
+    path.join(os.homedir(), '.screensync', 'deps', 'node', 'bin', 'npm')
+  );
+
+  // 其次尝试系统 PATH 中的 npm（作为兜底）
   const found = findExecutable('npm');
   if (found) candidates.push(found);
 
-  candidates.push(
-    path.join(os.homedir(), '.screensync', 'bin', 'npm'),
-    path.join(os.homedir(), '.screensync', 'deps', 'node', 'bin', 'npm'),
-    '/usr/local/bin/npm',
-    '/opt/homebrew/bin/npm'
-  );
+  // 最后再尝试常见全局安装路径
+  candidates.push('/usr/local/bin/npm', '/opt/homebrew/bin/npm');
 
   const seen = new Set();
   for (const candidate of candidates) {
