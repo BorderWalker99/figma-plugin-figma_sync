@@ -655,8 +655,6 @@ function stripPackagedSharpArtifacts(installPath) {
   if (!installPath) return;
   try {
     fs.rmSync(path.join(installPath, 'node_modules', 'sharp'), { recursive: true, force: true });
-    fs.rmSync(path.join(installPath, 'node_modules', 'detect-libc'), { recursive: true, force: true });
-    fs.rmSync(path.join(installPath, 'node_modules', 'semver'), { recursive: true, force: true });
     fs.rmSync(path.join(installPath, 'node_modules', '@img'), { recursive: true, force: true });
     fs.rmSync(path.join(installPath, 'runtime', 'sharp-vendor'), { recursive: true, force: true });
     fs.rmSync(path.join(installPath, 'runtime', 'apple', 'sharp-vendor'), { recursive: true, force: true });
@@ -702,46 +700,66 @@ async function ensureSharpRuntimeForCurrentArch({ installPath, npmPath, nodePath
     npm_config_os: 'darwin',
     npm_config_cpu: cpu,
     npm_config_loglevel: 'warn',
-    npm_config_strict_ssl: 'false'
+    npm_config_strict_ssl: 'false',
+    PATH: `${path.dirname(npmPath)}:${process.env.PATH || ''}`
   };
   const registries = [
     'https://registry.npmmirror.com',
     'https://registry.npmjs.org'
   ];
+  const installPathQ = JSON.stringify(installPath);
 
-  let installSucceeded = false;
+  // Strategy 1: cd into project dir and npm install sharp
   for (const registry of registries) {
     try {
       log(`   ↪️ 尝试通过 ${registry} 安装 sharp...\n`);
       await execPromise(
-        `"${npmPath}" --prefix "${installPath}" install --no-save --no-audit --no-fund --include=optional --legacy-peer-deps sharp --registry=${registry}`,
+        `cd ${installPathQ} && "${npmPath}" install --no-save --no-audit --no-fund --include=optional --legacy-peer-deps sharp --registry=${registry}`,
         { timeout: 8 * 60 * 1000, env: installEnv }
       );
-      installSucceeded = true;
-      break;
+      if (await checkSharpRuntimeHealth(nodePath, installPath)) {
+        log(`✅ sharp 安装成功（darwin-${cpu}）\n`);
+        return true;
+      }
     } catch (error) {
       log(`   ⚠️ 通过 ${registry} 安装 sharp 失败：${error.message}\n`);
     }
   }
 
-  if (!installSucceeded) {
+  // Strategy 2: explicitly install platform-specific binding packages
+  log(`   ↪️ 尝试显式安装平台包 @img/sharp-darwin-${cpu}...\n`);
+  stripPackagedSharpArtifacts(installPath);
+  for (const registry of registries) {
     try {
-      log('   ↪️ sharp 安装失败，尝试 rebuild...\n');
       await execPromise(
-        `"${npmPath}" --prefix "${installPath}" rebuild sharp --include=optional`,
-        { timeout: 5 * 60 * 1000, env: installEnv }
+        `cd ${installPathQ} && "${npmPath}" install --no-save --no-audit --no-fund --legacy-peer-deps sharp @img/sharp-darwin-${cpu} @img/sharp-libvips-darwin-${cpu} --registry=${registry}`,
+        { timeout: 8 * 60 * 1000, env: installEnv }
       );
+      if (await checkSharpRuntimeHealth(nodePath, installPath)) {
+        log(`✅ sharp 安装成功（darwin-${cpu}，显式平台包）\n`);
+        return true;
+      }
     } catch (error) {
-      log(`   ❌ sharp rebuild 失败：${error.message}\n`);
-      return false;
+      log(`   ⚠️ 显式安装平台包失败：${error.message}\n`);
     }
   }
 
-  const ok = await checkSharpRuntimeHealth(nodePath, installPath);
-  if (ok) {
-    log(`✅ sharp 安装成功（darwin-${cpu}）\n`);
+  // Strategy 3: npm rebuild as last resort
+  try {
+    log('   ↪️ 尝试 npm rebuild sharp...\n');
+    await execPromise(
+      `cd ${installPathQ} && "${npmPath}" rebuild sharp --include=optional`,
+      { timeout: 5 * 60 * 1000, env: installEnv }
+    );
+    if (await checkSharpRuntimeHealth(nodePath, installPath)) {
+      log(`✅ sharp rebuild 成功（darwin-${cpu}）\n`);
+      return true;
+    }
+  } catch (error) {
+    log(`   ❌ sharp rebuild 失败：${error.message}\n`);
   }
-  return ok;
+
+  return false;
 }
 
 function ensureNpmShimFromNode(nodePath) {
@@ -2184,17 +2202,16 @@ ipcMain.handle('install-dependencies', async (event, installPath) => {
     // exec 直接在 shell 中执行字符串，兼容性更好
     // 使用 --prefix 来规避 cwd 在只读卷下的问题
     // 添加 --omit=dev 以跳过开发依赖，加快安装速度
-    const commandStr = `("${npmPath}" install --legacy-peer-deps --omit=dev --no-audit --no-fund --registry=https://registry.npmmirror.com --prefix "${installPath}" || "${npmPath}" install --legacy-peer-deps --omit=dev --no-audit --no-fund --registry=https://registry.npmjs.org --prefix "${installPath}")`;
+    const installPathQ = JSON.stringify(installPath).slice(1, -1);
+    const commandStr = `(cd ${JSON.stringify(installPath)} && "${npmPath}" install --legacy-peer-deps --omit=dev --include=optional --no-audit --no-fund --registry=https://registry.npmmirror.com || "${npmPath}" install --legacy-peer-deps --omit=dev --include=optional --no-audit --no-fund --registry=https://registry.npmjs.org)`;
     console.log(`[DEBUG] Executing command: ${commandStr}`);
 
-    // 重要：将 cwd 设置为 /tmp，避免 ENOTDIR
     const child = exec(commandStr, {
-      cwd: os.tmpdir(),
+      cwd: installPath,
       env: {
         ...process.env,
         npm_config_loglevel: 'info',
         npm_config_strict_ssl: 'false',
-        // 确保 PATH 包含 npm 所在的目录
         PATH: `${path.dirname(npmPath)}:${process.env.PATH}`
       }
     });
@@ -2267,7 +2284,7 @@ ipcMain.handle('install-dependencies', async (event, installPath) => {
         }
         
         // 额外验证关键依赖
-        const criticalDeps = ['ws', 'express', 'sharp', 'chokidar'];
+        const criticalDeps = ['ws', 'express', 'chokidar'];
         for (const dep of criticalDeps) {
           const depPath = path.join(nodeModulesPath, dep);
           if (!fs.existsSync(depPath)) {

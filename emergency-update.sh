@@ -559,59 +559,65 @@ repair_sharp_for_current_arch() {
   local npm_bin="$2"
   local project_dir="$3"
   local cpu
-  local install_rc=1
-  local rebuild_rc=1
   cpu="$(get_host_npm_cpu)"
 
   if [ -z "${node_bin:-}" ] || [ ! -x "$node_bin" ]; then
     return 1
   fi
+  if [ -z "${npm_bin:-}" ] || [ ! -x "$npm_bin" ]; then
+    return 1
+  fi
 
   echo "   ↪️  检测到 sharp 缺失或与当前系统架构不兼容，正在修复（darwin-$cpu）..."
-  if [ -n "${npm_bin:-}" ] && [ -x "$npm_bin" ]; then
-    rm -rf \
-      "$project_dir/node_modules/sharp" \
-      "$project_dir/node_modules/detect-libc" \
-      "$project_dir/node_modules/semver" \
-      "$project_dir/node_modules/@img" 2>/dev/null || true
 
+  local sharp_env="npm_config_os=darwin npm_config_cpu=$cpu npm_config_loglevel=warn npm_config_strict_ssl=false"
+  local registries=("https://registry.npmmirror.com" "https://registry.npmjs.org")
+
+  # Strategy 1: npm install sharp (cd into project dir instead of --prefix)
+  rm -rf "$project_dir/node_modules/sharp" "$project_dir/node_modules/@img" 2>/dev/null || true
+  local reg
+  for reg in "${registries[@]}"; do
     set +e
-    env \
-      npm_config_os=darwin \
-      npm_config_cpu="$cpu" \
-      npm_config_loglevel=warn \
-      npm_config_strict_ssl=false \
-      "$npm_bin" --prefix "$project_dir" install \
-        --no-save \
-        --no-audit \
-        --no-fund \
-        --include=optional \
-        --legacy-peer-deps \
-        sharp \
-        --registry=https://registry.npmmirror.com >/dev/null 2>&1
-    install_rc=$?
+    (cd "$project_dir" && env $sharp_env \
+      "$npm_bin" install --no-save --no-audit --no-fund --include=optional --legacy-peer-deps \
+        sharp --registry="$reg" >/dev/null 2>&1)
+    local rc=$?
     set -e
-
-    if [ "$install_rc" -ne 0 ]; then
-      echo "   ⚠️  sharp 定向安装失败，尝试 npm rebuild..."
-      set +e
-      env \
-        npm_config_os=darwin \
-        npm_config_cpu="$cpu" \
-        npm_config_loglevel=warn \
-        npm_config_strict_ssl=false \
-        "$npm_bin" --prefix "$project_dir" rebuild sharp \
-          --include=optional >/dev/null 2>&1
-      rebuild_rc=$?
-      set -e
-    fi
-
-    if check_sharp_runtime_health "$node_bin" "$project_dir"; then
+    if [ "$rc" -eq 0 ] && check_sharp_runtime_health "$node_bin" "$project_dir"; then
       echo "   ✅ sharp 运行时修复成功（darwin-$cpu）"
       return 0
     fi
+  done
+
+  # Strategy 2: explicitly install platform binding packages
+  echo "   ↪️  尝试显式安装平台包 @img/sharp-darwin-$cpu..."
+  rm -rf "$project_dir/node_modules/sharp" "$project_dir/node_modules/@img" 2>/dev/null || true
+  for reg in "${registries[@]}"; do
+    set +e
+    (cd "$project_dir" && env $sharp_env \
+      "$npm_bin" install --no-save --no-audit --no-fund --legacy-peer-deps \
+        sharp "@img/sharp-darwin-$cpu" "@img/sharp-libvips-darwin-$cpu" \
+        --registry="$reg" >/dev/null 2>&1)
+    local rc2=$?
+    set -e
+    if [ "$rc2" -eq 0 ] && check_sharp_runtime_health "$node_bin" "$project_dir"; then
+      echo "   ✅ sharp 显式平台包安装成功（darwin-$cpu）"
+      return 0
+    fi
+  done
+
+  # Strategy 3: npm rebuild
+  echo "   ↪️  尝试 npm rebuild sharp..."
+  set +e
+  (cd "$project_dir" && env $sharp_env \
+    "$npm_bin" rebuild sharp --include=optional >/dev/null 2>&1)
+  set -e
+  if check_sharp_runtime_health "$node_bin" "$project_dir"; then
+    echo "   ✅ sharp rebuild 成功（darwin-$cpu）"
+    return 0
   fi
 
+  # Strategy 4: legacy bundled sharp-vendor (last resort)
   if restore_bundled_sharp_for_current_arch "$project_dir"; then
     echo "   ↪️  检测到旧版 sharp-vendor，尝试用历史离线包兜底恢复"
     if check_sharp_runtime_health "$node_bin" "$project_dir"; then
@@ -621,22 +627,7 @@ repair_sharp_for_current_arch() {
     echo "   ⚠️  历史 sharp-vendor 恢复后仍不可用"
   fi
 
-  if [ -z "${npm_bin:-}" ] || [ ! -x "$npm_bin" ]; then
-    return 1
-  fi
-
-  if [ "$install_rc" -ne 0 ]; then
-    echo "   ⚠️  sharp 定向安装未成功"
-  fi
-  if [ "$rebuild_rc" -ne 1 ] && [ "$rebuild_rc" -ne 0 ]; then
-    echo "   ⚠️  sharp rebuild 也未成功"
-  fi
-
-  if [ "$install_rc" -ne 0 ]; then
-    echo "   ⚠️  sharp 定向安装失败，且历史离线包也不可用"
-  else
-    echo "   ⚠️  sharp 已完成安装命令，但运行时健康检查仍失败"
-  fi
+  echo "   ⚠️  sharp 所有修复策略均已尝试，仍无法加载"
   return 1
 }
 

@@ -180,31 +180,73 @@ function hasRequiredDepsExcludingSharp(rootDir) {
   }
 }
 
+function cleanSharpArtifacts() {
+  const nodeModulesPath = path.join(__dirname, 'node_modules');
+  try {
+    fs.rmSync(path.join(nodeModulesPath, 'sharp'), { recursive: true, force: true });
+    fs.rmSync(path.join(nodeModulesPath, '@img'), { recursive: true, force: true });
+  } catch (_) {}
+}
+
 function installSharpForCurrentArch() {
   const cpu = getCurrentSharpCpu();
-  const nodeModulesPath = path.join(__dirname, 'node_modules');
-  const imgDir = path.join(nodeModulesPath, '@img');
+  const sharpEnv = {
+    ...process.env,
+    npm_config_os: 'darwin',
+    npm_config_cpu: cpu,
+    npm_config_loglevel: 'warn',
+    npm_config_strict_ssl: 'false'
+  };
+  const registries = ['https://registry.npmmirror.com', 'https://registry.npmjs.org'];
+
+  cleanSharpArtifacts();
+
+  // Strategy 1: npm install sharp
+  for (const registry of registries) {
+    try {
+      execSync(`npm install --no-save --include=optional --legacy-peer-deps sharp --registry=${registry}`, {
+        cwd: __dirname, stdio: 'inherit', timeout: 8 * 60 * 1000, env: sharpEnv
+      });
+      if (canLoadSharp()) return;
+    } catch (_) {}
+  }
+
+  // Strategy 2: explicitly install platform-specific binding
+  console.log(`   ↪️ 尝试显式安装平台包 @img/sharp-darwin-${cpu}...`);
+  cleanSharpArtifacts();
+  for (const registry of registries) {
+    try {
+      execSync(`npm install --no-save --legacy-peer-deps sharp @img/sharp-darwin-${cpu} @img/sharp-libvips-darwin-${cpu} --registry=${registry}`, {
+        cwd: __dirname, stdio: 'inherit', timeout: 8 * 60 * 1000, env: sharpEnv
+      });
+      if (canLoadSharp()) return;
+    } catch (_) {}
+  }
+
+  // Strategy 3: npm rebuild
   try {
-    fs.mkdirSync(imgDir, { recursive: true });
-    fs.rmSync(path.join(nodeModulesPath, 'sharp'), { recursive: true, force: true });
-    fs.rmSync(path.join(imgDir, 'colour'), { recursive: true, force: true });
-    fs.rmSync(path.join(imgDir, `sharp-darwin-${cpu}`), { recursive: true, force: true });
-    fs.rmSync(path.join(imgDir, `sharp-libvips-darwin-${cpu}`), { recursive: true, force: true });
+    execSync('npm rebuild sharp --include=optional', {
+      cwd: __dirname, stdio: 'inherit', timeout: 5 * 60 * 1000, env: sharpEnv
+    });
+    if (canLoadSharp()) return;
   } catch (_) {}
 
-  execSync('npm install --no-save --include=optional --legacy-peer-deps sharp --registry=https://registry.npmmirror.com', {
-    cwd: __dirname,
-    stdio: 'inherit',
-    timeout: 8 * 60 * 1000,
-    env: {
-      ...process.env,
-      npm_config_os: 'darwin',
-      npm_config_cpu: cpu,
-      npm_config_loglevel: 'warn',
-      npm_config_strict_ssl: 'false'
-    }
-  });
+  throw new Error(`sharp 安装失败（darwin-${cpu}），所有策略均已尝试`);
 }
+
+function canLoadSharp() {
+  try {
+    delete require.cache[require.resolve('sharp')];
+  } catch (_) {}
+  try {
+    require('sharp');
+    return true;
+  } catch (error) {
+    console.error('❌ sharp 运行时加载失败:', error.message);
+    return false;
+  }
+}
+
 let chokidar;
 try {
   chokidar = require('chokidar');
@@ -511,15 +553,6 @@ function checkEnvironment() {
     stdio: 'inherit',
     timeout: 300000
   });
-  const canLoadSharp = () => {
-    try {
-      require('sharp');
-      return true;
-    } catch (error) {
-      console.error('❌ sharp 运行时加载失败:', error.message);
-      return false;
-    }
-  };
   if (!fs.existsSync(nodeModulesPath) || !hasRequiredDepsExcludingSharp(__dirname)) {
     console.warn('⚠️  警告: 未找到 node_modules 文件夹');
     console.log('   🔧 正在尝试自动安装依赖...');
