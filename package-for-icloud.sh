@@ -69,7 +69,6 @@ validate_runtime_arch_bundle() {
     local runtime_root="$1"
     local arch_dir="$2"      # intel | apple
     local expected_arch="$3" # x86_64 | arm64
-    local npm_cpu="$4"       # x64 | arm64
     local bin_root="$runtime_root/$arch_dir/bin"
 
     require_file "$bin_root/node" "$arch_dir runtime/bin/node 必须存在"
@@ -179,14 +178,15 @@ cp package.json "$PROJECT_DIR/"
 cp package-lock.json "$PROJECT_DIR/" 2>/dev/null || true
 cp README.md "$PROJECT_DIR/" 2>/dev/null || true
 
-# 离线 runtime（供安装器 / start.js / emergency-update 使用）
+# 离线 runtime（仅保留 Node.js 与工具二进制；sharp 改为首次运行自动安装）
 if [ -d "runtime" ]; then
     echo -e "${YELLOW}🧰 复制离线 runtime...${NC}"
     rsync -a "runtime/" "$PROJECT_DIR/runtime/"
+    rm -rf "$PROJECT_DIR/runtime/sharp-vendor"
 fi
 
-validate_runtime_arch_bundle "$PROJECT_DIR/runtime" "intel" "x86_64" "x64"
-validate_runtime_arch_bundle "$PROJECT_DIR/runtime" "apple" "arm64" "arm64"
+validate_runtime_arch_bundle "$PROJECT_DIR/runtime" "intel" "x86_64"
+validate_runtime_arch_bundle "$PROJECT_DIR/runtime" "apple" "arm64"
 
 # Figma 插件（完整目录）
 echo -e "${YELLOW}🎨 复制 Figma 插件...${NC}"

@@ -445,7 +445,7 @@ const fs = require("fs");
 const path = require("path");
 const root = process.argv[1];
 const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
-const deps = Object.keys(pkg.dependencies || {});
+const deps = Object.keys(pkg.dependencies || {}).filter((dep) => dep !== "sharp");
 for (const dep of deps) {
   require.resolve(dep, { paths: [root] });
 }
@@ -475,53 +475,167 @@ check_sharp_runtime_health() {
     "$project_dir" >/dev/null 2>&1
 }
 
+collect_sharp_vendor_node_modules_dirs() {
+  local package_root
+  package_root="$(get_package_root_dir)"
+  # 兼容旧安装包：历史版本会在 runtime/sharp-vendor 下内置 sharp 预编译产物。
+  # 新胖包已不再分发该目录，因此这里只作为最后兜底来源，不再作为主修复路径。
+  local dirs=(
+    "$package_root/runtime/sharp-vendor/node_modules"
+    "$package_root/runtime/$RUNTIME_ARCH_DIR/sharp-vendor/node_modules"
+    "$SCRIPT_DIR/runtime/sharp-vendor/node_modules"
+    "$SCRIPT_DIR/runtime/$RUNTIME_ARCH_DIR/sharp-vendor/node_modules"
+  )
+  local seen=""
+  local d
+  for d in "${dirs[@]}"; do
+    if [ -d "$d" ]; then
+      case ":$seen:" in
+        *":$d:"*) ;;
+        *)
+          echo "$d"
+          seen="$seen:$d"
+          ;;
+      esac
+    fi
+  done
+}
+
+restore_bundled_sharp_for_current_arch() {
+  local project_dir="$1"
+  local cpu source_root vendor_root
+  cpu="$(get_host_npm_cpu)"
+  source_root=""
+
+  while IFS= read -r vendor_root; do
+    [ -n "$vendor_root" ] || continue
+    if [ -d "$vendor_root/sharp" ] && \
+       [ -d "$vendor_root/detect-libc" ] && \
+       [ -d "$vendor_root/semver" ] && \
+       [ -d "$vendor_root/@img/colour" ] && \
+       [ -d "$vendor_root/@img/sharp-darwin-$cpu" ] && \
+       [ -d "$vendor_root/@img/sharp-libvips-darwin-$cpu" ]; then
+      source_root="$vendor_root"
+      break
+    fi
+  done < <(collect_sharp_vendor_node_modules_dirs)
+
+  [ -n "$source_root" ] || return 1
+
+  mkdir -p "$project_dir/node_modules/@img"
+  rm -rf \
+    "$project_dir/node_modules/sharp" \
+    "$project_dir/node_modules/detect-libc" \
+    "$project_dir/node_modules/semver" \
+    "$project_dir/node_modules/@img/sharp-darwin-$cpu" \
+    "$project_dir/node_modules/@img/sharp-libvips-darwin-$cpu" 2>/dev/null || true
+
+  rsync -a "$source_root/sharp" "$project_dir/node_modules/" || return 1
+  rsync -a "$source_root/detect-libc" "$project_dir/node_modules/" || return 1
+  rsync -a "$source_root/semver" "$project_dir/node_modules/" || return 1
+  rsync -a "$source_root/@img/colour" "$project_dir/node_modules/@img/" || return 1
+  rsync -a "$source_root/@img/sharp-darwin-$cpu" "$project_dir/node_modules/@img/" || return 1
+  rsync -a "$source_root/@img/sharp-libvips-darwin-$cpu" "$project_dir/node_modules/@img/" || return 1
+  return 0
+}
+
+strip_packaged_sharp_artifacts() {
+  local project_dir="$1"
+  [ -n "${project_dir:-}" ] || return 0
+
+  # 新方案要求 sharp 始终按当前机器架构现装。
+  # 即使远端 release 资产暂时仍携带了旧的 sharp/node_modules，这里也先剥离，
+  # 后续再统一走 check_sharp_runtime_health + repair_sharp_for_current_arch。
+  rm -rf \
+    "$project_dir/node_modules/sharp" \
+    "$project_dir/node_modules/@img" \
+    "$project_dir/runtime/sharp-vendor" \
+    "$project_dir/runtime/apple/sharp-vendor" \
+    "$project_dir/runtime/intel/sharp-vendor" 2>/dev/null || true
+}
+
 repair_sharp_for_current_arch() {
   local node_bin="$1"
   local npm_bin="$2"
   local project_dir="$3"
   local cpu
+  local install_rc=1
+  local rebuild_rc=1
   cpu="$(get_host_npm_cpu)"
 
   if [ -z "${node_bin:-}" ] || [ ! -x "$node_bin" ]; then
     return 1
   fi
 
-  echo "   ↪️  检测到 sharp 架构不匹配，正在修复（darwin-$cpu）..."
+  echo "   ↪️  检测到 sharp 缺失或与当前系统架构不兼容，正在修复（darwin-$cpu）..."
+  if [ -n "${npm_bin:-}" ] && [ -x "$npm_bin" ]; then
+    rm -rf \
+      "$project_dir/node_modules/sharp" \
+      "$project_dir/node_modules/detect-libc" \
+      "$project_dir/node_modules/semver" \
+      "$project_dir/node_modules/@img" 2>/dev/null || true
+
+    set +e
+    env \
+      npm_config_os=darwin \
+      npm_config_cpu="$cpu" \
+      npm_config_loglevel=warn \
+      npm_config_strict_ssl=false \
+      "$npm_bin" --prefix "$project_dir" install \
+        --no-save \
+        --no-audit \
+        --no-fund \
+        --include=optional \
+        --legacy-peer-deps \
+        sharp \
+        --registry=https://registry.npmmirror.com >/dev/null 2>&1
+    install_rc=$?
+    set -e
+
+    if [ "$install_rc" -ne 0 ]; then
+      echo "   ⚠️  sharp 定向安装失败，尝试 npm rebuild..."
+      set +e
+      env \
+        npm_config_os=darwin \
+        npm_config_cpu="$cpu" \
+        npm_config_loglevel=warn \
+        npm_config_strict_ssl=false \
+        "$npm_bin" --prefix "$project_dir" rebuild sharp \
+          --include=optional >/dev/null 2>&1
+      rebuild_rc=$?
+      set -e
+    fi
+
+    if check_sharp_runtime_health "$node_bin" "$project_dir"; then
+      echo "   ✅ sharp 运行时修复成功（darwin-$cpu）"
+      return 0
+    fi
+  fi
+
+  if restore_bundled_sharp_for_current_arch "$project_dir"; then
+    echo "   ↪️  检测到旧版 sharp-vendor，尝试用历史离线包兜底恢复"
+    if check_sharp_runtime_health "$node_bin" "$project_dir"; then
+      echo "   ✅ sharp 已通过历史离线包恢复（darwin-$cpu）"
+      return 0
+    fi
+    echo "   ⚠️  历史 sharp-vendor 恢复后仍不可用"
+  fi
 
   if [ -z "${npm_bin:-}" ] || [ ! -x "$npm_bin" ]; then
     return 1
   fi
 
-  rm -rf "$project_dir/node_modules/sharp" "$project_dir/node_modules/@img" 2>/dev/null || true
-
-  set +e
-  "$npm_bin" --prefix "$project_dir" install \
-    --no-save \
-    --include=optional \
-    --legacy-peer-deps \
-    --os=darwin \
-    --cpu="$cpu" \
-    sharp >/dev/null 2>&1
-  local install_rc=$?
-  set -e
-
   if [ "$install_rc" -ne 0 ]; then
-    echo "   ⚠️  sharp 定向重装失败，尝试 npm rebuild..."
-    set +e
-    "$npm_bin" --prefix "$project_dir" rebuild sharp \
-      --include=optional \
-      --os=darwin \
-      --cpu="$cpu" >/dev/null 2>&1
-    local rebuild_rc=$?
-    set -e
-    if [ "$rebuild_rc" -ne 0 ]; then
-      return 1
-    fi
+    echo "   ⚠️  sharp 定向安装未成功"
+  fi
+  if [ "$rebuild_rc" -ne 1 ] && [ "$rebuild_rc" -ne 0 ]; then
+    echo "   ⚠️  sharp rebuild 也未成功"
   fi
 
-  if check_sharp_runtime_health "$node_bin" "$project_dir"; then
-    echo "   ✅ sharp 运行时修复成功（darwin-$cpu）"
-    return 0
+  if [ "$install_rc" -ne 0 ]; then
+    echo "   ⚠️  sharp 定向安装失败，且历史离线包也不可用"
+  else
+    echo "   ⚠️  sharp 已完成安装命令，但运行时健康检查仍失败"
   fi
   return 1
 }
@@ -1436,6 +1550,7 @@ if [ -d "$SOURCE_DIR/node_modules" ]; then
   echo -e "${YELLOW}📚 正在同步内置 Node.js 依赖（node_modules）...${NC}"
   mkdir -p "$SCRIPT_DIR/node_modules"
   rsync -a --delete "$SOURCE_DIR/node_modules/" "$SCRIPT_DIR/node_modules/" 2>/dev/null || true
+  strip_packaged_sharp_artifacts "$SCRIPT_DIR"
   echo -e "${GREEN}✅ 已同步内置 node_modules${NC}"
 fi
 

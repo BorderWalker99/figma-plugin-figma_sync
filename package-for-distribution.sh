@@ -78,53 +78,16 @@ require_runtime_max_macos() {
     fi
 }
 
-ensure_sharp_matches_arch() {
+strip_packaged_sharp() {
     local project_dir="$1"
-    local runtime_bin_dir="$2"
-    local npm_cpu="$3" # x64 | arm64
-    local npm_bin=""
-    local expected_pkg_dir="$project_dir/node_modules/@img/sharp-darwin-${npm_cpu}"
-    local expected_libvips_dir="$project_dir/node_modules/@img/sharp-libvips-darwin-${npm_cpu}"
+    local runtime_root="$2"
 
-    # 先做静态校验（跨架构主机可用，不要求执行目标架构 node）
-    if [ -d "$expected_pkg_dir" ] && [ -d "$expected_libvips_dir" ]; then
-        echo "   ✅ sharp 预编译包已匹配 darwin-${npm_cpu}"
-        return 0
-    fi
-
-    # 使用宿主 npm 做“目标架构定向安装”（避免在 Apple 机器执行 x64 runtime/node 失败）
-    if command -v npm >/dev/null 2>&1; then
-        npm_bin="$(command -v npm)"
-    elif [ -x "$runtime_bin_dir/npm" ]; then
-        npm_bin="$runtime_bin_dir/npm"
-    fi
-
-    if [ -z "$npm_bin" ]; then
-        echo -e "${RED}❌ 未找到可用 npm，无法准备 darwin-${npm_cpu} 的 sharp 预编译包${NC}"
-        exit 1
-    fi
-
-    echo "   ⚠️  sharp 目标架构包缺失，尝试预修复为 darwin-${npm_cpu}..."
-    set +e
-    "$npm_bin" --prefix "$project_dir" install \
-      --no-save \
-      --include=optional \
-      --legacy-peer-deps \
-      --platform=darwin \
-      --arch="$npm_cpu" \
-      sharp \
-      --registry=https://registry.npmmirror.com >/dev/null 2>&1
-    local sharp_install_rc=$?
-    set -e
-
-    if [ "$sharp_install_rc" -eq 0 ] && [ -d "$expected_pkg_dir" ] && [ -d "$expected_libvips_dir" ]; then
-        echo "   ✅ sharp 预修复成功（darwin-${npm_cpu}）"
-        return 0
-    fi
-
-    echo -e "${RED}❌ sharp 预修复失败（darwin-${npm_cpu}）${NC}"
-    echo -e "${YELLOW}   目标目录缺失: $expected_pkg_dir 或 $expected_libvips_dir${NC}"
-    exit 1
+    echo "   🧹 清理打包产物中的 sharp 相关文件（改为首次运行按架构自动安装）..."
+    rm -rf "$project_dir/node_modules/sharp" 2>/dev/null || true
+    rm -rf "$project_dir/node_modules/@img" 2>/dev/null || true
+    rm -rf "$runtime_root/sharp-vendor" 2>/dev/null || true
+    rm -rf "$runtime_root/intel/sharp-vendor" 2>/dev/null || true
+    rm -rf "$runtime_root/apple/sharp-vendor" 2>/dev/null || true
 }
 
 resolve_runtime_source() {
@@ -268,6 +231,8 @@ create_package() {
     rsync -a \
       --exclude '.cache/' \
       --exclude '*.log' \
+      --exclude 'sharp/' \
+      --exclude '@img/' \
       "node_modules/" "$TEMP_DIR/项目文件/node_modules/"
 
     # 2.2 复制离线运行时 runtime（按架构）
@@ -333,9 +298,7 @@ create_package() {
         require_runtime_max_macos "$TEMP_DIR/runtime/bin/convert" 13
     fi
 
-    # sharp 不再作为 runtime 的离线依赖强制打包：安装阶段将使用 runtime 内置 Node + npm
-    # 在用户本机按架构在线安装 sharp，从而避免离线包与系统/架构不匹配导致安装失败。
-    echo "   ℹ️  跳过 sharp-vendor 强制封装与校验（改为安装阶段在线安装 sharp）"
+    strip_packaged_sharp "$TEMP_DIR/项目文件" "$TEMP_DIR/runtime"
     
     # 3. 复制对应架构的 DMG (不再需要 .command 脚本, 安装器内部自动清除隔离)
     echo -e "${YELLOW}🖥️  复制 ${ARCH_TYPE} 安装器...${NC}"

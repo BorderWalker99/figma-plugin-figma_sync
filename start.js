@@ -67,50 +67,54 @@ const { checkUpdateAsync } = require('./update-manager');
   }
 })();
 
-function collectBundledSharpVendorNodeModulesDirs() {
-  const archKey = process.arch === 'arm64' ? 'apple' : 'intel';
-  const candidates = [
-    // sharp-vendor 已不再随安装包分发，这里保留空候选列表以兼容旧逻辑调用
-  ];
-  return candidates.filter((dir, index) => candidates.indexOf(dir) === index && fs.existsSync(dir));
+function getCurrentSharpCpu() {
+  return process.arch === 'arm64' ? 'arm64' : 'x64';
 }
 
-function restoreBundledSharpForCurrentArch() {
-  const cpu = process.arch === 'arm64' ? 'arm64' : 'x64';
-  const requiredPackages = [
-    'sharp',
-    'detect-libc',
-    'semver',
-    path.join('@img', 'colour'),
-    path.join('@img', `sharp-darwin-${cpu}`),
-    path.join('@img', `sharp-libvips-darwin-${cpu}`)
-  ];
-  const sourceRoot = collectBundledSharpVendorNodeModulesDirs()
-    .find((root) => requiredPackages.every((pkgPath) => fs.existsSync(path.join(root, pkgPath))));
-  if (!sourceRoot) return false;
-
-  const targetNodeModules = path.join(__dirname, 'node_modules');
-  const targetImgDir = path.join(targetNodeModules, '@img');
+function getRequiredDepsExcludingSharp() {
   try {
-    fs.mkdirSync(targetImgDir, { recursive: true });
-    fs.rmSync(path.join(targetNodeModules, 'sharp'), { recursive: true, force: true });
-    fs.rmSync(path.join(targetNodeModules, 'detect-libc'), { recursive: true, force: true });
-    fs.rmSync(path.join(targetNodeModules, 'semver'), { recursive: true, force: true });
-    fs.rmSync(path.join(targetImgDir, `sharp-darwin-${cpu}`), { recursive: true, force: true });
-    fs.rmSync(path.join(targetImgDir, `sharp-libvips-darwin-${cpu}`), { recursive: true, force: true });
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
+    return Object.keys(pkg.dependencies || {}).filter(dep => dep !== 'sharp');
+  } catch (_) {
+    return ['dotenv', 'ws', 'express', 'googleapis', 'chokidar'];
+  }
+}
 
-    fs.cpSync(path.join(sourceRoot, 'sharp'), path.join(targetNodeModules, 'sharp'), { recursive: true, force: true });
-    fs.cpSync(path.join(sourceRoot, 'detect-libc'), path.join(targetNodeModules, 'detect-libc'), { recursive: true, force: true });
-    fs.cpSync(path.join(sourceRoot, 'semver'), path.join(targetNodeModules, 'semver'), { recursive: true, force: true });
-    fs.cpSync(path.join(sourceRoot, '@img', 'colour'), path.join(targetImgDir, 'colour'), { recursive: true, force: true });
-    fs.cpSync(path.join(sourceRoot, '@img', `sharp-darwin-${cpu}`), path.join(targetImgDir, `sharp-darwin-${cpu}`), { recursive: true, force: true });
-    fs.cpSync(path.join(sourceRoot, '@img', `sharp-libvips-darwin-${cpu}`), path.join(targetImgDir, `sharp-libvips-darwin-${cpu}`), { recursive: true, force: true });
-    console.log('✅ 已从离线 sharp 运行时恢复依赖');
+function hasRequiredDepsExcludingSharp(rootDir) {
+  try {
+    for (const dep of getRequiredDepsExcludingSharp()) {
+      require.resolve(dep, { paths: [rootDir] });
+    }
     return true;
-  } catch (error) {
-    console.error('❌ 离线 sharp bundle 恢复失败:', error.message);
+  } catch (_) {
     return false;
   }
+}
+
+function installSharpForCurrentArch() {
+  const cpu = getCurrentSharpCpu();
+  const nodeModulesPath = path.join(__dirname, 'node_modules');
+  const imgDir = path.join(nodeModulesPath, '@img');
+  try {
+    fs.mkdirSync(imgDir, { recursive: true });
+    fs.rmSync(path.join(nodeModulesPath, 'sharp'), { recursive: true, force: true });
+    fs.rmSync(path.join(imgDir, 'colour'), { recursive: true, force: true });
+    fs.rmSync(path.join(imgDir, `sharp-darwin-${cpu}`), { recursive: true, force: true });
+    fs.rmSync(path.join(imgDir, `sharp-libvips-darwin-${cpu}`), { recursive: true, force: true });
+  } catch (_) {}
+
+  execSync('npm install --no-save --include=optional --legacy-peer-deps sharp --registry=https://registry.npmmirror.com', {
+    cwd: __dirname,
+    stdio: 'inherit',
+    timeout: 8 * 60 * 1000,
+    env: {
+      ...process.env,
+      npm_config_os: 'darwin',
+      npm_config_cpu: cpu,
+      npm_config_loglevel: 'warn',
+      npm_config_strict_ssl: 'false'
+    }
+  });
 }
 let chokidar;
 try {
@@ -318,7 +322,7 @@ function checkEnvironment() {
       return false;
     }
   };
-  if (!fs.existsSync(nodeModulesPath)) {
+  if (!fs.existsSync(nodeModulesPath) || !hasRequiredDepsExcludingSharp(__dirname)) {
     console.warn('⚠️  警告: 未找到 node_modules 文件夹');
     console.log('   🔧 正在尝试自动安装依赖...');
     
@@ -341,7 +345,7 @@ function checkEnvironment() {
   }
 
   // 检查关键依赖
-  const requiredDeps = ['dotenv', 'ws', 'express', 'sharp'];
+  const requiredDeps = getRequiredDepsExcludingSharp();
   for (const dep of requiredDeps) {
     const depPath = path.join(nodeModulesPath, dep);
     if (!fs.existsSync(depPath)) {
@@ -366,16 +370,16 @@ function checkEnvironment() {
   }
 
   if (!canLoadSharp()) {
-    console.log('   🔧 检测到 sharp 架构或原生模块异常，正在尝试重新安装依赖...');
+    console.log(`   🔧 首次运行将自动安装 sharp（darwin-${getCurrentSharpCpu()}）...`);
     try {
-      installProductionDeps();
+      installSharpForCurrentArch();
       if (!canLoadSharp()) {
-        console.error('❌ 重新安装依赖后 sharp 仍无法加载');
+        console.error('❌ 自动安装 sharp 后仍无法加载');
         return false;
       }
-      console.log('✅ sharp 运行时检查已恢复正常');
+      console.log('✅ sharp 已按当前架构安装并可运行');
     } catch (error) {
-      console.error('❌ 重新安装 sharp 相关依赖失败:', error.message);
+      console.error('❌ 自动安装 sharp 失败:', error.message);
       return false;
     }
   }
