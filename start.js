@@ -3,6 +3,7 @@ const { spawn, execSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const crypto = require('crypto');
 const { checkUpdateAsync } = require('./update-manager');
 
 // Inject bundled runtime/local deps into PATH.
@@ -66,6 +67,94 @@ const { checkUpdateAsync } = require('./update-manager');
     }
   }
 })();
+
+const LOCK_DIR = path.join(os.tmpdir(), 'screensync-locks');
+const START_LOCK_FILE = path.join(
+  LOCK_DIR,
+  `start-${crypto.createHash('md5').update(__dirname).digest('hex')}.lock`
+);
+let startLockAcquired = false;
+
+function getProcessCommand(pid) {
+  try {
+    return execSync(`ps -p ${pid} -o command=`, { encoding: 'utf8', timeout: 3000 }).trim();
+  } catch (_) {
+    return '';
+  }
+}
+
+function getProcessCwd(pid) {
+  try {
+    const output = execSync(`lsof -a -p ${pid} -d cwd -Fn`, { encoding: 'utf8', timeout: 3000 });
+    const line = output.split('\n').find(entry => entry.startsWith('n'));
+    return line ? line.slice(1).trim() : '';
+  } catch (_) {
+    return '';
+  }
+}
+
+function isRepoScriptProcess(pid, scriptName, command) {
+  const cmd = command || getProcessCommand(pid);
+  if (!cmd) return false;
+  if (cmd.includes(path.join(__dirname, scriptName))) return true;
+  if (!new RegExp(`(^|\\s|/)${scriptName}(\\s|$)`).test(cmd)) return false;
+  return getProcessCwd(pid) === __dirname;
+}
+
+function isMatchingProcessAlive(pid, scriptName) {
+  if (!pid || !Number.isFinite(pid) || pid <= 0 || pid === process.pid) return false;
+  try {
+    process.kill(pid, 0);
+  } catch (_) {
+    return false;
+  }
+  return isRepoScriptProcess(pid, scriptName);
+}
+
+function releaseStartLock() {
+  if (!startLockAcquired) return;
+  try {
+    const raw = fs.readFileSync(START_LOCK_FILE, 'utf8');
+    const lockInfo = JSON.parse(raw);
+    if (lockInfo && lockInfo.pid === process.pid) {
+      fs.rmSync(START_LOCK_FILE, { force: true });
+    }
+  } catch (_) {}
+  startLockAcquired = false;
+}
+
+function acquireStartLockOrExit() {
+  try {
+    fs.mkdirSync(LOCK_DIR, { recursive: true });
+  } catch (_) {}
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const fd = fs.openSync(START_LOCK_FILE, 'wx');
+      fs.writeFileSync(fd, JSON.stringify({
+        pid: process.pid,
+        script: path.join(__dirname, 'start.js'),
+        createdAt: Date.now()
+      }));
+      fs.closeSync(fd);
+      startLockAcquired = true;
+      process.on('exit', releaseStartLock);
+      return true;
+    } catch (error) {
+      if (!error || error.code !== 'EEXIST') break;
+      try {
+        const raw = fs.readFileSync(START_LOCK_FILE, 'utf8');
+        const lockInfo = JSON.parse(raw);
+        if (isMatchingProcessAlive(Number(lockInfo && lockInfo.pid), 'start.js')) {
+          console.log(`🛑 检测到同目录已有运行中的启动器 (PID: ${lockInfo.pid})，当前进程退出以避免重复启动`);
+          process.exit(0);
+        }
+      } catch (_) {}
+      try { fs.rmSync(START_LOCK_FILE, { force: true }); } catch (_) {}
+    }
+  }
+  return true;
+}
 
 function getCurrentSharpCpu() {
   return process.arch === 'arm64' ? 'arm64' : 'x64';
@@ -166,20 +255,34 @@ function cleanupWatcherProcesses() {
   }
   
   try {
-    // 查找旧的 drive-watcher.js 和 aliyun-watcher.js 进程
-    const result = execSync("ps aux | grep -E '(drive-watcher|aliyun-watcher|icloud-watcher)\\.js' | grep -v grep | awk '{print $2}'").toString().trim();
-    
-    if (result) {
+    const output = execSync('ps -axo pid=,command=', { encoding: 'utf8', timeout: 3000 });
+    const lines = output.split('\n').map(line => line.trim()).filter(Boolean);
+    const targetPids = [];
+
+    for (const line of lines) {
+      const match = line.match(/^(\d+)\s+(.+)$/);
+      if (!match) continue;
+      const pid = Number(match[1]);
+      const command = match[2];
+      if (!Number.isFinite(pid) || pid === process.pid) continue;
+
+      if (
+        isRepoScriptProcess(pid, 'drive-watcher.js', command) ||
+        isRepoScriptProcess(pid, 'icloud-watcher.js', command) ||
+        isRepoScriptProcess(pid, 'aliyun-watcher.js', command)
+      ) {
+        targetPids.push(pid);
+      }
+    }
+
+    if (targetPids.length > 0) {
       console.log(`🧹 发现旧的 watcher 进程，正在清理...`);
-      const pids = result.split('\n');
-      for (const pid of pids) {
-        if (pid) {
-          try {
-            process.kill(parseInt(pid), 'SIGTERM'); // 使用 SIGTERM 让进程优雅退出
-            console.log(`   ✅ 已终止旧 watcher 进程 PID: ${pid}`);
-          } catch (e) {
-            console.log(`   ⚠️  无法终止进程 ${pid}: ${e.message}`);
-          }
+      for (const pid of targetPids) {
+        try {
+          process.kill(pid, 'SIGTERM'); // 使用 SIGTERM 让进程优雅退出
+          console.log(`   ✅ 已终止旧 watcher 进程 PID: ${pid}`);
+        } catch (e) {
+          console.log(`   ⚠️  无法终止进程 ${pid}: ${e.message}`);
         }
       }
       
@@ -191,9 +294,50 @@ function cleanupWatcherProcesses() {
   }
 }
 
-// 清理端口和旧进程
-cleanupPort();
-cleanupWatcherProcesses();
+function cleanupLocalRepoProcesses() {
+  if (process.platform === 'win32') {
+    return;
+  }
+
+  try {
+    const output = execSync('ps -axo pid=,command=', { encoding: 'utf8' });
+    const lines = output.split('\n').map(line => line.trim()).filter(Boolean);
+    const targetPids = [];
+
+    for (const line of lines) {
+      const match = line.match(/^(\d+)\s+(.+)$/);
+      if (!match) continue;
+      const pid = Number(match[1]);
+      const command = match[2];
+      if (!Number.isFinite(pid) || pid === process.pid) continue;
+      if (
+        !isRepoScriptProcess(pid, 'start.js', command) &&
+        !isRepoScriptProcess(pid, 'server.js', command) &&
+        !isRepoScriptProcess(pid, 'drive-watcher.js', command) &&
+        !isRepoScriptProcess(pid, 'icloud-watcher.js', command) &&
+        !isRepoScriptProcess(pid, 'aliyun-watcher.js', command)
+      ) {
+        continue;
+      }
+      targetPids.push(pid);
+    }
+
+    if (targetPids.length > 0) {
+      console.log(`🧹 发现同目录旧服务进程，正在清理...`);
+      for (const pid of targetPids) {
+        try {
+          process.kill(pid, 'SIGTERM');
+          console.log(`   ✅ 已终止旧进程 PID: ${pid}`);
+        } catch (e) {
+          console.log(`   ⚠️  无法终止进程 ${pid}: ${e.message}`);
+        }
+      }
+      execSync('sleep 1');
+    }
+  } catch (_) {
+    // 忽略错误（通常表示没有找到旧进程）
+  }
+}
 
 // 从环境变量读取同步模式，默认 Google Drive
 let SYNC_MODE = process.env.SYNC_MODE || 'drive';
@@ -216,6 +360,48 @@ function readSyncMode() {
   return SYNC_MODE;
 }
 
+function getExpectedWatcherScript(mode) {
+  if (mode === 'icloud') return 'icloud-watcher.js';
+  if (mode === 'aliyun' || mode === 'oss') return 'aliyun-watcher.js';
+  return 'drive-watcher.js';
+}
+
+function hasHealthyExistingServiceStack(mode) {
+  if (process.platform === 'win32') {
+    return false;
+  }
+
+  const expectedWatcher = getExpectedWatcherScript(mode);
+  let hasServer = false;
+  let hasWatcher = false;
+
+  try {
+    const output = execSync('ps -axo pid=,command=', { encoding: 'utf8', timeout: 3000 });
+    const lines = output.split('\n').map(line => line.trim()).filter(Boolean);
+
+    for (const line of lines) {
+      const match = line.match(/^(\d+)\s+(.+)$/);
+      if (!match) continue;
+      const pid = Number(match[1]);
+      const command = match[2];
+      if (!Number.isFinite(pid) || pid === process.pid) continue;
+
+      if (isRepoScriptProcess(pid, 'server.js', command)) {
+        hasServer = true;
+      }
+      if (isRepoScriptProcess(pid, expectedWatcher, command)) {
+        hasWatcher = true;
+      }
+
+      if (hasServer && hasWatcher) {
+        return true;
+      }
+    }
+  } catch (_) {}
+
+  return false;
+}
+
 // 写入配置文件
 function writeSyncMode(mode) {
   try {
@@ -228,6 +414,17 @@ function writeSyncMode(mode) {
 // 初始化配置文件
 SYNC_MODE = readSyncMode();
 writeSyncMode(SYNC_MODE);
+
+// 如果同目录服务已经健康运行，则直接退出，避免二次启动打断现有连接。
+acquireStartLockOrExit();
+if (hasHealthyExistingServiceStack(SYNC_MODE)) {
+  console.log('🛑 检测到当前安装目录的服务已在运行，跳过重复启动');
+  releaseStartLock();
+  process.exit(0);
+}
+cleanupLocalRepoProcesses();
+cleanupPort();
+cleanupWatcherProcesses();
 
 console.clear();
 console.log('╔════════════════════════════════════════════╗');
@@ -301,6 +498,7 @@ function shutdown(reason = 'SIGINT') {
     });
   } catch (_) {}
   cleanupSyncModeFile();
+  releaseStartLock();
   process.exit(0);
 }
 

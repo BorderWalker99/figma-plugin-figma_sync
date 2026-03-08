@@ -13,6 +13,7 @@ const _execAsync = promisify(exec);
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const crypto = require('crypto');
 
 // 追踪所有活跃子进程，插件关闭时统一 kill
 const activeChildProcesses = new Set();
@@ -548,6 +549,93 @@ const MAX_KNOWN_FILES = 10000; // 限制已知文件数量，防止内存无限�
 const DEEP_CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000; // 每 6 小时做一次深度清理
 const STALE_TEMP_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 临时文件保留 24 小时
 const MANUAL_SYNC_CANCELLED_CODE = 'MANUAL_SYNC_CANCELLED';
+const WATCHER_LOCK_DIR = path.join(os.tmpdir(), 'screensync-locks');
+const WATCHER_LOCK_FILE = path.join(
+  WATCHER_LOCK_DIR,
+  `drive-watcher-${crypto.createHash('md5').update(__dirname).digest('hex')}.lock`
+);
+let watcherLockAcquired = false;
+
+function getProcessCommand(pid) {
+  try {
+    return require('child_process').execSync(`ps -p ${pid} -o command=`, { encoding: 'utf8', timeout: 3000 }).trim();
+  } catch (_) {
+    return '';
+  }
+}
+
+function getProcessCwd(pid) {
+  try {
+    const output = require('child_process').execSync(`lsof -a -p ${pid} -d cwd -Fn`, { encoding: 'utf8', timeout: 3000 });
+    const line = output.split('\n').find(entry => entry.startsWith('n'));
+    return line ? line.slice(1).trim() : '';
+  } catch (_) {
+    return '';
+  }
+}
+
+function isRepoScriptProcess(pid, scriptName, command) {
+  const cmd = command || getProcessCommand(pid);
+  if (!cmd) return false;
+  if (cmd.includes(path.join(__dirname, scriptName))) return true;
+  if (!new RegExp(`(^|\\s|/)${scriptName}(\\s|$)`).test(cmd)) return false;
+  return getProcessCwd(pid) === __dirname;
+}
+
+function isMatchingProcessAlive(pid, scriptName) {
+  if (!pid || !Number.isFinite(pid) || pid <= 0 || pid === process.pid) return false;
+  try {
+    process.kill(pid, 0);
+  } catch (_) {
+    return false;
+  }
+  return isRepoScriptProcess(pid, scriptName);
+}
+
+function releaseWatcherLock() {
+  if (!watcherLockAcquired) return;
+  try {
+    const raw = fs.readFileSync(WATCHER_LOCK_FILE, 'utf8');
+    const lockInfo = JSON.parse(raw);
+    if (lockInfo && lockInfo.pid === process.pid) {
+      fs.rmSync(WATCHER_LOCK_FILE, { force: true });
+    }
+  } catch (_) {}
+  watcherLockAcquired = false;
+}
+
+function acquireWatcherLockOrExit() {
+  try {
+    fs.mkdirSync(WATCHER_LOCK_DIR, { recursive: true });
+  } catch (_) {}
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const fd = fs.openSync(WATCHER_LOCK_FILE, 'wx');
+      fs.writeFileSync(fd, JSON.stringify({
+        pid: process.pid,
+        script: path.join(__dirname, 'drive-watcher.js'),
+        createdAt: Date.now()
+      }));
+      fs.closeSync(fd);
+      watcherLockAcquired = true;
+      process.on('exit', releaseWatcherLock);
+      return true;
+    } catch (error) {
+      if (!error || error.code !== 'EEXIST') break;
+      try {
+        const raw = fs.readFileSync(WATCHER_LOCK_FILE, 'utf8');
+        const lockInfo = JSON.parse(raw);
+        if (isMatchingProcessAlive(Number(lockInfo && lockInfo.pid), 'drive-watcher.js')) {
+          console.log(`🛑 [Drive] 检测到同目录已有 watcher 在运行 (PID: ${lockInfo.pid})，当前实例退出`);
+          process.exit(0);
+        }
+      } catch (_) {}
+      try { fs.rmSync(WATCHER_LOCK_FILE, { force: true }); } catch (_) {}
+    }
+  }
+  return true;
+}
 
 function createManualSyncCancelledError() {
   const error = new Error('手动同步已取消');
@@ -2451,6 +2539,7 @@ function cleanupCache() {
 }
 
 async function start() {
+  acquireWatcherLockOrExit();
   console.log('╔════════════════════════════════════════╗');
   console.log('║  Google Drive 截图同步 - Mac 监听器   ║');
   console.log('╚════════════════════════════════════════╝\n');
@@ -2508,6 +2597,7 @@ async function start() {
     clearInterval(_cacheCleanupTimer);
     releaseRuntimeResources({ preserveKnown: false });
     if (ws) ws.close();
+    releaseWatcherLock();
     process.exit(0);
   };
   process.on('SIGINT', () => shutdown('SIGINT'));

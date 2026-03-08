@@ -621,15 +621,14 @@ function isUsableNpmBinary(npmPath) {
 
 function resolveNpmBinary() {
   const candidates = [];
-  const found = findExecutable('npm');
-  if (found) candidates.push(found);
-
   candidates.push(
     path.join(os.homedir(), '.screensync', 'bin', 'npm'),
     path.join(os.homedir(), '.screensync', 'deps', 'node', 'bin', 'npm'),
     '/usr/local/bin/npm',
     '/opt/homebrew/bin/npm'
   );
+  const found = findExecutable('npm');
+  if (found) candidates.push(found);
 
   const seen = new Set();
   for (const candidate of candidates) {
@@ -650,6 +649,19 @@ async function checkSharpRuntimeHealth(nodePath, installPath) {
   } catch (_) {
     return false;
   }
+}
+
+function stripPackagedSharpArtifacts(installPath) {
+  if (!installPath) return;
+  try {
+    fs.rmSync(path.join(installPath, 'node_modules', 'sharp'), { recursive: true, force: true });
+    fs.rmSync(path.join(installPath, 'node_modules', 'detect-libc'), { recursive: true, force: true });
+    fs.rmSync(path.join(installPath, 'node_modules', 'semver'), { recursive: true, force: true });
+    fs.rmSync(path.join(installPath, 'node_modules', '@img'), { recursive: true, force: true });
+    fs.rmSync(path.join(installPath, 'runtime', 'sharp-vendor'), { recursive: true, force: true });
+    fs.rmSync(path.join(installPath, 'runtime', 'apple', 'sharp-vendor'), { recursive: true, force: true });
+    fs.rmSync(path.join(installPath, 'runtime', 'intel', 'sharp-vendor'), { recursive: true, force: true });
+  } catch (_) {}
 }
 
 function getRequiredDependenciesExcludingSharp(installPath) {
@@ -683,44 +695,44 @@ async function ensureSharpRuntimeForCurrentArch({ installPath, npmPath, nodePath
     return true;
   }
   log(`⚠️ 检测到 sharp 缺失或与当前系统不兼容，正在安装（darwin-${cpu}）...\n`);
-  try {
-    fs.rmSync(path.join(installPath, 'node_modules', 'sharp'), { recursive: true, force: true });
-    fs.rmSync(path.join(installPath, 'node_modules', 'detect-libc'), { recursive: true, force: true });
-    fs.rmSync(path.join(installPath, 'node_modules', 'semver'), { recursive: true, force: true });
-    fs.rmSync(path.join(installPath, 'node_modules', '@img'), { recursive: true, force: true });
-  } catch (_) {}
+  stripPackagedSharpArtifacts(installPath);
 
-  try {
-    await execPromise(
-      `"${npmPath}" --prefix "${installPath}" install --no-save --include=optional --legacy-peer-deps sharp --registry=https://registry.npmmirror.com`,
-      {
-        timeout: 8 * 60 * 1000,
-        env: {
-          ...process.env,
-          npm_config_os: 'darwin',
-          npm_config_cpu: cpu,
-          npm_config_loglevel: 'warn',
-          npm_config_strict_ssl: 'false'
-        }
-      }
-    );
-  } catch (_) {
+  const installEnv = {
+    ...process.env,
+    npm_config_os: 'darwin',
+    npm_config_cpu: cpu,
+    npm_config_loglevel: 'warn',
+    npm_config_strict_ssl: 'false'
+  };
+  const registries = [
+    'https://registry.npmmirror.com',
+    'https://registry.npmjs.org'
+  ];
+
+  let installSucceeded = false;
+  for (const registry of registries) {
+    try {
+      log(`   ↪️ 尝试通过 ${registry} 安装 sharp...\n`);
+      await execPromise(
+        `"${npmPath}" --prefix "${installPath}" install --no-save --no-audit --no-fund --include=optional --legacy-peer-deps sharp --registry=${registry}`,
+        { timeout: 8 * 60 * 1000, env: installEnv }
+      );
+      installSucceeded = true;
+      break;
+    } catch (error) {
+      log(`   ⚠️ 通过 ${registry} 安装 sharp 失败：${error.message}\n`);
+    }
+  }
+
+  if (!installSucceeded) {
     try {
       log('   ↪️ sharp 安装失败，尝试 rebuild...\n');
       await execPromise(
         `"${npmPath}" --prefix "${installPath}" rebuild sharp --include=optional`,
-        {
-          timeout: 5 * 60 * 1000,
-          env: {
-            ...process.env,
-            npm_config_os: 'darwin',
-            npm_config_cpu: cpu,
-            npm_config_loglevel: 'warn',
-            npm_config_strict_ssl: 'false'
-          }
-        }
+        { timeout: 5 * 60 * 1000, env: installEnv }
       );
-    } catch (__ ) {
+    } catch (error) {
+      log(`   ❌ sharp rebuild 失败：${error.message}\n`);
       return false;
     }
   }
@@ -2017,6 +2029,10 @@ ipcMain.handle('install-dependencies', async (event, installPath) => {
     const nodeModulesPath = path.join(installPath, 'node_modules');
     const lockFilePath = path.join(installPath, 'package-lock.json');
     const nodeBinForHealth = resolveNodeBinary(installPath);
+    if (nodeBinForHealth) {
+      try { ensureNpmShimFromNode(nodeBinForHealth); } catch (_) {}
+    }
+    stripPackagedSharpArtifacts(installPath);
 
     const fatRuntimeStatus = detectBundledRuntimeFolderStatus(installPath);
     if (fatRuntimeStatus && fatRuntimeStatus.complete && fs.existsSync(nodeModulesPath)) {
@@ -2168,7 +2184,7 @@ ipcMain.handle('install-dependencies', async (event, installPath) => {
     // exec 直接在 shell 中执行字符串，兼容性更好
     // 使用 --prefix 来规避 cwd 在只读卷下的问题
     // 添加 --omit=dev 以跳过开发依赖，加快安装速度
-    const commandStr = `"${npmPath}" install --legacy-peer-deps --omit=dev --registry=https://registry.npmmirror.com --prefix "${installPath}"`;
+    const commandStr = `("${npmPath}" install --legacy-peer-deps --omit=dev --no-audit --no-fund --registry=https://registry.npmmirror.com --prefix "${installPath}" || "${npmPath}" install --legacy-peer-deps --omit=dev --no-audit --no-fund --registry=https://registry.npmjs.org --prefix "${installPath}")`;
     console.log(`[DEBUG] Executing command: ${commandStr}`);
 
     // 重要：将 cwd 设置为 /tmp，避免 ENOTDIR

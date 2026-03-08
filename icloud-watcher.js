@@ -1,6 +1,7 @@
 // icloud-watcher.js - iCloud 模式监听器（带文件分类功能）
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const WebSocket = require('ws');
 const chokidar = require('chokidar');
 const sharp = require('sharp');
@@ -19,6 +20,93 @@ const os = require('os');
 const activeChildProcesses = new Set();
 
 let _abortAllConversions = false; // set true to reject any new execAsync immediately
+const WATCHER_LOCK_DIR = path.join(os.tmpdir(), 'screensync-locks');
+const WATCHER_LOCK_FILE = path.join(
+  WATCHER_LOCK_DIR,
+  `icloud-watcher-${crypto.createHash('md5').update(__dirname).digest('hex')}.lock`
+);
+let watcherLockAcquired = false;
+
+function getProcessCommand(pid) {
+  try {
+    return require('child_process').execSync(`ps -p ${pid} -o command=`, { encoding: 'utf8', timeout: 3000 }).trim();
+  } catch (_) {
+    return '';
+  }
+}
+
+function getProcessCwd(pid) {
+  try {
+    const output = require('child_process').execSync(`lsof -a -p ${pid} -d cwd -Fn`, { encoding: 'utf8', timeout: 3000 });
+    const line = output.split('\n').find(entry => entry.startsWith('n'));
+    return line ? line.slice(1).trim() : '';
+  } catch (_) {
+    return '';
+  }
+}
+
+function isRepoScriptProcess(pid, scriptName, command) {
+  const cmd = command || getProcessCommand(pid);
+  if (!cmd) return false;
+  if (cmd.includes(path.join(__dirname, scriptName))) return true;
+  if (!new RegExp(`(^|\\s|/)${scriptName}(\\s|$)`).test(cmd)) return false;
+  return getProcessCwd(pid) === __dirname;
+}
+
+function isMatchingProcessAlive(pid, scriptName) {
+  if (!pid || !Number.isFinite(pid) || pid <= 0 || pid === process.pid) return false;
+  try {
+    process.kill(pid, 0);
+  } catch (_) {
+    return false;
+  }
+  return isRepoScriptProcess(pid, scriptName);
+}
+
+function releaseWatcherLock() {
+  if (!watcherLockAcquired) return;
+  try {
+    const raw = fs.readFileSync(WATCHER_LOCK_FILE, 'utf8');
+    const lockInfo = JSON.parse(raw);
+    if (lockInfo && lockInfo.pid === process.pid) {
+      fs.rmSync(WATCHER_LOCK_FILE, { force: true });
+    }
+  } catch (_) {}
+  watcherLockAcquired = false;
+}
+
+function acquireWatcherLockOrExit() {
+  try {
+    fs.mkdirSync(WATCHER_LOCK_DIR, { recursive: true });
+  } catch (_) {}
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const fd = fs.openSync(WATCHER_LOCK_FILE, 'wx');
+      fs.writeFileSync(fd, JSON.stringify({
+        pid: process.pid,
+        script: path.join(__dirname, 'icloud-watcher.js'),
+        createdAt: Date.now()
+      }));
+      fs.closeSync(fd);
+      watcherLockAcquired = true;
+      process.on('exit', releaseWatcherLock);
+      return true;
+    } catch (error) {
+      if (!error || error.code !== 'EEXIST') break;
+      try {
+        const raw = fs.readFileSync(WATCHER_LOCK_FILE, 'utf8');
+        const lockInfo = JSON.parse(raw);
+        if (isMatchingProcessAlive(Number(lockInfo && lockInfo.pid), 'icloud-watcher.js')) {
+          console.log(`🛑 检测到同目录已有 iCloud watcher 在运行 (PID: ${lockInfo.pid})，当前实例退出`);
+          process.exit(0);
+        }
+      } catch (_) {}
+      try { fs.rmSync(WATCHER_LOCK_FILE, { force: true }); } catch (_) {}
+    }
+  }
+  return true;
+}
 
 function execAsync(cmd, opts) {
   return new Promise((resolve, reject) => {
@@ -2295,6 +2383,7 @@ process.on('unhandledRejection', (reason, promise) => {
 
 // ============= 启动 =============
 function start() {
+  acquireWatcherLockOrExit();
   console.clear();
   console.log('╔════════════════════════════════════════╗');
   console.log('║  iPhone截图同步 - Mac端监听器 (iCloud) ║');
@@ -2317,6 +2406,7 @@ function start() {
     clearInterval(cacheCleanupInterval);
     releaseRuntimeResources({ preserveProcessedCache: false });
     if (ws) ws.close();
+    releaseWatcherLock();
     process.exit(0);
   };
   process.on('SIGINT', () => shutdown('SIGINT'));

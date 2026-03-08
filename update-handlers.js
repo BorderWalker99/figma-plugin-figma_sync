@@ -18,8 +18,7 @@ const execPromise = util.promisify(exec);
  */
 module.exports = function createUpdateHandlers({ sendToFigma, WebSocket }) {
 
-// Shared helper: fetch the latest GitHub release for a given repo path (e.g. 'owner/repo')
-function fetchLatestRelease(repoPath) {
+function fetchGitHubJson(apiPath) {
   return new Promise((resolve, reject) => {
     const apiAgent = new https.Agent({ keepAlive: true, timeout: 15000 });
     const options = {
@@ -32,26 +31,52 @@ function fetchLatestRelease(repoPath) {
       timeout: 15000
     };
 
-    const req = https.get(`https://api.github.com/repos/${repoPath}/releases/latest`, options, (res) => {
+    const req = https.get(`https://api.github.com${apiPath}`, options, (res) => {
       let data = '';
       res.on('data', (chunk) => { data += chunk; });
       res.on('end', () => {
         if (res.statusCode === 200) {
           try {
-            resolve(JSON.parse(data));
+            resolve({ ok: true, statusCode: res.statusCode, data: JSON.parse(data) });
           } catch (e) {
             reject(new Error('解析 GitHub API 响应失败'));
           }
         } else if (res.statusCode === 403 && res.headers['x-ratelimit-remaining'] === '0') {
           reject(new Error('GitHub API 请求频率限制，请稍后重试'));
         } else {
-          reject(new Error(`GitHub API 返回错误: ${res.statusCode}`));
+          resolve({ ok: false, statusCode: res.statusCode, data: null });
         }
       });
     });
     req.on('error', reject);
     req.on('timeout', () => { req.destroy(); reject(new Error('GitHub API 请求超时')); });
   });
+}
+
+// Shared helper: fetch latest release; if repo has no published release,
+// fall back to latest tag and suppress noisy 404s.
+async function fetchLatestRelease(repoPath) {
+  const latestRelease = await fetchGitHubJson(`/repos/${repoPath}/releases/latest`);
+  if (latestRelease.ok && latestRelease.data) {
+    return { ...latestRelease.data, source: 'release' };
+  }
+
+  if (latestRelease.statusCode === 404) {
+    const tags = await fetchGitHubJson(`/repos/${repoPath}/tags?per_page=1`);
+    if (tags.ok && Array.isArray(tags.data) && tags.data.length > 0) {
+      const latestTag = tags.data[0];
+      return {
+        tag_name: latestTag.name,
+        assets: [],
+        body: '',
+        html_url: `https://github.com/${repoPath}/tags`,
+        source: 'tag'
+      };
+    }
+    throw new Error('仓库尚未发布 Release 或 Tag');
+  }
+
+  throw new Error(`GitHub API 返回错误: ${latestRelease.statusCode}`);
 }
 
 // 检查并通知更新（统一更新，不区分插件/服务器）
@@ -101,7 +126,11 @@ async function checkAndNotifyUpdates(targetGroup, connectionId) {
     }
     
   } catch (error) {
-    console.error('   ⚠️  检查更新失败:', error.message);
+    if (/尚未发布 Release 或 Tag/.test(error.message)) {
+      console.log('   ℹ️  当前仓库尚未发布可用更新，已跳过更新提示');
+    } else {
+      console.error('   ⚠️  检查更新失败:', error.message);
+    }
   }
 }
 
