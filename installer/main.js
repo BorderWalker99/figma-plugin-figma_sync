@@ -1077,7 +1077,9 @@ function execPromise(cmd, options = {}) {
 // ============================================================
 const LEGACY_DEPS_DIR = path.join(os.homedir(), '.screensync', 'deps');
 const LEGACY_BIN_DIR = path.join(os.homedir(), '.screensync', 'bin');
-const LEGACY_NODE_VERSION = '22.13.1';
+// 使用与 sharp 官方预编译二进制高度兼容的 LTS Node 版本
+// 避免 Node 主版本过新导致 sharp 只能源码编译或运行时 ABI 不兼容
+const LEGACY_NODE_VERSION = '20.11.1';
 
 function ensureLegacyBinInShellProfiles(sendLog) {
   const profilePaths = [
