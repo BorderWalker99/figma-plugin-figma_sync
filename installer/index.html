@@ -666,6 +666,29 @@
       height: 16px;
     }
 
+    .completion-badge {
+      width: 88px;
+      height: 88px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 4px 16px var(--accent-soft);
+      background: var(--accent);
+      color: white;
+      transition: background 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .completion-badge.success {
+      background: var(--unified-green);
+      box-shadow: 0 4px 16px var(--unified-green-glow);
+    }
+
+    .completion-badge.error {
+      background: var(--danger);
+      box-shadow: 0 4px 16px rgba(255, 59, 48, 0.28);
+    }
+
     .completion-icon svg {
       width: 40px !important;
       height: 40px !important;
@@ -1110,14 +1133,14 @@
 
     <!-- Step 5: Complete -->
     <div class="step" id="step5">
-      <div style="width: 88px; height: 88px; background: var(--unified-green); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 16px var(--unified-green-glow);">
-        <div class="completion-icon">
-          <svg viewBox="0 0 24 24" fill="none">
-            <path d="M20 6L9 17L4 12"/>
+      <div class="completion-badge" id="step5IconBadge">
+        <div class="completion-icon" id="step5Icon">
+          <svg class="spinner" viewBox="0 0 24 24" fill="none">
+            <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
           </svg>
         </div>
       </div>
-      <h2 class="step-title" style="margin: 0;" data-i18n="step5_title">安装完成</h2>
+      <h2 class="step-title" style="margin: 0;" id="step5Title" data-i18n="step5_starting_title">正在启动服务器</h2>
       <div class="button-group" style="justify-content: center; margin-top: 0;">
         <button class="btn btn-primary" id="step5Finish" onclick="finishInstallation()" style="min-width: 120px;">
           <span data-i18n="btn_done">我知道了</span>
@@ -1135,7 +1158,7 @@
       <div class="dot" data-step="5"></div>
     </div>
     <div style="color: var(--text-tertiary); font-size: 12px;">
-      v1.0.1
+      v1.0.2
     </div>
   </div>
 

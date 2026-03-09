@@ -23,6 +23,7 @@ const i18n = {
     step4_title: '系统配置',
     step4_desc: '应用配置并设置本地环境',
     step5_title: '安装完成',
+    step5_starting_title: '正在启动服务器',
     installing: '正在安装...',
     configuring: '配置中...',
     setting_permissions: '正在设置权限和文件夹...',
@@ -74,6 +75,7 @@ const i18n = {
     step4_title: 'System Configuration',
     step4_desc: 'Apply settings and configure local environment',
     step5_title: 'Installation Complete',
+    step5_starting_title: 'Starting Server',
     installing: 'Installing...',
     configuring: 'Configuring...',
     setting_permissions: 'Setting permissions and folders...',
@@ -122,6 +124,46 @@ function applyLanguage() {
     const text = t(key);
     if (text) el.textContent = text;
   });
+}
+
+function setStep5VisualState(state) {
+  const titleEl = document.getElementById('step5Title');
+  const badgeEl = document.getElementById('step5IconBadge');
+  const iconEl = document.getElementById('step5Icon');
+  if (!titleEl || !badgeEl || !iconEl) return;
+
+  let titleKey = 'step5_starting_title';
+  let badgeClass = '';
+  let iconSvg = `
+    <svg class="spinner" viewBox="0 0 24 24" fill="none">
+      <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+    </svg>
+  `;
+
+  if (state === 'success') {
+    titleKey = 'step5_title';
+    badgeClass = 'success';
+    iconSvg = `
+      <svg viewBox="0 0 24 24" fill="none">
+        <path d="M20 6L9 17L4 12"/>
+      </svg>
+    `;
+  } else if (state === 'error') {
+    titleKey = 'install_failed';
+    badgeClass = 'error';
+    iconSvg = `
+      <svg viewBox="0 0 24 24" fill="none">
+        <circle cx="12" cy="12" r="9" fill="none" stroke="white"/>
+        <path d="M12 7.5v6"/>
+        <path d="M12 16.5v.5"/>
+      </svg>
+    `;
+  }
+
+  titleEl.setAttribute('data-i18n', titleKey);
+  titleEl.textContent = t(titleKey);
+  badgeEl.className = `completion-badge ${badgeClass}`.trim();
+  iconEl.innerHTML = iconSvg.trim();
 }
 
 window.selectLanguage = function(lang) {
@@ -187,6 +229,8 @@ function showStep(step) {
     installDependencies();
   } else if (step === 4) {
     setupConfiguration();
+  } else if (step === 5) {
+    setStep5VisualState('loading');
   }
 }
 
@@ -716,6 +760,7 @@ window.finishInstallation = async function() {
   
   try {
     // 安装最后一步：完成剩余配置，并以自启动拉起服务器作为最终验收。
+    setStep5VisualState('loading');
     button.classList.add('keep-raised'); // 保持凸起样式
     button.disabled = true;
     button.textContent = t('configuring');
@@ -741,6 +786,7 @@ window.finishInstallation = async function() {
     
     if (autostartResult.success) {
       // 配置成功
+      setStep5VisualState('success');
       button.textContent = t('config_done');
       showToast(t('autostart_done'), 'success');
       
@@ -751,6 +797,7 @@ window.finishInstallation = async function() {
     } else {
       // 自启动失败即视为安装失败，不再回退成“直接启动成功”。
       console.warn('自启动配置失败:', autostartResult.error);
+      setStep5VisualState('error');
       button.classList.remove('keep-raised');
       button.disabled = false;
       button.textContent = originalText;
@@ -759,11 +806,13 @@ window.finishInstallation = async function() {
     }
   } catch (err) {
     // 出错，恢复按钮状态
+    setStep5VisualState('error');
     button.classList.remove('keep-raised');
     button.disabled = false;
     button.textContent = originalText;
-    showToast(t('config_failed'), 'error');
+    showToast(t('install_failed'), 'error');
     console.error('配置自启动失败:', err);
+    showErrorDetailModal(err && err.message ? err.message : String(err), t('install_failed'));
   }
 }
 

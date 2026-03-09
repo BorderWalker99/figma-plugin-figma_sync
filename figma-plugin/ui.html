@@ -5451,9 +5451,13 @@
           {
             const sub = document.getElementById('manualSyncSubtitle');
             if (sub) {
-              const total = data.totalFiles || (data.imageCount || 0) + (data.gifCount || 0);
-              const done = data.count || total;
-              sub.textContent = currentLang === 'zh' ? `${done}/${total} 完成` : `${done}/${total} done`;
+              const normalizedTotal = Number(
+                data.totalFiles ?? data.total ?? ((data.imageCount || 0) + (data.gifCount || 0))
+              );
+              const done = Number(data.count ?? normalizedTotal);
+              sub.textContent = currentLang === 'zh'
+                ? `${done}/${normalizedTotal} 完成`
+                : `${done}/${normalizedTotal} done`;
             }
             setTimeout(() => hideManualSyncProgress(), 800);
           }
@@ -5521,7 +5525,12 @@
           
           // 检查是否有真正的错误消息（如用户文件夹未初始化、网络错误等）
           // 注意：如果 total === 0 且没有 message，说明是文件夹为空，这是正常情况，不是错误
-          if (data.message && data.total === 0 && data.count === 0) {
+          const normalizedTotal = Number(
+            data.totalFiles ?? data.total ?? ((data.imageCount || 0) + (data.gifCount || 0))
+          );
+          const normalizedCount = Number(data.count || 0);
+
+          if (data.message && normalizedTotal === 0 && normalizedCount === 0) {
             log(`❌ ${data.message}`);
             // 根据不同的错误消息给出友好提示
             if (data.message.includes('未初始化') || data.message.includes('未连接')) {
@@ -5540,13 +5549,13 @@
           }
           
           // 优化后的逻辑：支持显示部分失败和具体错误详情
-          if (data.total === 0) {
+          if (normalizedTotal === 0) {
             // 没有文件，但不是错误（message 为空）
             log('✅ 同步完成：0 张截图（文件夹为空）');
             updateStatus('connected', t('status_sync_done'));
-          } else if (data.count === data.total) {
+          } else if (normalizedCount === normalizedTotal) {
             // 全部成功
-            log(`✅ 同步完成：全部 ${data.count} 张截图`);
+            log(`✅ 同步完成：全部 ${normalizedCount} 张截图`);
             if (gifBackupCount > 0) {
               updateStatus('connected', '');
             } else {
@@ -5554,11 +5563,11 @@
             }
           } else {
             // 部分或全部失败
-            const failed = data.total - data.count;
-            if (data.count > 0) {
-               log(`⚠️  同步完成，但有 ${failed} 张失败 (成功 ${data.count}/${data.total})`);
+            const failed = normalizedTotal - normalizedCount;
+            if (normalizedCount > 0) {
+               log(`⚠️  同步完成，但有 ${failed} 张失败 (成功 ${normalizedCount}/${normalizedTotal})`);
             } else {
-               log(`⚠️  同步失败，${data.total} 张全部处理失败`);
+               log(`⚠️  同步失败，${normalizedTotal} 张全部处理失败`);
             }
             
             // 显示详细错误信息
