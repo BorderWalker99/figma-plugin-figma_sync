@@ -715,26 +715,12 @@ window.finishInstallation = async function() {
   const originalText = button.textContent;
   
   try {
-    // 显示启动中状态
+    // 安装最后一步：完成剩余配置，并以自启动拉起服务器作为最终验收。
     button.classList.add('keep-raised'); // 保持凸起样式
     button.disabled = true;
-    button.textContent = t('starting_server');
+    button.textContent = t('configuring');
     
-    // 步骤 1：先手动启动服务器（确保依赖已安装且服务正常）
-    const startResult = await ipcRenderer.invoke('start-server', installPath);
-    
-    if (!startResult.success) {
-      // 启动失败
-      button.classList.remove('keep-raised');
-      button.disabled = false;
-      button.textContent = originalText;
-      showToast(t('server_start_failed'), 'error');
-      console.error('服务器启动失败:', startResult.error);
-      showErrorDetailModal(startResult.error || '', t('server_start_failed'));
-      return; // 提前返回，不配置自启动
-    }
-    
-    // 步骤 2：如果是 iCloud 模式，配置文件夹为"始终保留下载"
+    // 步骤 1：如果是 iCloud 模式，配置文件夹为"始终保留下载"
     if (selectedMode === 'icloud') {
       button.textContent = t('configuring_icloud');
       console.log('📁 检测到 iCloud 模式，配置文件夹为"始终保留下载"...');
@@ -749,7 +735,7 @@ window.finishInstallation = async function() {
       }
     }
     
-    // 步骤 3：服务器启动成功后，配置自启动
+    // 步骤 2：安装最后一步，配置自启动并验证服务器由 launchd 拉起成功
     button.textContent = t('configuring_autostart');
     const autostartResult = await ipcRenderer.invoke('setup-autostart', installPath);
     
@@ -763,30 +749,13 @@ window.finishInstallation = async function() {
         ipcRenderer.invoke('quit-app');
       }, 1500);
     } else {
-      // 配置自启动失败，但服务器已启动
+      // 自启动失败即视为安装失败，不再回退成“直接启动成功”。
       console.warn('自启动配置失败:', autostartResult.error);
-      button.textContent = t('starting_server');
-
-      // setup-autostart 过程中会接管并重启 8888 进程。
-      // 如果自启动配置失败，补一次手动拉起，避免用户安装完成后插件仍显示“服务器未连接”。
-      const recoveryResult = await ipcRenderer.invoke('start-server', installPath);
-      if (recoveryResult.success) {
-        button.textContent = t('server_started');
-        showToast(t('autostart_failed'), 'warning');
-        setTimeout(() => {
-          ipcRenderer.invoke('quit-app');
-        }, 2500);
-      } else {
-        button.classList.remove('keep-raised');
-        button.disabled = false;
-        button.textContent = originalText;
-        showToast(t('config_failed'), 'error');
-        const detail = [
-          autostartResult.error || '',
-          recoveryResult.error ? `\n手动恢复启动失败:\n${recoveryResult.error}` : ''
-        ].filter(Boolean).join('\n');
-        showErrorDetailModal(detail, t('autostart_failed'));
-      }
+      button.classList.remove('keep-raised');
+      button.disabled = false;
+      button.textContent = originalText;
+      showToast(t('install_failed'), 'error');
+      showErrorDetailModal(autostartResult.error || '', t('autostart_failed'));
     }
   } catch (err) {
     // 出错，恢复按钮状态

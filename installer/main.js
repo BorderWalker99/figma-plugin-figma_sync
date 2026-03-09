@@ -2407,13 +2407,18 @@ ipcMain.handle('setup-autostart', async (event, installPath) => {
       }
       console.log('🚀 配置自启动，使用 Node 路径:', nodePath);
 
-      // 复用更健壮的 setup-autostart.js（含 load/bootstrap 双路径、端口验证、直接启动兜底）
+      // 安装器最后一步需要严格校验自启动是否真的可用，不把直接启动兜底视为成功。
       const scriptPath = path.join(installPath, 'setup-autostart.js');
       if (!fs.existsSync(scriptPath)) {
         throw new Error(`未找到 setup-autostart.js: ${scriptPath}`);
       }
 
-      exec(`"${nodePath}" "${scriptPath}" "${installPath}"`, (error, stdout, stderr) => {
+      exec(`"${nodePath}" "${scriptPath}" "${installPath}"`, {
+        env: {
+          ...process.env,
+          SCREENSYNC_INSTALLER_STRICT_AUTOSTART: '1'
+        }
+      }, (error, stdout, stderr) => {
         let parsed = null;
         try {
           const line = (stdout || '').trim().split('\n').filter(Boolean).pop();

@@ -213,6 +213,7 @@ function cleanOldLaunchAgents() {
 
 function main() {
   const installPath = process.argv[2];
+  const strictInstallerMode = process.env.SCREENSYNC_INSTALLER_STRICT_AUTOSTART === '1';
   if (!installPath || !fs.existsSync(installPath)) {
     output({ success: false, error: `无效安装路径: ${installPath || '(empty)'}` });
     process.exit(1);
@@ -298,9 +299,7 @@ function main() {
     process.exit(1);
   }
 
-  // ── Phase 2: If server is already running (from installer's start-server), done ──
-  // The installer starts the server BEFORE calling setup-autostart.
-  // Don't kill it — just let it keep running. LaunchAgent will take over on next reboot.
+  // ── Phase 2: If server is already running, keep it and only verify autostart config ──
   if (portReady()) {
     output({ success: true, message: '服务器已启动并配置为开机自动启动' });
     process.exit(0);
@@ -333,7 +332,13 @@ function main() {
     process.exit(0);
   }
 
-  // ── Phase 4: LaunchAgent failed. Direct spawn fallback ──
+  // ── Phase 4: LaunchAgent failed to bring up the server ────────────────────
+  if (strictInstallerMode) {
+    output({ success: false, error: '自启动配置已写入，但 LaunchAgent 未能成功启动服务器并监听 8888 端口' });
+    process.exit(1);
+  }
+
+  // 非安装器严格模式下，仍保留直接启动兜底，兼容更新/修复流程。
   killAllScreenSyncProcesses(installPath);
   sleepSec(1);
 

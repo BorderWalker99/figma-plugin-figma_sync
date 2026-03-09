@@ -1687,40 +1687,18 @@ if [ -f "$SCRIPT_DIR/start.js" ]; then
 elif [ -f "$SCRIPT_DIR/server.js" ]; then
   START_ENTRY="server.js"
 else
-  echo -e "${RED}❌ 更新后未找到启动文件（start.js/server.js）${NC}"
+  echo -e "${RED}❌ 安装失败：更新后未找到启动文件（start.js/server.js）${NC}"
   exit 1
 fi
 
-# ─── 14. 显示更新结果 ────────────────────────────────────────────────────────
-echo ""
-echo -e "${BLUE}═══════════════════════════════════════════════════════${NC}"
-
-NEW_VERSION="未知"
-if [ -f "$SCRIPT_DIR/VERSION.txt" ]; then
-  NEW_VERSION=$(cat "$SCRIPT_DIR/VERSION.txt" | tr -d '[:space:]')
-fi
-
-echo -e "${GREEN}✅ 更新完成！${NC}"
-echo ""
-echo -e "   旧版本: ${RED}${OLD_VERSION}${NC}"
-echo -e "   新版本: ${GREEN}${NEW_VERSION}${NC}"
-if [ "$RENAMED" = true ]; then
-  echo -e "   安装包: ${GREEN}已重命名为 ${NEW_PACKAGE_NAME}${NC}"
-fi
-echo -e "   项目路径: ${GREEN}${SCRIPT_DIR}${NC}"
-echo -e "   备份位置: ${BACKUP_DIR}"
-echo ""
-echo -e "${BLUE}═══════════════════════════════════════════════════════${NC}"
-echo ""
-
-# ─── 15. 重启服务器 ──────────────────────────────────────────────────────────
+# ─── 14. 启动并验证服务器（安装最后一步） ───────────────────────────────────────
 echo -e "${YELLOW}🔄 正在启动服务器...${NC}"
 
 if [ -z "${NODE_BIN:-}" ]; then
   NODE_BIN="$(resolve_node_bin || true)"
 fi
 if [ -z "${NODE_BIN:-}" ]; then
-  echo -e "${RED}❌ 未找到可用 Node.js，无法启动服务器${NC}"
+  echo -e "${RED}❌ 安装失败：未找到可用 Node.js，无法启动服务器${NC}"
   exit 1
 fi
 
@@ -1741,7 +1719,7 @@ if [ -f "$PLIST_PATH" ]; then
       if kill -0 "$SERVER_PID" 2>/dev/null; then
         echo -e "${GREEN}✅ 服务器已启动 (PID: $SERVER_PID, 入口: $START_ENTRY)${NC}"
       else
-        echo -e "${RED}❌ 服务器启动失败，请检查日志或手动运行: node $START_ENTRY${NC}"
+        echo -e "${RED}❌ 安装失败：自启动服务器失败，请检查日志或手动运行: node $START_ENTRY${NC}"
         print_startup_logs
         exit 1
       fi
@@ -1755,7 +1733,7 @@ if [ -f "$PLIST_PATH" ]; then
     if kill -0 "$SERVER_PID" 2>/dev/null; then
       echo -e "${GREEN}✅ 服务器已启动 (PID: $SERVER_PID, 入口: $START_ENTRY)${NC}"
     else
-      echo -e "${RED}❌ 服务器启动失败，请检查日志或手动运行: node $START_ENTRY${NC}"
+      echo -e "${RED}❌ 安装失败：自启动服务器失败，请检查日志或手动运行: node $START_ENTRY${NC}"
       print_startup_logs
       exit 1
     fi
@@ -1768,7 +1746,7 @@ else
   if kill -0 "$SERVER_PID" 2>/dev/null; then
     echo -e "${GREEN}✅ 服务器已启动 (PID: $SERVER_PID, 入口: $START_ENTRY)${NC}"
   else
-    echo -e "${RED}❌ 服务器启动失败，请检查日志或手动运行: node $START_ENTRY${NC}"
+    echo -e "${RED}❌ 安装失败：自启动服务器失败，请检查日志或手动运行: node $START_ENTRY${NC}"
     print_startup_logs
     exit 1
   fi
@@ -1777,10 +1755,32 @@ fi
 # 最终端口兜底校验，避免“进程存在但 8888 未监听”
 sleep 1
 if ! lsof -i :8888 -sTCP:LISTEN >/dev/null 2>&1; then
-  echo -e "${RED}❌ 服务器进程已启动但 8888 端口未监听${NC}"
+  echo -e "${RED}❌ 安装失败：服务器进程已启动但 8888 端口未监听${NC}"
   print_startup_logs
   exit 1
 fi
+
+# ─── 15. 显示更新结果 ────────────────────────────────────────────────────────
+echo ""
+echo -e "${BLUE}═══════════════════════════════════════════════════════${NC}"
+
+NEW_VERSION="未知"
+if [ -f "$SCRIPT_DIR/VERSION.txt" ]; then
+  NEW_VERSION=$(cat "$SCRIPT_DIR/VERSION.txt" | tr -d '[:space:]')
+fi
+
+echo -e "${GREEN}✅ 安装成功！${NC}"
+echo ""
+echo -e "   旧版本: ${RED}${OLD_VERSION}${NC}"
+echo -e "   新版本: ${GREEN}${NEW_VERSION}${NC}"
+if [ "$RENAMED" = true ]; then
+  echo -e "   安装包: ${GREEN}已重命名为 ${NEW_PACKAGE_NAME}${NC}"
+fi
+echo -e "   项目路径: ${GREEN}${SCRIPT_DIR}${NC}"
+echo -e "   备份位置: ${BACKUP_DIR}"
+echo ""
+echo -e "${BLUE}═══════════════════════════════════════════════════════${NC}"
+echo ""
 
 echo ""
 echo -e "${GREEN}🎉 全部完成！请回到 Figma 插件，功能已恢复到最新版本。${NC}"
