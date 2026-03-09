@@ -1,3 +1,4 @@
+const fs = require('fs');
 const { google } = require('googleapis');
 const { Readable } = require('stream');
 
@@ -320,6 +321,91 @@ async function uploadBuffer({ buffer, filename, mimeType = 'image/jpeg', folderI
   }
 }
 
+async function uploadFilePath({ filePath, filename, mimeType = 'application/octet-stream', folderId, supportsAllDrives = true }) {
+  if (!filePath || typeof filePath !== 'string') {
+    throw new Error('uploadFilePath 缺少 filePath');
+  }
+  if (!filename) {
+    throw new Error('uploadFilePath 缺少 filename');
+  }
+  if (!folderId || folderId.trim() === '' || folderId === '.') {
+    throw new Error(`uploadFilePath 缺少或无效的 folderId: "${folderId}"`);
+  }
+
+  const fileStat = await fs.promises.stat(filePath);
+  const fileSizeBytes = Math.max(0, Number(fileStat.size || 0));
+  const fileSizeMB = fileSizeBytes / 1024 / 1024;
+  const drive = getDriveClient();
+  const isVideo = mimeType && mimeType.toLowerCase().startsWith('video/');
+  const isGif = mimeType && mimeType.toLowerCase() === 'image/gif';
+  const isSharedDrive = folderId.startsWith('0A') || folderId.length === 33;
+  const USE_RESUMABLE_THRESHOLD = 5 * 1024 * 1024;
+  const useResumable = fileSizeBytes > USE_RESUMABLE_THRESHOLD;
+
+  const buildParams = () => ({
+    requestBody: {
+      name: filename,
+      parents: [folderId]
+    },
+    media: {
+      mimeType,
+      body: fs.createReadStream(filePath),
+      resumable: useResumable
+    },
+    fields: 'id,name',
+    ...(isSharedDrive || supportsAllDrives ? {
+      supportsAllDrives: true,
+      supportsTeamDrives: true
+    } : {})
+  });
+
+  let timeout = 30000;
+  if (isVideo || isGif || fileSizeBytes > USE_RESUMABLE_THRESHOLD) {
+    timeout = useResumable
+      ? Math.max(180000, Math.min(1800000, fileSizeMB * 30 * 1000))
+      : Math.max(90000, Math.min(600000, fileSizeMB * 15 * 1000));
+  }
+
+  try {
+    const response = await drive.files.create(buildParams(), {
+      timeout,
+      maxRedirects: 5,
+      retryConfig: {
+        retry: 3,
+        statusCodesToRetry: [[100, 199], [429, 429], [500, 599]],
+        retryDelay: 1000
+      }
+    });
+    return response.data;
+  } catch (error) {
+    const shouldRetry = fileSizeBytes > USE_RESUMABLE_THRESHOLD || isGif || isVideo;
+    if (shouldRetry) {
+      const retryTimeout = Math.max(300000, Math.min(3600000, fileSizeMB * 60 * 1000));
+      try {
+        const retryResponse = await drive.files.create({
+          ...buildParams(),
+          media: {
+            mimeType,
+            body: fs.createReadStream(filePath),
+            resumable: true
+          }
+        }, {
+          timeout: retryTimeout,
+          retryConfig: {
+            retry: 5,
+            statusCodesToRetry: [[100, 199], [408, 408], [429, 429], [500, 599]],
+            retryDelay: 2000
+          }
+        });
+        return retryResponse.data;
+      } catch (retryError) {
+        throw retryError;
+      }
+    }
+    throw error;
+  }
+}
+
 async function listFolderFiles({ folderId, pageSize = 50, orderBy = 'createdTime desc', fields = 'files(id,name,mimeType,createdTime,modifiedTime,size,parents,md5Checksum),nextPageToken', supportsAllDrives = true, pageToken = null, customQuery = null }) {
   if (!folderId || folderId.trim() === '' || folderId === '.') {
     throw new Error(`listFolderFiles 缺少或无效的 folderId: "${folderId}"`);
@@ -415,12 +501,14 @@ async function listFolderFiles({ folderId, pageSize = 50, orderBy = 'createdTime
   throw lastError;
 }
 
-async function downloadFileBuffer(fileId, timeoutMs = 60000, maxRetries = 3) {
+async function downloadFileBuffer(fileId, timeoutMs = 60000, maxRetries = 3, options = {}) {
   if (!fileId || fileId.trim() === '' || fileId === '.') {
     throw new Error(`downloadFileBuffer 缺少或无效的 fileId: "${fileId}"`);
   }
 
   let lastError = null;
+  const expectedBytes = Math.max(0, Number(options.expectedBytes || 0));
+  const onProgress = typeof options.onProgress === 'function' ? options.onProgress : null;
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     const drive = getDriveClient();
@@ -447,6 +535,14 @@ async function downloadFileBuffer(fileId, timeoutMs = 60000, maxRetries = 3) {
         response.data.on('data', (chunk) => {
           chunks.push(chunk);
           totalBytes += chunk.length;
+          if (onProgress) {
+            try {
+              onProgress({
+                downloadedBytes: totalBytes,
+                totalBytes: expectedBytes
+              });
+            } catch (_) {}
+          }
         });
 
         response.data.on('end', () => {
@@ -476,6 +572,87 @@ async function downloadFileBuffer(fileId, timeoutMs = 60000, maxRetries = 3) {
       }
 
       // 命中 TLS/网络抖动时，强制重建客户端以清理潜在坏连接
+      resetDriveClient();
+      const retryDelayMs = 600 * attempt;
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+    }
+  }
+
+  throw lastError || new Error(`下载文件失败: ${fileId}`);
+}
+
+async function downloadFileToPath(fileId, outputPath, timeoutMs = 60000, maxRetries = 3, options = {}) {
+  if (!fileId || fileId.trim() === '' || fileId === '.') {
+    throw new Error(`downloadFileToPath 缺少或无效的 fileId: "${fileId}"`);
+  }
+  if (!outputPath || outputPath.trim() === '') {
+    throw new Error('downloadFileToPath 缺少 outputPath');
+  }
+
+  let lastError = null;
+  const expectedBytes = Math.max(0, Number(options.expectedBytes || 0));
+  const onProgress = typeof options.onProgress === 'function' ? options.onProgress : null;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    const drive = getDriveClient();
+    try {
+      const response = await drive.files.get(
+        { fileId, alt: 'media' },
+        { responseType: 'stream', timeout: timeoutMs }
+      );
+
+      await new Promise((resolve, reject) => {
+        let totalBytes = 0;
+        let settled = false;
+        const writer = fs.createWriteStream(outputPath);
+
+        const cleanupAndReject = (err) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          try { response.data.destroy(); } catch (_) {}
+          try { writer.destroy(); } catch (_) {}
+          try { fs.rmSync(outputPath, { force: true }); } catch (_) {}
+          reject(err);
+        };
+
+        const timer = setTimeout(() => {
+          cleanupAndReject(new Error(`文件下载超时（超过${Math.round(timeoutMs / 1000)}秒）`));
+        }, timeoutMs);
+
+        response.data.on('data', (chunk) => {
+          totalBytes += chunk.length;
+          if (onProgress) {
+            try {
+              onProgress({
+                downloadedBytes: totalBytes,
+                totalBytes: expectedBytes
+              });
+            } catch (_) {}
+          }
+        });
+
+        response.data.on('error', cleanupAndReject);
+        writer.on('error', cleanupAndReject);
+        writer.on('finish', () => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          resolve();
+        });
+
+        response.data.pipe(writer);
+      });
+
+      return outputPath;
+    } catch (error) {
+      lastError = error;
+      const isTransientSslOrNetwork = isTransientTlsOrNetworkError(error);
+
+      if (!isTransientSslOrNetwork || attempt === maxRetries) {
+        throw error;
+      }
+
       resetDriveClient();
       const retryDelayMs = 600 * attempt;
       await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
@@ -771,8 +948,10 @@ async function getResumableUploadUrl({ filename, mimeType, folderId, supportsAll
 
 module.exports = {
   uploadBuffer,
+  uploadFilePath,
   listFolderFiles,
   downloadFileBuffer,
+  downloadFileToPath,
   trashFile,
   deleteFileImmediately,
   removeFileFromFolder,

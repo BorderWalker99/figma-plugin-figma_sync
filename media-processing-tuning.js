@@ -167,19 +167,19 @@ module.exports = {
 
     // 极速档（> ultraSpeedVideoMb）
     ultra: {
-      // 极速档优先通过“降帧”换速度：在保留颜色/清晰度前提下显著提速
-      // （如需更丝滑可升高；如需更快可再降低）
+      // 极速档优先通过“降帧”换速度，默认尽量保住分辨率清晰度。
+      // 有损优先级：帧率 > 颜色 > 清晰度
       fps: envNumber('ULTRA_SPEED_GIF_FPS', 15),
-      scaleDivisor: envNumber('ULTRA_SPEED_GIF_SCALE_DIVISOR', 5),
-      maxColors: envNumber('ULTRA_SPEED_GIF_MAX_COLORS', 144),
+      scaleDivisor: envNumber('ULTRA_SPEED_GIF_SCALE_DIVISOR', 4),
+      maxColors: envNumber('ULTRA_SPEED_GIF_MAX_COLORS', 160),
       dither: envString('ULTRA_SPEED_GIF_DITHER', 'bayer:bayer_scale=2'),
       timeoutMs: envNumber('ULTRA_SPEED_GIF_TIMEOUT_MS', 210000),
 
       // 极速回退参数
       fallbackDither: envString('ULTRA_SPEED_GIF_FALLBACK_DITHER', 'bayer:bayer_scale=4'),
-      fallbackMinFps: envNumber('ULTRA_SPEED_FALLBACK_MIN_FPS', 15),
-      fallbackScaleDivisorMin: envNumber('ULTRA_SPEED_FALLBACK_SCALE_DIV_MIN', 4),
-      fallbackMinColors: envNumber('ULTRA_SPEED_FALLBACK_MIN_COLORS', 96),
+      fallbackMinFps: envNumber('ULTRA_SPEED_FALLBACK_MIN_FPS', 12),
+      fallbackScaleDivisorMin: envNumber('ULTRA_SPEED_FALLBACK_SCALE_DIV_MIN', 5),
+      fallbackMinColors: envNumber('ULTRA_SPEED_FALLBACK_MIN_COLORS', 112),
       fallbackTimeoutFloorMs: envNumber('ULTRA_SPEED_FALLBACK_TIMEOUT_FLOOR_MS', 150000),
       fallbackTimeoutReduceMs: envNumber('ULTRA_SPEED_FALLBACK_TIMEOUT_REDUCE_MS', 30000)
     }
@@ -215,10 +215,11 @@ module.exports = {
       fpsCapMedium: envNumber('COMPOSER_FAST_FPS_CAP_MEDIUM', 20),
       fpsCapLarge: envNumber('COMPOSER_FAST_FPS_CAP_LARGE', 16),
       fpsCapXLarge: envNumber('COMPOSER_FAST_FPS_CAP_XLARGE', 12),
-      lossyBase: envNumber('COMPOSER_FAST_LOSSY_BASE', 94),
-      lossyMedium: envNumber('COMPOSER_FAST_LOSSY_MEDIUM', 100),
-      lossyLarge: envNumber('COMPOSER_FAST_LOSSY_LARGE', 106),
-      lossyXLarge: envNumber('COMPOSER_FAST_LOSSY_XLARGE', 110),
+      // fast 档尽量优先靠降帧率提速；颜色/有损压缩作为第二顺位
+      lossyBase: envNumber('COMPOSER_FAST_LOSSY_BASE', 88),
+      lossyMedium: envNumber('COMPOSER_FAST_LOSSY_MEDIUM', 94),
+      lossyLarge: envNumber('COMPOSER_FAST_LOSSY_LARGE', 100),
+      lossyXLarge: envNumber('COMPOSER_FAST_LOSSY_XLARGE', 106),
       timeoutScale: envNumber('COMPOSER_FAST_TIMEOUT_SCALE', 0.65),
       pipelinePerFrameMs: envNumber('COMPOSER_FAST_PIPELINE_PER_FRAME_MS', 3500),
       paletteGenTimeoutMs: envNumber('COMPOSER_FAST_PALETTEGEN_TIMEOUT_MS', 45000),
@@ -296,16 +297,20 @@ module.exports = {
     lowCoreCount: envNumber('ADAPTIVE_LOW_CORE_COUNT', 4),
 
     // 当机器较慢或负载较高时，允许更早触发“类极速档”。
+    // lowCoreIdleUltraTriggerMb: 低核机器即使当前负载不高，也会更早进入极速档。
     softUltraTriggerMb: envNumber('ADAPTIVE_SOFT_ULTRA_TRIGGER_MB', 90),
     criticalUltraTriggerMb: envNumber('ADAPTIVE_CRITICAL_ULTRA_TRIGGER_MB', 60),
+    lowCoreIdleUltraTriggerMb: envNumber('ADAPTIVE_LOW_CORE_IDLE_ULTRA_TRIGGER_MB', 75),
 
     // 外层总超时也按压力自适应放宽，避免内部已降档但被总超时提前杀掉。
     baseVideoTimeoutMs: envNumber('ADAPTIVE_BASE_VIDEO_TIMEOUT_MS', 480000),
     highPressureVideoTimeoutMs: envNumber('ADAPTIVE_HIGH_PRESSURE_VIDEO_TIMEOUT_MS', 600000),
     criticalPressureVideoTimeoutMs: envNumber('ADAPTIVE_CRITICAL_PRESSURE_VIDEO_TIMEOUT_MS', 720000),
 
-    // 导出链路在高压机器上可更早切 fast。
+    // 导出链路在高压机器上可更早切 fast；低核机器也使用更激进阈值。
     exportFastMinFrames: envNumber('ADAPTIVE_EXPORT_FAST_MIN_FRAMES', 180),
-    exportFastMinPixels: envNumber('ADAPTIVE_EXPORT_FAST_MIN_PIXELS', 3000000)
+    exportFastMinPixels: envNumber('ADAPTIVE_EXPORT_FAST_MIN_PIXELS', 3000000),
+    lowCoreExportFastMinFrames: envNumber('ADAPTIVE_LOW_CORE_EXPORT_FAST_MIN_FRAMES', 140),
+    lowCoreExportFastMinPixels: envNumber('ADAPTIVE_LOW_CORE_EXPORT_FAST_MIN_PIXELS', 2500000)
   }
 };

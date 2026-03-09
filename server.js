@@ -259,12 +259,14 @@ const crypto = require('crypto');
 // Google Drive 功能（可选）
 let googleDriveEnabled = false;
 let uploadBuffer = null;
+let uploadFilePath = null;
 let createFolder = null;
 let getUserFolderId = null;
 let initializeUserFolderForUpload = null;
 try {
   const driveModule = require('./googleDrive');
   uploadBuffer = driveModule.uploadBuffer;
+  uploadFilePath = driveModule.uploadFilePath;
   createFolder = driveModule.createFolder;
   googleDriveEnabled = true;
   
@@ -978,6 +980,47 @@ function getPayloadSize(data) {
   }
 }
 
+async function resolveUploadTargetFolderId(userId) {
+  if (userId && initializeUserFolderForUpload) {
+    try {
+      return await initializeUserFolderForUpload(userId);
+    } catch (error) {
+      console.error(`⚠️  [上传] 创建用户文件夹失败，回退共享目录: ${error.message}`);
+    }
+  }
+
+  const folderId = getEffectiveDriveFolderId(DRIVE_FOLDER_ID);
+  if (!folderId) {
+    throw new Error('未配置 GDRIVE_FOLDER_ID，无法上传文件');
+  }
+  return folderId;
+}
+
+async function uploadDriveFileDirect({ userId, filename, mimeType, filePath, folderId = null, startTime = Date.now() }) {
+  if (!uploadFilePath) {
+    throw new Error('Google Drive 文件直传能力不可用');
+  }
+  if (!filePath) {
+    throw new Error('uploadDriveFileDirect 缺少 filePath');
+  }
+
+  const targetFolderId = folderId || await resolveUploadTargetFolderId(userId);
+  const effectiveMimeType = normalizeIncomingMimeType(filename, mimeType) || mimeType || 'application/octet-stream';
+  const beforeUploadStat = await fs.promises.stat(filePath);
+  const uploadStartTime = Date.now();
+  const result = await uploadFilePath({
+    filePath,
+    filename,
+    mimeType: effectiveMimeType,
+    folderId: targetFolderId
+  });
+  const uploadDuration = Date.now() - uploadStartTime;
+  const totalDuration = Date.now() - startTime;
+  const fileSizeMB = (beforeUploadStat.size / 1024 / 1024).toFixed(2);
+  console.log(`✅ [Drive直传] ${filename} (${fileSizeMB}MB, 上传:${uploadDuration}ms, 总计:${totalDuration}ms, 文件ID: ${result.id || 'N/A'})`);
+  return result;
+}
+
 // ========== 上传队列管理器（控制并发和速率） ==========
 class UploadQueue {
   constructor(options = {}) {
@@ -1608,10 +1651,10 @@ class UploadQueue {
 
 // 创建上传队列实例
 const uploadQueue = new UploadQueue({
-  // 降低并发数以提高稳定性（特别是在 LaunchAgent 后台模式下）
-  // 之前的 10 并发可能导致资源竞争或被系统限制
-  maxConcurrent: 2, 
-  rateLimit: 10 // 降低速率限制
+  // 旧版 Base64 上传仍走队列；二进制/分块直传路径已绕开此队列。
+  // 适度提高默认并发，减轻遗留上传路径在高频场景下的排队时间。
+  maxConcurrent: Math.max(2, Number(process.env.UPLOAD_QUEUE_CONCURRENCY || 4)),
+  rateLimit: Math.max(10, Number(process.env.UPLOAD_QUEUE_RATE_LIMIT || 20))
 });
 
 // 添加请求日志中间件（在body parser之前，用于追踪大文件请求）
@@ -2069,10 +2112,11 @@ if (googleDriveEnabled && uploadBuffer) {
     }
   }, 60000);
 
-  async function backgroundProxyUpload(tempPath, tempDir, userId, filename, mimeType) {
+  async function backgroundProxyUpload(tempPath, tempDir, userId, filename, mimeType, folderId = null) {
     try {
-      let finalBuffer = await fs.promises.readFile(tempPath);
-      const origSizeBytes = finalBuffer.length;
+      let uploadPath = tempPath;
+      const origStat = await fs.promises.stat(tempPath);
+      const origSizeBytes = origStat.size;
       const origSizeMB = (origSizeBytes / 1024 / 1024).toFixed(1);
       const isVideo = /\.(mp4|mov)$/i.test(filename);
 
@@ -2099,26 +2143,25 @@ if (googleDriveEnabled && uploadBuffer) {
             { timeout: 600000, maxBuffer: 10 * 1024 * 1024 }
           );
           if (fs.existsSync(tempOut) && fs.statSync(tempOut).size > 0) {
-            const compBuf = await fs.promises.readFile(tempOut);
-            const ratio = ((1 - compBuf.length / origSizeBytes) * 100).toFixed(1);
-            console.log(`   ✅ [后台压缩] ${origSizeMB}MB → ${(compBuf.length / 1024 / 1024).toFixed(1)}MB (节省 ${ratio}%)`);
-            finalBuffer = compBuf;
+            const compSize = fs.statSync(tempOut).size;
+            const ratio = ((1 - compSize / origSizeBytes) * 100).toFixed(1);
+            console.log(`   ✅ [后台压缩] ${origSizeMB}MB → ${(compSize / 1024 / 1024).toFixed(1)}MB (节省 ${ratio}%)`);
+            uploadPath = tempOut;
           }
         } catch (compErr) {
           console.warn(`   ⚠️  [后台压缩] 失败，使用原始文件: ${compErr.message}`);
         }
       }
 
-      uploadQueue.add({
+      await uploadDriveFileDirect({
         userId,
         filename,
-        data: finalBuffer,
         mimeType,
-        startTime: Date.now(),
-        priority: 'high'
+        filePath: uploadPath,
+        folderId,
+        startTime: Date.now()
       });
-      finalBuffer = null;
-      console.log(`📤 [后台上传] ${filename} 已加入 Google Drive 上传队列`);
+      console.log(`📤 [后台上传] ${filename} 已完成 Google Drive 直传`);
     } finally {
       try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch (_) {}
     }
@@ -2348,7 +2391,7 @@ if (googleDriveEnabled && uploadBuffer) {
 
         process.nextTick(async () => {
           try {
-            await backgroundProxyUpload(tempPath, tempDir, userId, filename, mimeType);
+            await backgroundProxyUpload(tempPath, tempDir, userId, filename, mimeType, folderId);
           } catch (bgErr) {
             console.error(`❌ [极速上传] 后台上传也失败: ${bgErr.message}`);
             try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch (_) {}
@@ -2551,7 +2594,7 @@ const _chunkSessionSweepTimer = setInterval(() => {
   }
 }, 60000);
 
-app.post('/upload-init', (req, res) => {
+app.post('/upload-init', async (req, res) => {
   const userId = req.headers['x-user-id'] || req.body.userId || null;
   if (!validateUserId(userId, res)) return;
   if (!validateUploadToken(req.headers['x-upload-token'], res)) return;
@@ -2598,10 +2641,17 @@ app.post('/upload-init', (req, res) => {
   const sessionId = `chunk-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const tempDir = path.join(os.tmpdir(), `screensync-chunk-${sessionId}`);
   fs.mkdirSync(tempDir, { recursive: true });
+  let folderId = null;
+  try {
+    folderId = await resolveUploadTargetFolderId(userId);
+  } catch (error) {
+    try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch (_) {}
+    return res.status(500).json({ error: error.message || 'Failed to resolve upload folder' });
+  }
 
   chunkedSessions.set(sessionId, {
     userId, filename, mimeType: normalizedMimeType || mimeType || 'application/octet-stream',
-    totalSize: totalSize || 0, tempDir,
+    totalSize: totalSize || 0, tempDir, folderId,
     receivedChunks: new Set(), receivedBytes: 0, createdAt: Date.now()
   });
 
@@ -2762,18 +2812,22 @@ app.post('/upload-finish', async (req, res) => {
       const assembledPath = path.join(tempDir, `assembled_${safeName}`);
       const wsAssemble = fs.createWriteStream(assembledPath);
       for (const cf of chunkFiles) {
-        const chunkData = await fs.promises.readFile(path.join(tempDir, cf));
-        if (!wsAssemble.write(chunkData)) {
-          await new Promise((resolve) => wsAssemble.once('drain', resolve));
-        }
+        const chunkPath = path.join(tempDir, cf);
+        await new Promise((resolve, reject) => {
+          const rs = fs.createReadStream(chunkPath);
+          rs.on('error', reject);
+          rs.on('end', resolve);
+          rs.pipe(wsAssemble, { end: false });
+        });
       }
       await new Promise((resolve, reject) => {
         wsAssemble.on('error', reject);
         wsAssemble.end(() => resolve());
       });
 
-      let finalBuffer = await fs.promises.readFile(assembledPath);
-      const origSizeBytes = finalBuffer.length;
+      let uploadPath = assembledPath;
+      const assembledStat = await fs.promises.stat(assembledPath);
+      const origSizeBytes = assembledStat.size;
       const origSizeMB = (origSizeBytes / 1024 / 1024).toFixed(1);
       console.log(`✅ [分块上传] 已组装: ${filename} (${origSizeMB}MB, ${session.receivedChunks.size} chunks)`);
 
@@ -2782,9 +2836,7 @@ app.post('/upload-finish', async (req, res) => {
 
       // ─── 步骤 2：大视频压缩（FFmpeg 直读磁盘文件，省去"加载到内存→写临时文件"的双重 I/O）───
       if (isVideo && origSizeBytes > mediaTuning.thresholds.uploadCompressMb * 1024 * 1024) {
-        const tempIn = path.join(tempDir, `raw_${safeName}`);
         const tempOut = path.join(tempDir, `comp_${safeName}`);
-        await fs.promises.writeFile(tempIn, finalBuffer);
         const sizeMB = origSizeBytes / 1024 / 1024;
         const isUltraLarge = sizeMB > mediaTuning.thresholds.ultraSpeedVideoMb;
         const isTier80 = sizeMB > mediaTuning.thresholds.uploadTier80Mb;
@@ -2801,15 +2853,14 @@ app.post('/upload-finish', async (req, res) => {
         console.log(`   🎥 [分块上传] 压缩视频: ${origSizeMB}MB, preset=${preset}, CRF=${crf}...`);
         try {
           await execAsync(
-            `ffmpeg -an -i "${tempIn}" -vf "${scaleFilter}" -c:v libx264 -preset ${preset} -crf ${crf} -movflags +faststart -y "${tempOut}"`,
+            `ffmpeg -an -i "${assembledPath}" -vf "${scaleFilter}" -c:v libx264 -preset ${preset} -crf ${crf} -movflags +faststart -y "${tempOut}"`,
             { timeout: 600000 }
           );
           if (fs.existsSync(tempOut) && fs.statSync(tempOut).size > 0) {
-            const compBuf = await fs.promises.readFile(tempOut);
-            const newSize = compBuf.length;
+            const newSize = fs.statSync(tempOut).size;
             const ratio = ((1 - newSize / origSizeBytes) * 100).toFixed(1);
             console.log(`   ✅ [分块上传] ${origSizeMB}MB → ${(newSize / 1024 / 1024).toFixed(1)}MB (节省 ${ratio}%)`);
-            finalBuffer = compBuf;
+            uploadPath = tempOut;
           }
         } catch (compErr) {
           console.warn(`   ⚠️  [分块上传] 压缩失败，使用原始文件: ${compErr.message}`);
@@ -2818,18 +2869,16 @@ app.post('/upload-finish', async (req, res) => {
 
       // ─── 步骤 3：加入上传队列 ───
       const effectiveUserId = userId || session.userId;
-
-      uploadQueue.add({
+      await uploadDriveFileDirect({
         userId: effectiveUserId,
         filename,
-        data: finalBuffer,
         mimeType,
-        startTime: Date.now(),
-        priority: (isVideo || isGif) ? 'high' : 'normal'
+        filePath: uploadPath,
+        folderId: session.folderId || null,
+        startTime: Date.now()
       });
-      finalBuffer = null;
 
-      console.log(`📤 [分块上传] ${filename} 已加入上传队列`);
+      console.log(`📤 [分块上传] ${filename} 已完成直传上传`);
 
     } catch (err) {
       console.error(`❌ [分块上传] 组装/处理失败 (${filename}):`, err.message);

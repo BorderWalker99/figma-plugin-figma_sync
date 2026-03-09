@@ -17,11 +17,14 @@ function getAdaptiveRuntimeConfig(mediaTuning = {}) {
     lowCoreCount: Math.max(2, Math.round(num(cfg.lowCoreCount, 4))),
     softUltraTriggerMb: num(cfg.softUltraTriggerMb, 90),
     criticalUltraTriggerMb: num(cfg.criticalUltraTriggerMb, 60),
+    lowCoreIdleUltraTriggerMb: num(cfg.lowCoreIdleUltraTriggerMb, 75),
     baseVideoTimeoutMs: Math.max(180000, Math.round(num(cfg.baseVideoTimeoutMs, 480000))),
     highPressureVideoTimeoutMs: Math.max(240000, Math.round(num(cfg.highPressureVideoTimeoutMs, 600000))),
     criticalPressureVideoTimeoutMs: Math.max(300000, Math.round(num(cfg.criticalPressureVideoTimeoutMs, 720000))),
     exportFastMinFrames: Math.max(60, Math.round(num(cfg.exportFastMinFrames, 180))),
-    exportFastMinPixels: Math.max(1000000, Math.round(num(cfg.exportFastMinPixels, 3000000)))
+    exportFastMinPixels: Math.max(1000000, Math.round(num(cfg.exportFastMinPixels, 3000000))),
+    lowCoreExportFastMinFrames: Math.max(60, Math.round(num(cfg.lowCoreExportFastMinFrames, 140))),
+    lowCoreExportFastMinPixels: Math.max(1000000, Math.round(num(cfg.lowCoreExportFastMinPixels, 2500000)))
   };
 }
 
@@ -68,6 +71,9 @@ function getDynamicUltraTriggerMb(mediaTuning = {}, { sizeMB = 0, pressure = nul
   let triggerMb = baseMb;
 
   if (pressure) {
+    if (pressure.cpuCount <= cfg.lowCoreCount) {
+      triggerMb = Math.min(triggerMb, cfg.lowCoreIdleUltraTriggerMb);
+    }
     if (pressure.level === 'critical') {
       triggerMb = Math.min(triggerMb, cfg.criticalUltraTriggerMb);
     } else if (
@@ -149,7 +155,7 @@ function buildWatcherAttemptProfiles(mediaTuning = {}, { videoSizeMB = 0, isLarg
   const largeCfg = shouldPreferFastStart ? (watcher.ultra || {}) : (watcher.largeSinglePass || {});
   const largeBase = {
     label: shouldPreferFastStart ? 'smart-ultra' : 'large-balanced',
-    strategy: 'largeTwoPass',
+    strategy: shouldPreferFastStart ? 'largeTwoPass' : 'largeSinglePass',
     fps: num(largeCfg.fps, shouldPreferFastStart ? 15 : 16),
     scaleDivisor: normalizeScaleDivisor(largeCfg.scaleDivisor, shouldPreferFastStart ? 5 : 4),
     maxColors: Math.round(num(largeCfg.maxColors, shouldPreferFastStart ? 144 : 192)),
@@ -169,9 +175,11 @@ function buildWatcherAttemptProfiles(mediaTuning = {}, { videoSizeMB = 0, isLarg
   const profiles = [];
   for (let tier = tierSeed; tier <= 3; tier++) {
     if (baseProfile.strategy === 'smallTwoPass') {
-      const fps = clamp(baseProfile.fps - tier * 2, 8, baseProfile.fps);
-      const scaleDivisor = normalizeScaleDivisor(baseProfile.scaleDivisor + tier, baseProfile.scaleDivisor);
-      const maxColors = clamp(baseProfile.maxColors - tier * 32, 64, 256);
+      const fps = clamp(baseProfile.fps - tier * 3, 8, baseProfile.fps);
+      const colorTier = Math.max(0, tier - 1);
+      const clarityTier = Math.max(0, tier - 2);
+      const scaleDivisor = normalizeScaleDivisor(baseProfile.scaleDivisor + clarityTier, baseProfile.scaleDivisor);
+      const maxColors = clamp(baseProfile.maxColors - colorTier * 32, 64, 256);
       profiles.push({
         label: tier === 0 ? baseProfile.label : `small-degraded-${tier}`,
         strategy: 'smallTwoPass',
@@ -185,12 +193,14 @@ function buildWatcherAttemptProfiles(mediaTuning = {}, { videoSizeMB = 0, isLarg
       continue;
     }
 
-    const fps = clamp(baseProfile.fps - tier * 2, 8, baseProfile.fps);
-    const scaleDivisor = normalizeScaleDivisor(baseProfile.scaleDivisor + tier, baseProfile.scaleDivisor);
-    const maxColors = clamp(baseProfile.maxColors - tier * 24, 64, 256);
+    const fps = clamp(baseProfile.fps - tier * 3, 8, baseProfile.fps);
+    const colorTier = Math.max(0, tier - 1);
+    const clarityTier = Math.max(0, tier - 2);
+    const scaleDivisor = normalizeScaleDivisor(baseProfile.scaleDivisor + clarityTier, baseProfile.scaleDivisor);
+    const maxColors = clamp(baseProfile.maxColors - colorTier * 24, 64, 256);
     profiles.push({
       label: tier === 0 ? baseProfile.label : `large-degraded-${tier}`,
-      strategy: 'largeTwoPass',
+      strategy: baseProfile.strategy,
       fps,
       scaleDivisor,
       maxColors,
@@ -227,6 +237,8 @@ function buildComposerAttemptProfiles(mediaTuning = {}, {
   const minFrames = num(triggerCfg.minFrames, 220);
   const minScore = num(triggerCfg.minScore, 12000000);
   const runtimeCfg = getAdaptiveRuntimeConfig(mediaTuning);
+  const isLowCoreMachine = effectivePressure.cpuCount <= runtimeCfg.lowCoreCount;
+  const lowCoreFastTriggerMb = Math.min(runtimeCfg.softUltraTriggerMb, runtimeCfg.lowCoreIdleUltraTriggerMb);
 
   let score = pixels;
   if (frameCount > 0) score *= Math.min(6, Math.max(1, frameCount / 120));
@@ -238,11 +250,11 @@ function buildComposerAttemptProfiles(mediaTuning = {}, {
     frameCount >= minFrames ||
     score >= minScore;
 
-  if (!autoFast && effectivePressure.level !== 'low') {
+  if (!autoFast && (effectivePressure.level !== 'low' || isLowCoreMachine)) {
     autoFast =
-      modeSizeMB >= runtimeCfg.softUltraTriggerMb ||
-      frameCount >= runtimeCfg.exportFastMinFrames ||
-      pixels >= runtimeCfg.exportFastMinPixels;
+      modeSizeMB >= (isLowCoreMachine ? lowCoreFastTriggerMb : runtimeCfg.softUltraTriggerMb) ||
+      frameCount >= (isLowCoreMachine ? runtimeCfg.lowCoreExportFastMinFrames : runtimeCfg.exportFastMinFrames) ||
+      pixels >= (isLowCoreMachine ? runtimeCfg.lowCoreExportFastMinPixels : runtimeCfg.exportFastMinPixels);
   }
 
   const normalizedRequestedMode = (requestedMode === 'fast' || requestedMode === 'quality') ? requestedMode : 'auto';
@@ -269,18 +281,20 @@ function buildComposerAttemptProfiles(mediaTuning = {}, {
     const paletteGenTimeoutMs = num(modeCfg.paletteGenTimeoutMs, mode === 'fast' ? 45000 : 60000);
     const paletteUseTimeoutMs = num(modeCfg.paletteUseTimeoutMs, mode === 'fast' ? 90000 : 120000);
     const gifsicleTimeoutPerMbMs = num(modeCfg.gifsicleTimeoutPerMbMs, mode === 'fast' ? 3200 : 5000);
+    const colorTier = Math.max(0, tierBump - 1);
 
     return {
       mode,
       label: `${mode}-tier-${tierBump}`,
-      videoFpsCap: clamp(videoFpsCap - tierBump * 2, 8, videoFpsCap),
-      lossy: clamp(Math.round(lossy + tierBump * 6), 60, 130),
+      // 有损优先级：帧率 > 颜色/压缩强度；导出阶段默认不主动降目标尺寸
+      videoFpsCap: clamp(videoFpsCap - tierBump * 3, 8, videoFpsCap),
+      lossy: clamp(Math.round(lossy + colorTier * 6), 60, 130),
       timeoutScale: clamp(timeoutScale - tierBump * 0.08, 0.4, 1.2),
       pipelinePerFrameMs: Math.max(1800, Math.round(pipelinePerFrameMs * (tierBump >= 2 ? 0.7 : tierBump === 1 ? 0.82 : 1))),
       paletteGenTimeoutMs: Math.max(20000, Math.round(paletteGenTimeoutMs * (tierBump >= 2 ? 0.7 : tierBump === 1 ? 0.82 : 1))),
       paletteUseTimeoutMs: Math.max(45000, Math.round(paletteUseTimeoutMs * (tierBump >= 2 ? 0.7 : tierBump === 1 ? 0.82 : 1))),
       gifsicleTimeoutPerMbMs: Math.max(2000, Math.round(gifsicleTimeoutPerMbMs * (tierBump >= 2 ? 0.75 : tierBump === 1 ? 0.85 : 1))),
-      paletteMaxColors: clamp((mode === 'fast' ? 224 : 256) - tierBump * 32, 96, 256),
+      paletteMaxColors: clamp((mode === 'fast' ? 240 : 256) - colorTier * 32, 112, 256),
       effectiveDither: tierBump >= 2 ? 'none' : null
     };
   };
