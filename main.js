@@ -640,96 +640,24 @@ function resolveNpmBinary() {
   return null;
 }
 
-async function checkSharpRuntimeHealth(nodePath, installPath) {
-  if (!nodePath || !isUsableNodeBinary(nodePath)) return false;
-  if (!installPath || !fs.existsSync(path.join(installPath, 'node_modules', 'sharp'))) return false;
-  const installPathLiteral = JSON.stringify(installPath);
-  try {
-    await execPromise(`"${nodePath}" -e 'process.chdir(${installPathLiteral});require(\"sharp\")'`, { timeout: 15000 });
-    return true;
-  } catch (_) {
-    return false;
-  }
-}
-
-function getRequiredDependenciesExcludingSharp(installPath) {
+function getRequiredDependencies(installPath) {
   try {
     const pkg = JSON.parse(fs.readFileSync(path.join(installPath, 'package.json'), 'utf8'));
-    return Object.keys(pkg.dependencies || {}).filter(dep => dep !== 'sharp');
+    return Object.keys(pkg.dependencies || {});
   } catch (_) {
     return ['dotenv', 'ws', 'express', 'googleapis', 'chokidar'];
   }
 }
 
-function hasRequiredDependenciesExcludingSharp(installPath) {
+function hasRequiredDependencies(installPath) {
   try {
-    for (const dep of getRequiredDependenciesExcludingSharp(installPath)) {
+    for (const dep of getRequiredDependencies(installPath)) {
       require.resolve(dep, { paths: [installPath] });
     }
     return true;
   } catch (_) {
     return false;
   }
-}
-
-async function ensureSharpRuntimeForCurrentArch({ installPath, npmPath, nodePath, sendOutput }) {
-  if (!installPath || !npmPath || !nodePath) return false;
-  const cpu = process.arch === 'arm64' ? 'arm64' : 'x64';
-  const log = (msg) => {
-    if (typeof sendOutput === 'function') sendOutput(msg);
-  };
-
-  if (await checkSharpRuntimeHealth(nodePath, installPath)) {
-    return true;
-  }
-  log(`⚠️ 检测到 sharp 缺失或与当前系统不兼容，正在安装（darwin-${cpu}）...\n`);
-  try {
-    fs.rmSync(path.join(installPath, 'node_modules', 'sharp'), { recursive: true, force: true });
-    fs.rmSync(path.join(installPath, 'node_modules', 'detect-libc'), { recursive: true, force: true });
-    fs.rmSync(path.join(installPath, 'node_modules', 'semver'), { recursive: true, force: true });
-    fs.rmSync(path.join(installPath, 'node_modules', '@img'), { recursive: true, force: true });
-  } catch (_) {}
-
-  try {
-    await execPromise(
-      `"${npmPath}" --prefix "${installPath}" install --no-save --include=optional --legacy-peer-deps sharp --registry=https://registry.npmmirror.com`,
-      {
-        timeout: 8 * 60 * 1000,
-        env: {
-          ...process.env,
-          npm_config_os: 'darwin',
-          npm_config_cpu: cpu,
-          npm_config_loglevel: 'warn',
-          npm_config_strict_ssl: 'false'
-        }
-      }
-    );
-  } catch (_) {
-    try {
-      log('   ↪️ sharp 安装失败，尝试 rebuild...\n');
-      await execPromise(
-        `"${npmPath}" --prefix "${installPath}" rebuild sharp --include=optional`,
-        {
-          timeout: 5 * 60 * 1000,
-          env: {
-            ...process.env,
-            npm_config_os: 'darwin',
-            npm_config_cpu: cpu,
-            npm_config_loglevel: 'warn',
-            npm_config_strict_ssl: 'false'
-          }
-        }
-      );
-    } catch (__ ) {
-      return false;
-    }
-  }
-
-  const ok = await checkSharpRuntimeHealth(nodePath, installPath);
-  if (ok) {
-    log(`✅ sharp 安装成功（darwin-${cpu}）\n`);
-  }
-  return ok;
 }
 
 function ensureNpmShimFromNode(nodePath) {
@@ -2020,28 +1948,13 @@ ipcMain.handle('install-dependencies', async (event, installPath) => {
 
     const fatRuntimeStatus = detectBundledRuntimeFolderStatus(installPath);
     if (fatRuntimeStatus && fatRuntimeStatus.complete && fs.existsSync(nodeModulesPath)) {
-      const fatCoreDepsReady = hasRequiredDependenciesExcludingSharp(installPath);
-      const fatSharpHealthy = fatCoreDepsReady && await checkSharpRuntimeHealth(nodeBinForHealth, installPath);
-      if (fatCoreDepsReady && fatSharpHealthy) {
-        console.log('✅ Fat Package runtime 完整，核心依赖齐全，且 sharp 可运行，跳过 npm install');
+      const fatCoreDepsReady = hasRequiredDependencies(installPath);
+      if (fatCoreDepsReady) {
+        console.log('✅ Fat Package runtime 完整，核心依赖齐全，跳过 npm install');
         resolve({ success: true, bundled: true, fatPackage: true, skippedNpmInstall: true });
         return;
       }
-      console.warn('⚠️ Fat Package 将改为保留核心依赖，并在首次运行时按当前架构安装 sharp...');
-      const quickNpm = resolveNpmBinary();
-      if (fatCoreDepsReady && quickNpm && nodeBinForHealth) {
-        const fixed = await ensureSharpRuntimeForCurrentArch({
-          installPath,
-          npmPath: quickNpm,
-          nodePath: nodeBinForHealth,
-          sendOutput: (msg) => event.sender.send('install-output', { type: 'stdout', data: msg })
-        });
-        if (fixed) {
-          resolve({ success: true, bundled: true, fatPackage: true, skippedNpmInstall: true, sharpFixed: true });
-          return;
-        }
-      }
-      console.warn('⚠️ Fat Package sharp 自修复失败，将继续走完整依赖安装流程');
+      console.warn('⚠️ Fat Package 核心依赖不完整，将继续走完整依赖安装流程');
     }
 
     // 离线胖包模式：若已包含完整依赖且可运行，直接跳过 npm install
@@ -2051,28 +1964,11 @@ ipcMain.handle('install-dependencies', async (event, installPath) => {
       !!findExecutable('ffmpeg') &&
       !!findExecutable('gifsicle');
     const existingNodeModules = fs.existsSync(nodeModulesPath);
-    const existingCoreDepsReady = existingNodeModules && hasRequiredDependenciesExcludingSharp(installPath);
+    const existingCoreDepsReady = existingNodeModules && hasRequiredDependencies(installPath);
     if (bundledRuntimeQuickCheck && existingCoreDepsReady) {
-      const sharpHealthy = await checkSharpRuntimeHealth(nodeBinForHealth, installPath);
-      if (sharpHealthy) {
-        console.log('✅ 检测到离线胖包运行时 + 预置核心 node_modules，且 sharp 已可运行，跳过在线 npm 安装');
-        resolve({ success: true, bundled: true, skippedNpmInstall: true });
-        return;
-      }
-      console.warn('⚠️ 预置核心依赖已存在，但 sharp 缺失或不兼容，将尝试按当前架构安装');
-      const quickNpm = resolveNpmBinary();
-      if (quickNpm && nodeBinForHealth) {
-        const fixed = await ensureSharpRuntimeForCurrentArch({
-          installPath,
-          npmPath: quickNpm,
-          nodePath: nodeBinForHealth,
-          sendOutput: (msg) => event.sender.send('install-output', { type: 'stdout', data: msg })
-        });
-        if (fixed) {
-          resolve({ success: true, bundled: true, skippedNpmInstall: true, sharpFixed: true });
-          return;
-        }
-      }
+      console.log('✅ 检测到离线胖包运行时 + 预置核心 node_modules，跳过在线 npm 安装');
+      resolve({ success: true, bundled: true, skippedNpmInstall: true });
+      return;
     }
 
     // 清理可能的冲突文件
@@ -2251,7 +2147,7 @@ ipcMain.handle('install-dependencies', async (event, installPath) => {
         }
         
         // 额外验证关键依赖
-        const criticalDeps = ['ws', 'express', 'sharp', 'chokidar'];
+        const criticalDeps = ['ws', 'express', 'chokidar'];
         for (const dep of criticalDeps) {
           const depPath = path.join(nodeModulesPath, dep);
           if (!fs.existsSync(depPath)) {
@@ -2264,34 +2160,8 @@ ipcMain.handle('install-dependencies', async (event, installPath) => {
           }
         }
         
-        const verifiedNodeBin = resolveNodeBinary(installPath);
-        checkSharpRuntimeHealth(verifiedNodeBin, installPath).then(async (sharpOk) => {
-          if (sharpOk) {
-            console.log('✅ 依赖安装验证成功（所有关键依赖已确认）');
-            resolve({ success: true });
-            return;
-          }
-          const fixed = await ensureSharpRuntimeForCurrentArch({
-            installPath,
-            npmPath,
-            nodePath: verifiedNodeBin,
-            sendOutput: (msg) => event.sender.send('install-output', { type: 'stdout', data: msg })
-          });
-          if (!fixed) {
-            resolve({
-              success: false,
-              error: 'sharp 与当前系统架构不兼容，自动修复失败。请检查网络后重试安装。'
-            });
-            return;
-          }
-          console.log('✅ 依赖安装验证成功（sharp 已自动修复）');
-          resolve({ success: true, sharpFixed: true });
-        }).catch(() => {
-          resolve({
-            success: false,
-            error: 'sharp 运行时校验失败，请重试安装。'
-          });
-        });
+        console.log('✅ 依赖安装验证成功（所有关键依赖已确认）');
+        resolve({ success: true });
       } else {
         console.error('❌ npm install 失败');
         resolve({ 

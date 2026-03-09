@@ -78,18 +78,6 @@ require_runtime_max_macos() {
     fi
 }
 
-strip_packaged_sharp() {
-    local project_dir="$1"
-    local runtime_root="$2"
-
-    echo "   🧹 清理打包产物中的 sharp 相关文件（改为首次运行按架构自动安装）..."
-    rm -rf "$project_dir/node_modules/sharp" 2>/dev/null || true
-    rm -rf "$project_dir/node_modules/@img" 2>/dev/null || true
-    rm -rf "$runtime_root/sharp-vendor" 2>/dev/null || true
-    rm -rf "$runtime_root/intel/sharp-vendor" 2>/dev/null || true
-    rm -rf "$runtime_root/apple/sharp-vendor" 2>/dev/null || true
-}
-
 resolve_runtime_source() {
     local arch="$1" # intel / apple
     local candidates=()
@@ -231,9 +219,12 @@ create_package() {
     rsync -a \
       --exclude '.cache/' \
       --exclude '*.log' \
-      --exclude 'sharp/' \
-      --exclude '@img/' \
       "node_modules/" "$TEMP_DIR/项目文件/node_modules/"
+    if command -v npm >/dev/null 2>&1; then
+        echo "   🧹 校验预置 node_modules，仅保留 package.json 中声明的生产依赖..."
+        npm prune --omit=dev --prefix "$TEMP_DIR/项目文件" >/dev/null 2>&1 || \
+          echo "   ⚠️  npm prune 失败，继续使用当前 node_modules 副本"
+    fi
 
     # 2.2 复制离线运行时 runtime（按架构）
     echo -e "${YELLOW}🧰 复制离线 runtime (${ARCH_TYPE})...${NC}"
@@ -298,8 +289,6 @@ create_package() {
         require_runtime_max_macos "$TEMP_DIR/runtime/bin/convert" 13
     fi
 
-    strip_packaged_sharp "$TEMP_DIR/项目文件" "$TEMP_DIR/runtime"
-    
     # 3. 复制对应架构的 DMG (不再需要 .command 脚本, 安装器内部自动清除隔离)
     echo -e "${YELLOW}🖥️  复制 ${ARCH_TYPE} 安装器...${NC}"
     cp "$DMG_PATH" "$TEMP_DIR/双击安装.dmg"

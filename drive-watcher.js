@@ -1,12 +1,5 @@
 require('dotenv').config();
 const WebSocket = require('ws');
-const sharp = require('sharp');
-
-// 优化 sharp 配置，减少内存占用并提高稳定性（特别是在 LaunchAgent 环境下）
-sharp.cache(false); // 禁用缓存
-sharp.simd(false); // 禁用 SIMD
-sharp.concurrency(Math.max(2, Math.min(8, (require('os').cpus()?.length || 4)))); // 提升并发处理吞吐
-
 const { exec } = require('child_process');
 const { promisify } = require('util');
 const _execAsync = promisify(exec);
@@ -69,6 +62,7 @@ const {
   getDriveFolderId,
   getLocalDownloadFolder
 } = require('./userConfig');
+const { detectImageFormat, normalizeStillImageToJpeg } = require('./image-processor');
 
 /**
  * 确保本地下载文件夹存在
@@ -1142,20 +1136,20 @@ async function handleDriveFile(file, deleteAfterSync = false, progressCb = null,
                 mimeType === 'video/x-m4v';
     }
     
-    // 检测是否为 GIF / HEIF（视频文件直接跳过 sharp 元数据探测，减少无损耗时）
+    // 检测是否为 GIF / HEIF（视频文件直接跳过探测，减少无损耗时）
     let isGif = fileNameIsGif;
     let isHeif = fileNameIsHeif;
     if (!isVideo) {
+      let detectedFormat = 'unknown';
       if (!isGif) {
         const mimeType = (file.mimeType || '').toLowerCase();
         if (mimeType === 'image/gif') {
           isGif = true;
         } else {
           try {
-            const sharpImage = sharp(originalBuffer);
-            const metadata = await sharpImage.metadata();
-            isGif = metadata.format === 'gif';
-          } catch (metaError) {
+            detectedFormat = await detectImageFormat(originalBuffer, { fileName: file.name, mimeType: file.mimeType });
+            isGif = detectedFormat === 'gif';
+          } catch (_) {
             isGif = false;
           }
         }
@@ -1163,9 +1157,10 @@ async function handleDriveFile(file, deleteAfterSync = false, progressCb = null,
 
       if (!isHeif) {
         try {
-          const sharpImage = sharp(originalBuffer);
-          const metadata = await sharpImage.metadata();
-          isHeif = metadata.format === 'heif' || metadata.format === 'heic';
+          if (detectedFormat === 'unknown') {
+            detectedFormat = await detectImageFormat(originalBuffer, { fileName: file.name, mimeType: file.mimeType });
+          }
+          isHeif = detectedFormat === 'heif' || detectedFormat === 'heic';
         } catch (metaError) {
           const errorMsg = metaError.message.toLowerCase();
           if (errorMsg.includes('heif') || errorMsg.includes('heic') || errorMsg.includes('codec')) {
@@ -1504,19 +1499,16 @@ async function handleDriveFile(file, deleteAfterSync = false, progressCb = null,
         const isManualSmallHeif = syncSource === 'manual' && originalBuffer && originalBuffer.length <= manualFastPassBytes;
 
         if (isManualSmallHeif) {
-          // 小 HEIF 手动同步极速直通：sips 转 JPEG 后直接发送，跳过 sharp 二次处理
+          // 小 HEIF 手动同步极速直通：sips 转 JPEG 后直接发送，跳过二次压缩
           processedBuffer = convertedBuffer;
           backupImageFilename = file.name.replace(/\.(heic|heif)$/i, '.jpg');
           backupImageMimeType = 'image/jpeg';
         } else {
-          // 使用 sharp 对转换后的 JPEG 进行压缩和调整大小
-          processedBuffer = await sharp(convertedBuffer)
-            .resize(CONFIG.maxWidth, null, {
-              withoutEnlargement: true,
-              fit: 'inside'
-            })
-            .jpeg({ quality: CONFIG.quality })
-            .toBuffer();
+          const normalizedImage = await normalizeStillImageToJpeg(
+            { buffer: convertedBuffer, fileName: file.name.replace(/\.(heic|heif)$/i, '.jpg'), mimeType: 'image/jpeg' },
+            { maxWidth: CONFIG.maxWidth, quality: CONFIG.quality, execAsync, timeout: 60000 }
+          );
+          processedBuffer = normalizedImage.buffer;
         }
         
         // 清理临时文件
@@ -1553,7 +1545,7 @@ async function handleDriveFile(file, deleteAfterSync = false, progressCb = null,
     } else if (isHeif) {
       return;
     } else {
-      // 非 HEIF 格式，使用 sharp 正常处理
+      // 非 HEIF 格式，使用 ImageMagick 进行统一压缩
       const manualFastPassBytes = mediaTuning.thresholds.manualImageFastPassKb * 1024;
       const isManualSmallRaster =
         syncSource === 'manual' &&
@@ -1565,21 +1557,17 @@ async function handleDriveFile(file, deleteAfterSync = false, progressCb = null,
         (fileName.endsWith('.jpg') || fileName.endsWith('.jpeg') || fileName.endsWith('.png') || fileMimeLower === 'image/jpeg' || fileMimeLower === 'image/png');
 
       if (isManualSmallRaster) {
-        // 小图手动同步极速直通：跳过 sharp 压缩，直接传给 Figma
+        // 小图手动同步极速直通：跳过压缩，直接传给 Figma
         processedBuffer = originalBuffer;
         backupImageFilename = file.name;
         backupImageMimeType = file.mimeType || (fileName.endsWith('.png') ? 'image/png' : 'image/jpeg');
       } else {
         try {
-          const sharpImage = sharp(originalBuffer);
-          processedBuffer = await sharpImage
-            .resize(CONFIG.maxWidth, null, {
-              withoutEnlargement: true,
-              fit: 'inside'
-            })
-            .jpeg({ quality: CONFIG.quality })
-            .toBuffer();
-          
+          const normalizedImage = await normalizeStillImageToJpeg(
+            { buffer: originalBuffer, fileName: file.name, mimeType: file.mimeType },
+            { maxWidth: CONFIG.maxWidth, quality: CONFIG.quality, execAsync, timeout: 60000 }
+          );
+          processedBuffer = normalizedImage.buffer;
           // 立即释放原始buffer内存
           originalBuffer = null;
         } catch (error) {

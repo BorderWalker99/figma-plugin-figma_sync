@@ -4,17 +4,11 @@ const path = require('path');
 const crypto = require('crypto');
 const WebSocket = require('ws');
 const chokidar = require('chokidar');
-const sharp = require('sharp');
-
-// 优化 sharp 配置，减少内存占用并提高稳定性（特别是在 LaunchAgent 环境下）
-sharp.cache(false); // 禁用缓存
-sharp.simd(false); // 禁用 SIMD
-sharp.concurrency(Math.max(2, Math.min(8, (require('os').cpus()?.length || 4)))); // 提升并发处理吞吐
-
 const { exec } = require('child_process');
 const { promisify } = require('util');
 const _execAsync = promisify(exec);
 const os = require('os');
+const { detectImageFormat, normalizeStillImageToJpeg } = require('./image-processor');
 
 // 追踪所有活跃子进程，插件关闭时统一 kill
 const activeChildProcesses = new Set();
@@ -1085,22 +1079,19 @@ async function convertHeifToJpeg(filePath) {
     const newFilename = path.basename(filePath, ext) + '.jpg';
     const newPath = path.join(path.dirname(filePath), newFilename);
     
-    // 尝试使用 sharp 压缩，如果失败则直接使用 sips 转换结果
+    // 尝试进一步压缩，如果失败则直接使用 sips 转换结果
     try {
       const convertedBuffer = fs.readFileSync(tempOutputPath);
-      const compressedBuffer = await sharp(convertedBuffer)
-        .resize(CONFIG.maxWidth, null, {
-          withoutEnlargement: true,
-          fit: 'inside'
-        })
-        .jpeg({ quality: CONFIG.quality })
-        .toBuffer();
+      const normalizedImage = await normalizeStillImageToJpeg(
+        { buffer: convertedBuffer, fileName: newFilename, mimeType: 'image/jpeg' },
+        { maxWidth: CONFIG.maxWidth, quality: CONFIG.quality, execAsync, timeout: 60000 }
+      );
       
       // 写入压缩后的 JPEG
-      fs.writeFileSync(newPath, compressedBuffer);
-    } catch (sharpError) {
-      console.log(`   ⚠️ [iCloud] sharp 压缩失败，使用原始转换结果: ${sharpError.message}`);
-      // sharp 失败时，直接复制 sips 转换的结果
+      fs.writeFileSync(newPath, normalizedImage.buffer);
+    } catch (normalizeError) {
+      console.log(`   ⚠️ [iCloud] JPEG 压缩失败，使用原始转换结果: ${normalizeError.message}`);
+      // 压缩失败时，直接复制 sips 转换的结果
       fs.copyFileSync(tempOutputPath, newPath);
     }
     
@@ -2206,16 +2197,14 @@ async function syncScreenshot(filePath, deleteAfterSync = false, subfolder = nul
         const isManualSmallHeif = syncSource === 'manual' && stats.size <= manualFastPassBytes;
 
         if (isManualSmallHeif) {
-          // 小 HEIF 手动同步极速直通：sips 转 JPEG 后直接发送，跳过 sharp 二次处理
+          // 小 HEIF 手动同步极速直通：sips 转 JPEG 后直接发送，跳过二次压缩
           imageBuffer = convertedBuffer;
         } else {
-          imageBuffer = await sharp(convertedBuffer)
-            .resize(CONFIG.maxWidth, null, {
-              withoutEnlargement: true,
-              fit: 'inside'
-            })
-            .jpeg({ quality: CONFIG.quality })
-            .toBuffer();
+          const normalizedImage = await normalizeStillImageToJpeg(
+            { buffer: convertedBuffer, fileName: filename.replace(/\.(heic|heif)$/i, '.jpg'), mimeType: 'image/jpeg' },
+            { maxWidth: CONFIG.maxWidth, quality: CONFIG.quality, execAsync, timeout: 60000 }
+          );
+          imageBuffer = normalizedImage.buffer;
         }
         
         try {
@@ -2244,17 +2233,16 @@ async function syncScreenshot(filePath, deleteAfterSync = false, subfolder = nul
         (ext === '.jpg' || ext === '.jpeg' || ext === '.png');
 
       if (isManualSmallRaster) {
-        // 小图手动同步极速直通：跳过 sharp 压缩，直接传给 Figma
+        // 小图手动同步极速直通：跳过压缩，直接传给 Figma
         imageBuffer = fs.readFileSync(filePath);
       } else {
         try {
-          imageBuffer = await sharp(filePath)
-            .resize(CONFIG.maxWidth, null, {
-              withoutEnlargement: true,
-              fit: 'inside'
-            })
-            .jpeg({ quality: CONFIG.quality })
-            .toBuffer();
+          const mimeType = ext === '.png' ? 'image/png' : 'image/jpeg';
+          const normalizedImage = await normalizeStillImageToJpeg(
+            { filePath, fileName: filename, mimeType },
+            { maxWidth: CONFIG.maxWidth, quality: CONFIG.quality, execAsync, timeout: 60000 }
+          );
+          imageBuffer = normalizedImage.buffer;
           
           const compressedSize = (imageBuffer.length / 1024).toFixed(2);
           console.log(`   📦 ${originalSize}KB → ${compressedSize}KB`);

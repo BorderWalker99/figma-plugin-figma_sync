@@ -22,14 +22,6 @@ require('dotenv').config();
 const express = require('express');
 const WebSocket = require('ws');
 const http = require('http');
-const sharp = require('sharp');
-
-// 优化 sharp 配置，减少内存占用并提高稳定性（特别是在 LaunchAgent 环境下）
-sharp.cache(false); // 禁用缓存，防止内存泄漏
-sharp.simd(false); // 禁用 SIMD 指令集，提高在不同 CPU 架构下的兼容性
-// 限制并发数，避免在后台运行时占用过多 CPU 导致被系统限制
-sharp.concurrency(1); 
-
 const { exec, spawn } = require('child_process');
 const { promisify } = require('util');
 const execAsync = promisify(exec);
@@ -37,6 +29,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const mediaTuning = require('./media-processing-tuning');
+const { normalizeStillImageToJpeg } = require('./image-processor');
 
 // Inject bundled runtime/local deps into PATH.
 (() => {
@@ -160,6 +153,7 @@ function resolveDefaultFolderId(useOSS) {
 
 // ✅ 跟踪每个连接的活动子进程，用于取消时终止
 const activeProcesses = new Map(); // connectionId -> Set<ChildProcess>
+const exportSessions = new Map(); // connectionId -> { traceId, cancelled, startedAt }
 
 /**
  * 可取消的 execAsync 包装函数
@@ -170,7 +164,7 @@ const activeProcesses = new Map(); // connectionId -> Set<ChildProcess>
  */
 function execAsyncCancellable(cmd, options = {}, connectionId = null) {
   return new Promise((resolve, reject) => {
-    const childProcess = exec(cmd, options, (error, stdout, stderr) => {
+    const childProcess = exec(cmd, { ...options, detached: process.platform !== 'win32' }, (error, stdout, stderr) => {
       // 从活动进程列表中移除
       if (connectionId) {
         const processes = activeProcesses.get(connectionId);
@@ -179,7 +173,12 @@ function execAsyncCancellable(cmd, options = {}, connectionId = null) {
         }
       }
       
-      if (error) {
+      if (connectionId && cancelFlags.get(connectionId) === true) {
+        const cancelErr = new Error('GIF_EXPORT_CANCELLED');
+        cancelErr.stdout = stdout;
+        cancelErr.stderr = stderr;
+        reject(cancelErr);
+      } else if (error) {
         error.stdout = stdout;
         error.stderr = stderr;
         reject(error);
@@ -206,30 +205,54 @@ function killActiveProcesses(connectionId) {
   const processes = activeProcesses.get(connectionId);
   if (processes && processes.size > 0) {
     for (const proc of processes) {
-      // ✅ 尝试杀死 Shell 的子进程 (即实际运行的 ImageMagick/FFmpeg 命令)
-      // 使用 pkill -P 杀死父进程为 proc.pid 的所有进程
       if (proc.pid) {
         try {
-          require('child_process').execSync(`pkill -P ${proc.pid} || true`, { stdio: 'ignore' });
-        } catch (e) {
-          // 忽略错误 (例如没有子进程)
-        }
-      }
-
-      try {
-        // 使用 SIGKILL 强制终止进程树
-        process.kill(-proc.pid, 'SIGKILL');
-      } catch (e) {
-        // 进程可能已经结束
+          require('child_process').execSync(`pkill -TERM -P ${proc.pid} || true`, { stdio: 'ignore' });
+          require('child_process').execSync(`pkill -KILL -P ${proc.pid} || true`, { stdio: 'ignore' });
+        } catch (_) {}
         try {
-          proc.kill('SIGKILL');
-        } catch (e2) {
-          // 忽略
-        }
+          if (process.platform !== 'win32') {
+            process.kill(-proc.pid, 'SIGTERM');
+          }
+        } catch (_) {}
+        try {
+          if (process.platform !== 'win32') {
+            process.kill(-proc.pid, 'SIGKILL');
+          }
+        } catch (_) {}
       }
+      try { proc.kill('SIGTERM'); } catch (_) {}
+      try { proc.kill('SIGKILL'); } catch (_) {}
     }
     processes.clear();
   }
+  activeProcesses.delete(connectionId);
+}
+function startExportSession(connectionId, traceId) {
+  const nextTraceId = traceId || `connection-${connectionId}`;
+  const existing = exportSessions.get(connectionId);
+  if (!existing || existing.traceId !== nextTraceId) {
+    const session = { traceId: nextTraceId, cancelled: false, startedAt: Date.now() };
+    exportSessions.set(connectionId, session);
+    cancelFlags.set(connectionId, false);
+    return session;
+  }
+  return existing;
+}
+
+function cancelExportSession(connectionId) {
+  cancelFlags.set(connectionId, true);
+  const existing = exportSessions.get(connectionId);
+  if (existing) {
+    existing.cancelled = true;
+  }
+}
+
+function isExportSessionCancelled(connectionId, traceId) {
+  const existing = exportSessions.get(connectionId);
+  if (!existing) return cancelFlags.get(connectionId) === true;
+  const sameTrace = !traceId || existing.traceId === traceId;
+  return sameTrace && existing.cancelled === true;
 }
 const crypto = require('crypto');
 
@@ -1295,18 +1318,11 @@ class UploadQueue {
         );
         
         if (isHeif) {
-          // 使用 sharp 将 HEIF 转换为 JPEG 格式
-          const sharpImage = sharp(buffer);
-          
-          // 转换为 JPEG 格式（统一格式，减小文件大小，提高兼容性）
-          finalBuffer = await sharpImage
-            .resize(1920, null, {
-              withoutEnlargement: true,
-              fit: 'inside'
-            })
-            .jpeg({ quality: 85 })
-            .toBuffer();
-          
+          const normalizedImage = await normalizeStillImageToJpeg(
+            { buffer, fileName: filename, mimeType: detectedMime },
+            { maxWidth: 1920, quality: 85, execAsync, timeout: 60000 }
+          );
+          finalBuffer = normalizedImage.buffer;
           finalMimeType = 'image/jpeg';
           
           const compressedSize = finalBuffer.length;
@@ -3066,7 +3082,7 @@ wss.on('connection', (ws, req) => {
     
     // 处理取消 GIF 导出请求
     if (data.type === 'cancel-gif-export') {
-      cancelFlags.set(connectionId, true);
+      cancelExportSession(connectionId);
       
       // ✅ 立即终止所有活动的子进程（ImageMagick、FFmpeg 等）
       killActiveProcesses(connectionId);
@@ -3757,9 +3773,16 @@ wss.on('connection', (ws, req) => {
     
     // 处理带标注的 GIF 合成请求
     if (data.type === 'compose-annotated-gif') {
-      // 重置取消标志
-      cancelFlags.set(connectionId, false);
       const exportTraceId = data.exportTraceId || null;
+      const exportSession = startExportSession(connectionId, exportTraceId);
+      if (exportSession.cancelled || isExportSessionCancelled(connectionId, exportTraceId)) {
+        sendToFigma(targetGroup, {
+          type: 'gif-compose-cancelled',
+          message: '导出已取消',
+          exportTraceId
+        });
+        return;
+      }
       
       console.log(`\n🎬 收到 GIF 导出请求: ${data.frameName || '未命名'} (${data.gifInfos?.length || 0} 个 GIF)`);
       sendToFigma(targetGroup, {
@@ -3811,7 +3834,7 @@ wss.on('connection', (ws, req) => {
           exportMode: data.exportMode || 'auto', // auto: 按阈值切换 fast/quality
           // 🔍 验证: 确保从 UI 正确接收算法设置
           connectionId: connectionId,
-          shouldCancel: () => cancelFlags.get(connectionId) === true,
+          shouldCancel: () => isExportSessionCancelled(connectionId, exportTraceId),
           onProgress: (percent, message) => {
             try {
               sendToFigma(targetGroup, {
@@ -3851,6 +3874,11 @@ wss.on('connection', (ws, req) => {
         };
         console.log(result.skipped ? '   📤 发送跳过消息到 Figma' : `   📤 发送成功消息到 Figma (耗时 ${durationSeconds}s)`);
         sendToFigma(targetGroup, successMsg);
+        const successSession = exportSessions.get(connectionId);
+        if (successSession && (!exportTraceId || successSession.traceId === exportTraceId) && !successSession.cancelled) {
+          exportSessions.delete(connectionId);
+          cancelFlags.delete(connectionId);
+        }
         
         // 🧹 异步清理上传缓存（不阻塞用户体验）
         setImmediate(() => {
@@ -3915,6 +3943,11 @@ wss.on('connection', (ws, req) => {
             exportModeEvaluated: typeof error.exportModeEvaluated === 'boolean' ? error.exportModeEvaluated : false,
             exportTraceId
           });
+          const cancelSession = exportSessions.get(connectionId);
+          if (cancelSession && (!exportTraceId || cancelSession.traceId === exportTraceId)) {
+            exportSessions.delete(connectionId);
+          }
+          cancelFlags.delete(connectionId);
           
           // 清理临时文件
           try {
@@ -3960,6 +3993,11 @@ wss.on('connection', (ws, req) => {
             exportModeEvaluated: typeof error.exportModeEvaluated === 'boolean' ? error.exportModeEvaluated : false,
             exportTraceId
           });
+          const residualCancelSession = exportSessions.get(connectionId);
+          if (residualCancelSession && (!exportTraceId || residualCancelSession.traceId === exportTraceId)) {
+            exportSessions.delete(connectionId);
+          }
+          cancelFlags.delete(connectionId);
           return;
         }
         
@@ -4002,6 +4040,11 @@ wss.on('connection', (ws, req) => {
         })) {
           console.warn('   ⚠️ 无法发送错误消息：Figma WebSocket未连接');
         }
+        const errorSession = exportSessions.get(connectionId);
+        if (errorSession && (!exportTraceId || errorSession.traceId === exportTraceId)) {
+          exportSessions.delete(connectionId);
+        }
+        cancelFlags.delete(connectionId);
       }
       return;
     }
@@ -4326,6 +4369,7 @@ wss.on('connection', (ws, req) => {
         connections.delete(connectionId);
         // 清理取消标志和活动进程
         cancelFlags.delete(connectionId);
+        exportSessions.delete(connectionId);
         killActiveProcesses(connectionId);
         activeProcesses.delete(connectionId);
       }
@@ -4357,6 +4401,7 @@ const _staleWsSweepTimer = setInterval(() => {
     if (!group.figma && !group.mac) {
       connections.delete(connectionId);
       cancelFlags.delete(connectionId);
+      exportSessions.delete(connectionId);
       killActiveProcesses(connectionId);
       activeProcesses.delete(connectionId);
     }

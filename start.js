@@ -156,93 +156,22 @@ function acquireStartLockOrExit() {
   return true;
 }
 
-function getCurrentSharpCpu() {
-  return process.arch === 'arm64' ? 'arm64' : 'x64';
-}
-
-function getRequiredDepsExcludingSharp() {
+function getRequiredNodeDeps() {
   try {
     const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
-    return Object.keys(pkg.dependencies || {}).filter(dep => dep !== 'sharp');
+    return Object.keys(pkg.dependencies || {});
   } catch (_) {
     return ['dotenv', 'ws', 'express', 'googleapis', 'chokidar'];
   }
 }
 
-function hasRequiredDepsExcludingSharp(rootDir) {
+function hasRequiredNodeDeps(rootDir) {
   try {
-    for (const dep of getRequiredDepsExcludingSharp()) {
+    for (const dep of getRequiredNodeDeps()) {
       require.resolve(dep, { paths: [rootDir] });
     }
     return true;
   } catch (_) {
-    return false;
-  }
-}
-
-function cleanSharpArtifacts() {
-  const nodeModulesPath = path.join(__dirname, 'node_modules');
-  try {
-    fs.rmSync(path.join(nodeModulesPath, 'sharp'), { recursive: true, force: true });
-    fs.rmSync(path.join(nodeModulesPath, '@img'), { recursive: true, force: true });
-  } catch (_) {}
-}
-
-function installSharpForCurrentArch() {
-  const cpu = getCurrentSharpCpu();
-  const sharpEnv = {
-    ...process.env,
-    npm_config_os: 'darwin',
-    npm_config_cpu: cpu,
-    npm_config_loglevel: 'warn',
-    npm_config_strict_ssl: 'false'
-  };
-  const registries = ['https://registry.npmmirror.com', 'https://registry.npmjs.org'];
-
-  cleanSharpArtifacts();
-
-  // Strategy 1: npm install sharp
-  for (const registry of registries) {
-    try {
-      execSync(`npm install --no-save --include=optional --legacy-peer-deps sharp --registry=${registry}`, {
-        cwd: __dirname, stdio: 'inherit', timeout: 8 * 60 * 1000, env: sharpEnv
-      });
-      if (canLoadSharp()) return;
-    } catch (_) {}
-  }
-
-  // Strategy 2: explicitly install platform-specific binding
-  console.log(`   ↪️ 尝试显式安装平台包 @img/sharp-darwin-${cpu}...`);
-  cleanSharpArtifacts();
-  for (const registry of registries) {
-    try {
-      execSync(`npm install --no-save --legacy-peer-deps sharp @img/sharp-darwin-${cpu} @img/sharp-libvips-darwin-${cpu} --registry=${registry}`, {
-        cwd: __dirname, stdio: 'inherit', timeout: 8 * 60 * 1000, env: sharpEnv
-      });
-      if (canLoadSharp()) return;
-    } catch (_) {}
-  }
-
-  // Strategy 3: npm rebuild
-  try {
-    execSync('npm rebuild sharp --include=optional', {
-      cwd: __dirname, stdio: 'inherit', timeout: 5 * 60 * 1000, env: sharpEnv
-    });
-    if (canLoadSharp()) return;
-  } catch (_) {}
-
-  throw new Error(`sharp 安装失败（darwin-${cpu}），所有策略均已尝试`);
-}
-
-function canLoadSharp() {
-  try {
-    delete require.cache[require.resolve('sharp')];
-  } catch (_) {}
-  try {
-    require('sharp');
-    return true;
-  } catch (error) {
-    console.error('❌ sharp 运行时加载失败:', error.message);
     return false;
   }
 }
@@ -553,7 +482,7 @@ function checkEnvironment() {
     stdio: 'inherit',
     timeout: 300000
   });
-  if (!fs.existsSync(nodeModulesPath) || !hasRequiredDepsExcludingSharp(__dirname)) {
+  if (!fs.existsSync(nodeModulesPath) || !hasRequiredNodeDeps(__dirname)) {
     console.warn('⚠️  警告: 未找到 node_modules 文件夹');
     console.log('   🔧 正在尝试自动安装依赖...');
     
@@ -576,7 +505,7 @@ function checkEnvironment() {
   }
 
   // 检查关键依赖
-  const requiredDeps = getRequiredDepsExcludingSharp();
+  const requiredDeps = getRequiredNodeDeps();
   for (const dep of requiredDeps) {
     const depPath = path.join(nodeModulesPath, dep);
     if (!fs.existsSync(depPath)) {
@@ -600,20 +529,6 @@ function checkEnvironment() {
     }
   }
 
-  if (!canLoadSharp()) {
-    console.log(`   🔧 首次运行将自动安装 sharp（darwin-${getCurrentSharpCpu()}）...`);
-    try {
-      installSharpForCurrentArch();
-      if (!canLoadSharp()) {
-        console.error('❌ 自动安装 sharp 后仍无法加载');
-        return false;
-      }
-      console.log('✅ sharp 已按当前架构安装并可运行');
-    } catch (error) {
-      console.error('❌ 自动安装 sharp 失败:', error.message);
-      return false;
-    }
-  }
   console.log('✅ 环境检查通过');
   return true;
 }

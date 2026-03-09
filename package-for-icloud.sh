@@ -178,11 +178,10 @@ cp package.json "$PROJECT_DIR/"
 cp package-lock.json "$PROJECT_DIR/" 2>/dev/null || true
 cp README.md "$PROJECT_DIR/" 2>/dev/null || true
 
-# 离线 runtime（仅保留 Node.js 与工具二进制；sharp 改为首次运行自动安装）
+# 离线 runtime（仅保留 Node.js 与工具二进制）
 if [ -d "runtime" ]; then
     echo -e "${YELLOW}🧰 复制离线 runtime...${NC}"
     rsync -a "runtime/" "$PROJECT_DIR/runtime/"
-    rm -rf "$PROJECT_DIR/runtime/sharp-vendor"
 fi
 
 validate_runtime_arch_bundle "$PROJECT_DIR/runtime" "intel" "x86_64"

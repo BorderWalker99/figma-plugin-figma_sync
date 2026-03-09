@@ -46,11 +46,19 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
     if (shouldCancel && shouldCancel()) {
       return Promise.reject(new Error('GIF_EXPORT_CANCELLED'));
     }
-    return execAsyncCancellable(cmd, options, connectionId);
+    return execAsyncCancellable(cmd, options, connectionId).then((result) => {
+      if (shouldCancel && shouldCancel()) {
+        throw new Error('GIF_EXPORT_CANCELLED');
+      }
+      return result;
+    });
   };
 
   // 进度汇报辅助函数
   const reportProgress = (percent, message) => {
+    if (shouldCancel && shouldCancel()) {
+      throw new Error('GIF_EXPORT_CANCELLED');
+    }
     if (onProgress) {
       onProgress(percent, message);
     }

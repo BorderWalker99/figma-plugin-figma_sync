@@ -505,7 +505,7 @@ async function ensureUpdateDependencies(targetGroup) {
   // 1) Node.js project dependencies (for newly introduced npm deps)
   sendProgress('checking', '正在检查运行依赖...');
   const nodeModulesPath = path.join(__dirname, 'node_modules');
-  const requiredNodeDeps = ['dotenv', 'ws', 'express', 'sharp', 'chokidar'];
+  const requiredNodeDeps = ['dotenv', 'ws', 'express', 'chokidar'];
   const missingNodeDeps = requiredNodeDeps.filter(dep => !fs.existsSync(path.join(nodeModulesPath, dep)));
 
   if (missingNodeDeps.length > 0) {

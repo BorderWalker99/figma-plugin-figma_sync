@@ -99,7 +99,7 @@ module.exports = {
     uploadCompressMb: envNumber('UPLOAD_COMPRESS_THRESHOLD_MB', 120),
     // 服务端普通压缩分层阈值
     uploadTier80Mb: envNumber('UPLOAD_TIER_80_MB', 80),
-    // 手动同步小图极速直通阈值（<=该值时可跳过 sharp 压缩，直传到 Figma）
+    // 手动同步小图极速直通阈值（<=该值时可跳过二次压缩，直传到 Figma）
     manualImageFastPassKb: envNumber('MANUAL_IMAGE_FAST_PASS_KB', 1024),
 
     // ── 分块上传参数（手机→服务器的切片策略）──

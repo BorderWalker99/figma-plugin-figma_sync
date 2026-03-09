@@ -8328,6 +8328,7 @@
         showToast(msg.error, 'error');
         // Reset button state
         stopSmoothProgress();
+        resetExportProgressState();
         const exportBtn = document.getElementById('exportGifBtn');
         if (exportBtn) {
             exportBtn.classList.remove('success');
@@ -8347,6 +8348,7 @@
             if (ring) ring.style.opacity = 0;
         }
         isExporting = false;
+        resetExportProgressState();
       } else if (msg.type === 'frame-selection-result') {
         // Handle frame selection check result
         if (!msg.hasValidFrame) {
@@ -8451,6 +8453,7 @@
           }
           isExporting = false;
           stopSmoothProgress();
+          resetExportProgressState();
           activeGifExportTraceId = null;
         }
       } else if (msg.type === 'frame-created') {
@@ -8787,6 +8790,12 @@
     var exportGifBtn = null;
     var smoothProgressInterval = null;
     var currentSmoothProgress = 0;
+    var exportStartedAt = 0;
+    var exportEstimatedTotalMs = 0;
+    var exportTargetProgress = 0;
+    var exportLastRealProgress = 0;
+    var exportProgressMessage = '';
+    var exportLinearCap = 97.2;
     
     // 跟踪窗口焦点状态（用于判断是否显示 toast）
     var windowHasFocus = !document.hidden;
@@ -9030,8 +9039,12 @@
             console.warn('⚠️ setExportProgress: 元素未找到', { progressCircle, progressRing });
             return;
         }
+
+        const clampedPercent = (isExporting && percent < 100)
+            ? Math.min(exportLinearCap, Math.max(0, percent))
+            : Math.min(100, Math.max(0, percent));
         
-        const offset = circumference - (percent / 100) * circumference;
+        const offset = circumference - (clampedPercent / 100) * circumference;
         progressCircle.style.strokeDashoffset = offset;
         progressRing.style.opacity = 1;
     }
@@ -9250,10 +9263,11 @@
         
         // 如果有消息，可以更新状态文本（如果有状态显示区域的话）
         if (message) {
+            exportProgressMessage = message;
             // 可选：更新按钮文字显示当前状态
             if (exportGifBtn && !exportGifBtn.classList.contains('success')) {
                const btnText = exportGifBtn.querySelector('span');
-               if (btnText) btnText.textContent = t('btn_exporting', percent);
+               if (btnText) btnText.textContent = t('btn_exporting', Math.max(1, Math.round(currentSmoothProgress || percent)));
             }
         }
 
@@ -9272,23 +9286,42 @@
         if (totalExports > 1) {
             batchProgress = ((completedExports * 100) + percent) / totalExports;
         }
-        
-        // 确保进度不倒退
-        if (batchProgress > currentSmoothProgress) {
-             currentSmoothProgress = batchProgress;
-             setExportProgress(currentSmoothProgress);
+
+        exportLastRealProgress = Math.max(exportLastRealProgress, batchProgress);
+        exportTargetProgress = Math.max(exportTargetProgress, batchProgress);
+
+        if (exportStartedAt > 0 && batchProgress > 0.5) {
+            const elapsed = Math.max(1000, Date.now() - exportStartedAt);
+            // 服务器阶段进度在 fast 档会明显前置，不能直接当成线性完成度。
+            // 这里做一层保守校正，仅用于估算总时长，不直接驱动 UI 满条。
+            const calibratedCompletion = Math.pow(
+                Math.min(exportLinearCap, batchProgress) / 100,
+                1.32
+            );
+            const instantEstimate = elapsed / Math.max(0.02, calibratedCompletion);
+            const minEstimate = Math.max(30000, totalExports * 25000);
+            const maxEstimate = Math.max(15 * 60 * 1000, totalExports * 8 * 60 * 1000);
+            const boundedEstimate = Math.max(minEstimate, Math.min(maxEstimate, instantEstimate));
+            if (exportEstimatedTotalMs <= 0) {
+                exportEstimatedTotalMs = boundedEstimate;
+            } else {
+                const blend = boundedEstimate >= exportEstimatedTotalMs ? 0.3 : 0.12;
+                exportEstimatedTotalMs = (exportEstimatedTotalMs * (1 - blend)) + (boundedEstimate * blend);
+            }
         }
     }
 
-    // Smooth progress simulation for better UX
-    // 现在主要作为"心跳"动画，防止用户以为卡死
     function startSmoothProgress() {
         
         if (smoothProgressInterval) clearInterval(smoothProgressInterval);
         
-        // 初始进度
+        exportStartedAt = Date.now();
+        exportEstimatedTotalMs = Math.max(60000, totalExports * 90000);
+        exportTargetProgress = 2;
+        exportLastRealProgress = 0;
+        exportProgressMessage = '';
         currentSmoothProgress = 2;
-        lastProgressUpdate = Date.now(); // 记录开始时间
+        lastProgressUpdate = exportStartedAt;
         setExportProgress(currentSmoothProgress);
         
         if (exportGifBtn) {
@@ -9300,21 +9333,28 @@
         startExportStallDetection();
         
         smoothProgressInterval = setInterval(() => {
-            // 仅仅做极缓慢的增加，作为"我还在运行"的信号
-            // 如果真实进度来了，currentSmoothProgress 会被 updateRealProgress 大幅更新
-            
-            // 如果卡在某个进度太久，最多自动爬升 5%
-            // 比如当前是 30%，最多自动爬到 35%，然后等待服务器消息
-            
-            // 这里我们只做非常微小的蠕动，每 100ms 增加 0.05%
-            // 这样 1秒增加 0.5%，1分钟增加 30%
-            // 并在 95% 处封顶
-            
-            if (currentSmoothProgress < 95) {
-                currentSmoothProgress += 0.05;
+            if (!isExporting || exportStartedAt <= 0) return;
+
+            const elapsed = Math.max(0, Date.now() - exportStartedAt);
+            const desired = exportLastRealProgress > 0.5
+                ? Math.min(exportLinearCap, (elapsed / Math.max(exportEstimatedTotalMs, 1)) * exportLinearCap)
+                : Math.min(10, 2 + (elapsed / 10000) * 8);
+
+            if (desired > currentSmoothProgress) {
+                const gap = desired - currentSmoothProgress;
+                const step = Math.max(0.06, Math.min(0.4, gap * 0.14));
+                currentSmoothProgress = Math.min(desired, currentSmoothProgress + step);
                 setExportProgress(currentSmoothProgress);
             }
-            
+
+            if (exportGifBtn && !exportGifBtn.classList.contains('success')) {
+                const btnText = exportGifBtn.querySelector('span');
+                if (btnText) {
+                    btnText.textContent = exportProgressMessage
+                        ? t('btn_exporting', Math.max(1, Math.round(currentSmoothProgress)))
+                        : t('btn_exporting', Math.max(1, Math.round(currentSmoothProgress)));
+                }
+            }
         }, 100); 
     }
     
@@ -9348,7 +9388,7 @@
                 isExporting = false;
                 totalExports = 0;
                 completedExports = 0;
-                currentSmoothProgress = 0;
+                resetExportProgressState();
                 
                 // 重置 UI
                 if (exportGifBtn) {
@@ -9387,6 +9427,15 @@
             clearInterval(smoothProgressInterval);
             smoothProgressInterval = null;
         }
+    }
+
+    function resetExportProgressState() {
+        exportStartedAt = 0;
+        exportEstimatedTotalMs = 0;
+        exportTargetProgress = 0;
+        exportLastRealProgress = 0;
+        exportProgressMessage = '';
+        currentSmoothProgress = 0;
     }
 
     function createSplashParticles(rect) {
@@ -9432,7 +9481,7 @@
         isCancellingExport = true;
 
         // 发送取消消息给后端
-        postToPlugin('cancel-gif-export');
+        postToPlugin('cancel-gif-export', { exportTraceId: activeGifExportTraceId });
         
         // 立即停止平滑进度动画
         stopSmoothProgress();
@@ -9442,7 +9491,7 @@
         isExporting = false;
         totalExports = 0;
         completedExports = 0;
-        currentSmoothProgress = 0;
+        resetExportProgressState();
         
         // 重置 UI 到初始状态
         if (exportGifBtn) {
@@ -9476,7 +9525,7 @@
         }
         
         // 通知服务器取消所有进行中的处理
-        wsSend('cancel-gif-export');
+        wsSend('cancel-gif-export', { exportTraceId: activeGifExportTraceId });
         
     }
 
@@ -9492,6 +9541,7 @@
             
             setTimeout(() => {
                 isExporting = false;
+                resetExportProgressState();
                 
                 // Remove exporting class
                 if (exportGifBtn) {
@@ -9535,6 +9585,7 @@
             
             setTimeout(() => {
                 isExporting = false;
+                resetExportProgressState();
                 
                 // Remove exporting class
                 if (exportGifBtn) {
