@@ -2288,7 +2288,24 @@ ipcMain.handle('start-server', async (event, installPath) => {
       finish({ success: false, error: '未找到可用的 Node.js 可执行文件（请检查 Node 安装）' });
       return;
     }
-    
+
+    // Remove stale start.js lock file so the new process won't exit(0) immediately.
+    // Also kill any orphaned start.js that might still be holding the lock.
+    try {
+      const lockDir = path.join(os.tmpdir(), 'screensync-locks');
+      const lockHash = require('crypto').createHash('md5').update(installPath).digest('hex');
+      const lockFile = path.join(lockDir, `start-${lockHash}.lock`);
+      if (fs.existsSync(lockFile)) {
+        try {
+          const lockInfo = JSON.parse(fs.readFileSync(lockFile, 'utf8'));
+          if (lockInfo && lockInfo.pid) {
+            try { process.kill(lockInfo.pid, 'SIGKILL'); } catch (_) {}
+          }
+        } catch (_) {}
+        try { fs.unlinkSync(lockFile); } catch (_) {}
+      }
+    } catch (_) {}
+
     const child = spawn(nodePath, [startScript], {
       cwd: installPath,
       stdio: 'pipe',

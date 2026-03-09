@@ -136,7 +136,9 @@ echo -e "   ${YELLOW}正在打包服务器...${NC}"
 # 先清理日志和临时文件
 find . -maxdepth 1 -name "*.log" -delete 2>/dev/null || true
 rm -f .user-config.json .sync-mode 2>/dev/null || true
-if ./package-for-distribution.sh > /dev/null 2>&1; then
+PACKAGE_LOG=$(mktemp)
+if ./package-for-distribution.sh > "$PACKAGE_LOG" 2>&1; then
+    rm -f "$PACKAGE_LOG"
     INTEL_TAR="ScreenSync-Intel.tar.gz"
     APPLE_TAR="ScreenSync-Apple.tar.gz"
     
@@ -159,6 +161,9 @@ if ./package-for-distribution.sh > /dev/null 2>&1; then
     fi
 else
     echo -e "   ${RED}❌ 服务器打包失败${NC}"
+    echo -e "${YELLOW}--- 打包脚本输出（最后 80 行）---${NC}"
+    tail -n 80 "$PACKAGE_LOG" 2>/dev/null || cat "$PACKAGE_LOG"
+    rm -f "$PACKAGE_LOG"
     exit 1
 fi
 

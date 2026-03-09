@@ -1504,11 +1504,18 @@ async function handleDriveFile(file, deleteAfterSync = false, progressCb = null,
           backupImageFilename = file.name.replace(/\.(heic|heif)$/i, '.jpg');
           backupImageMimeType = 'image/jpeg';
         } else {
-          const normalizedImage = await normalizeStillImageToJpeg(
-            { buffer: convertedBuffer, fileName: file.name.replace(/\.(heic|heif)$/i, '.jpg'), mimeType: 'image/jpeg' },
-            { maxWidth: CONFIG.maxWidth, quality: CONFIG.quality, execAsync, timeout: 60000 }
-          );
-          processedBuffer = normalizedImage.buffer;
+          try {
+            const normalizedImage = await normalizeStillImageToJpeg(
+              { buffer: convertedBuffer, fileName: file.name.replace(/\.(heic|heif)$/i, '.jpg'), mimeType: 'image/jpeg' },
+              { maxWidth: CONFIG.maxWidth, quality: CONFIG.quality, execAsync, timeout: 60000 }
+            );
+            processedBuffer = normalizedImage.buffer;
+          } catch (normalizeError) {
+            console.warn(`   ⚠️  [HEIF] JPEG 标准化失败，回退使用 sips 结果: ${normalizeError.message}`);
+            processedBuffer = convertedBuffer;
+          }
+          backupImageFilename = file.name.replace(/\.(heic|heif)$/i, '.jpg');
+          backupImageMimeType = 'image/jpeg';
         }
         
         // 清理临时文件
@@ -2207,6 +2214,12 @@ function connectWebSocket() {
 
   ws.on('open', () => {
     console.log('✅ [Drive] 已连接到服务器');
+    if (wasRealTimeMode && !isRealTimeMode) {
+      console.log('🔄 [Drive] 恢复断线前的实时同步模式...');
+      isRealTimeMode = true;
+      _abortAllConversions = false;
+      startPolling();
+    }
   });
 
   ws.on('message', async (data) => {

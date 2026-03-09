@@ -120,7 +120,20 @@ fi
 rm -rf dist
 
 echo -e "   ${YELLOW}构建双架构 DMG...${NC}"
-npm run build:mac
+BUILD_ATTEMPTS=2
+attempt=1
+while [ $attempt -le $BUILD_ATTEMPTS ]; do
+    if npm run build:mac; then
+        break
+    fi
+    if [ $attempt -eq $BUILD_ATTEMPTS ]; then
+        echo -e "${RED}❌ electron-builder 在 ${BUILD_ATTEMPTS} 次尝试后仍失败（常见原因：hdiutil 临时失败、路径含空格、磁盘空间）${NC}"
+        exit 1
+    fi
+    echo -e "   ${YELLOW}第 ${attempt} 次构建失败，正在重试...${NC}"
+    rm -rf dist
+    attempt=$((attempt + 1))
+done
 
 # 定位构建产物（dist 已清空重建，按文件名后缀识别架构）
 DMG_INTEL=""

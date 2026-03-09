@@ -14,6 +14,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const crypto = require('crypto');
 const { execSync, spawn } = require('child_process');
 
 function shQuote(input) {
@@ -65,6 +66,39 @@ function spawnDirectServer(nodePath, startScript, installPath, comprehensivePath
   } catch (_) {
     return false;
   }
+}
+
+/**
+ * Kill ALL ScreenSync-related processes (start.js, server.js, watchers)
+ * for the given installPath, AND remove the start.js lock file.
+ * This ensures a truly clean slate for LaunchAgent to start fresh.
+ */
+function killAllScreenSyncProcesses(installPath) {
+  run('lsof -ti :8888 | xargs kill -9 2>/dev/null');
+
+  const scriptNames = ['start.js', 'server.js', 'drive-watcher.js', 'icloud-watcher.js', 'aliyun-watcher.js'];
+  const myPid = String(process.pid);
+  for (const name of scriptNames) {
+    const fullPath = path.join(installPath, name);
+    const res = run(`pgrep -f ${shQuote(fullPath)}`);
+    if (res.ok && res.out) {
+      const pids = res.out.split('\n').map(s => s.trim()).filter(s => s && s !== myPid);
+      if (pids.length > 0) {
+        run(`kill -9 ${pids.join(' ')} 2>/dev/null`);
+      }
+    }
+  }
+
+  removeStartLock(installPath);
+}
+
+function removeStartLock(installPath) {
+  try {
+    const lockDir = path.join(os.tmpdir(), 'screensync-locks');
+    const lockHash = crypto.createHash('md5').update(installPath).digest('hex');
+    const lockFile = path.join(lockDir, `start-${lockHash}.lock`);
+    fs.unlinkSync(lockFile);
+  } catch (_) {}
 }
 
 function buildPlist(nodePath, installPath, comprehensivePath) {
@@ -194,7 +228,6 @@ function main() {
   const launchAgentsDir = path.join(os.homedir(), 'Library', 'LaunchAgents');
   fs.mkdirSync(launchAgentsDir, { recursive: true });
 
-  // Clean up any old ScreenSync LaunchAgents (e.g. from Electron) to avoid conflicts
   cleanOldLaunchAgents();
 
   const plistName = 'com.screensync.server.plist';
@@ -237,28 +270,12 @@ function main() {
   const uidRes = run('id -u');
   let loaded = false;
 
-  // Re-enable the label in case a previous install disabled it
   if (uidRes.ok && uidRes.out) {
     const domain = `gui/${uidRes.out}`;
     run(`launchctl enable ${domain}/${label} 2>/dev/null`);
   }
 
-  // Kill any stale server so the LaunchAgent can start cleanly (no port conflict)
-  run('lsof -ti :8888 | xargs kill -9 2>/dev/null');
-  sleepSec(1);
-
-  // Clear old log files so diagnostic only shows errors from this run
-  const logPaths = [
-    path.join(installPath, 'server.log'),
-    path.join(installPath, 'server-error.log'),
-    '/tmp/screensync-server.log',
-    '/tmp/screensync-server-error.log',
-  ];
-  for (const lp of logPaths) {
-    try { fs.writeFileSync(lp, '', 'utf8'); } catch (_) {}
-  }
-
-  // Unload old agent, then load the new plist (RunAtLoad will start the server)
+  // ── Phase 1: Load plist into launchd (configure autostart for reboot) ──
   run(`launchctl unload ${shQuote(plistPath)} 2>/dev/null`);
   sleepSec(1);
   const loadRes = run(`launchctl load ${shQuote(plistPath)}`);
@@ -281,6 +298,29 @@ function main() {
     process.exit(1);
   }
 
+  // ── Phase 2: If server is already running (from installer's start-server), done ──
+  // The installer starts the server BEFORE calling setup-autostart.
+  // Don't kill it — just let it keep running. LaunchAgent will take over on next reboot.
+  if (portReady()) {
+    output({ success: true, message: '服务器已启动并配置为开机自动启动' });
+    process.exit(0);
+  }
+
+  // ── Phase 3: Server not running. Full cleanup → fresh LaunchAgent start ──
+  killAllScreenSyncProcesses(installPath);
+
+  const logPaths = [
+    path.join(installPath, 'server.log'),
+    path.join(installPath, 'server-error.log'),
+    '/tmp/screensync-server.log',
+    '/tmp/screensync-server-error.log',
+  ];
+  for (const lp of logPaths) {
+    try { fs.writeFileSync(lp, '', 'utf8'); } catch (_) {}
+  }
+
+  sleepSec(2);
+
   if (uidRes.ok && uidRes.out) {
     const domain = `gui/${uidRes.out}`;
     run(`launchctl kickstart -k ${domain}/${label} 2>/dev/null`);
@@ -288,16 +328,17 @@ function main() {
     run(`launchctl start ${label} 2>/dev/null`);
   }
 
-  // Poll for server to be ready (LaunchAgent's RunAtLoad starts it)
-  // 某些机器 launchd 首次拉起较慢，这里放宽等待窗口，避免误报“自启动失败”。
-  if (waitForPortReady(60, 1)) {
+  if (waitForPortReady(30, 1)) {
     output({ success: true, message: '服务器已启动并配置为开机自动启动' });
     process.exit(0);
   }
 
-  // Fallback: LaunchAgent didn't bring up the server; spawn directly
+  // ── Phase 4: LaunchAgent failed. Direct spawn fallback ──
+  killAllScreenSyncProcesses(installPath);
+  sleepSec(1);
+
   spawnDirectServer(nodePath, startScript, installPath, comprehensivePath);
-  if (waitForPortReady(20, 1)) {
+  if (waitForPortReady(15, 1)) {
     output({ success: true, message: '服务器已启动（直接启动模式），自启动已配置' });
     process.exit(0);
   }

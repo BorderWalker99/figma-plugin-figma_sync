@@ -1547,6 +1547,44 @@ function startWatching() {
       pollInterval: 100
     }
   });
+
+  function maybeEnqueueRealtimeAfterOrganize(finalPath, displayFilename, subfolder) {
+    if (!finalPath) return;
+
+    const finalExt = path.extname(finalPath).toLowerCase();
+    const isVideo = finalExt === '.mp4' || finalExt === '.mov';
+
+    if (!isRealTimeMode) {
+      console.log(`⏸️  文件已整理完成，但实时同步未开启（插件未连接）\n`);
+      return;
+    }
+
+    let stats = null;
+    try {
+      stats = fs.statSync(finalPath);
+    } catch (_) {
+      return;
+    }
+    if (!stats || !stats.isFile() || stats.size <= 0) return;
+
+    // 只补入本次实时会话期间新增的文件，避免把启动前已有文件误当成实时导入。
+    if (realtimeSessionStartedAt > 0 && stats.mtimeMs < (realtimeSessionStartedAt - REALTIME_RECONCILE_WINDOW_BACK_MS)) {
+      console.log(`⏭️  [实时模式] 跳过会话开始前文件: ${displayFilename}`);
+      return;
+    }
+
+    if (isFileProcessed(finalPath)) {
+      console.log(`\n⏭️  [实时模式] 跳过已同步文件: ${displayFilename}`);
+      return;
+    }
+
+    enqueueRealtimeSyncTask({
+      finalPath,
+      displayFilename,
+      subfolder,
+      isVideo
+    });
+  }
   
   const handleFileEvent = async (filePath) => {
     const filename = path.basename(filePath);
@@ -1625,34 +1663,11 @@ function startWatching() {
       subfolder = relativePath.split(path.sep)[0];
     }
     
-    // 重新检测文件类型（可能已经从 HEIF 转换为 JPEG）
-    const finalExt = path.extname(finalPath).toLowerCase();
-    const isGif = finalExt === '.gif';
-    const isVideo = finalExt === '.mp4' || finalExt === '.mov';
-    
     // ========================================
     // ✅ 第二步：检查是否需要同步到 Figma
     //    只有这部分需要插件连接
     // ========================================
-    
-    if (!isRealTimeMode) {
-      console.log(`⏸️  文件已整理完成，但实时同步未开启（插件未连接）\n`);
-      return;
-    }
-    
-    // 检查是否重复处理（同步阶段）
-    if (isFileProcessed(finalPath)) {
-      console.log(`\n⏭️  [实时模式] 跳过已同步文件: ${displayFilename}`);
-      return;
-    }
-    
-    // 实时模式按队列执行：图片/GIF优先，视频后处理，避免视频耗时影响图片进度
-    enqueueRealtimeSyncTask({
-      finalPath,
-      displayFilename,
-      subfolder,
-      isVideo
-    });
+    maybeEnqueueRealtimeAfterOrganize(finalPath, displayFilename, subfolder);
     return;
   };
   
@@ -1703,7 +1718,11 @@ function startWatching() {
           for (const file of files) {
             const filePath = path.join(CONFIG.icloudPath, file);
             try {
-              await moveFileToSubfolder(filePath);
+              const result = await moveFileToSubfolder(filePath);
+              const finalPath = result && result.newPath ? result.newPath : filePath;
+              const displayFilename = (result && result.newFilename) || path.basename(finalPath);
+              const subfolder = (result && result.subfolder) || getTargetSubfolder(displayFilename);
+              maybeEnqueueRealtimeAfterOrganize(finalPath, displayFilename, subfolder);
             } catch (e) {
               console.warn(`   ⚠️  整理失败: ${file} - ${e.message}`);
             }
@@ -2200,11 +2219,16 @@ async function syncScreenshot(filePath, deleteAfterSync = false, subfolder = nul
           // 小 HEIF 手动同步极速直通：sips 转 JPEG 后直接发送，跳过二次压缩
           imageBuffer = convertedBuffer;
         } else {
-          const normalizedImage = await normalizeStillImageToJpeg(
-            { buffer: convertedBuffer, fileName: filename.replace(/\.(heic|heif)$/i, '.jpg'), mimeType: 'image/jpeg' },
-            { maxWidth: CONFIG.maxWidth, quality: CONFIG.quality, execAsync, timeout: 60000 }
-          );
-          imageBuffer = normalizedImage.buffer;
+          try {
+            const normalizedImage = await normalizeStillImageToJpeg(
+              { buffer: convertedBuffer, fileName: filename.replace(/\.(heic|heif)$/i, '.jpg'), mimeType: 'image/jpeg' },
+              { maxWidth: CONFIG.maxWidth, quality: CONFIG.quality, execAsync, timeout: 60000 }
+            );
+            imageBuffer = normalizedImage.buffer;
+          } catch (normalizeError) {
+            console.warn(`   ⚠️  [HEIF] JPEG 标准化失败，回退使用 sips 结果: ${normalizeError.message}`);
+            imageBuffer = convertedBuffer;
+          }
         }
         
         try {
