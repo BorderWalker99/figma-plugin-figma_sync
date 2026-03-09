@@ -14,7 +14,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { execSync } = require('child_process');
+const { execSync, spawn } = require('child_process');
 
 function shQuote(input) {
   return `'${String(input).replace(/'/g, `'\"'\"'`)}'`;
@@ -38,6 +38,33 @@ function sleepSec(sec) {
 
 function portReady() {
   return run('lsof -i :8888 -sTCP:LISTEN').ok;
+}
+
+function waitForPortReady(attempts, sleepSeconds = 1) {
+  for (let i = 0; i < attempts; i++) {
+    sleepSec(sleepSeconds);
+    if (portReady()) return true;
+  }
+  return false;
+}
+
+function spawnDirectServer(nodePath, startScript, installPath, comprehensivePath) {
+  try {
+    const env = { ...process.env };
+    if (comprehensivePath) {
+      env.PATH = env.PATH ? `${comprehensivePath}:${env.PATH}` : comprehensivePath;
+    }
+    const child = spawn(nodePath, [startScript], {
+      cwd: installPath,
+      detached: true,
+      stdio: 'ignore',
+      env,
+    });
+    child.unref();
+    return true;
+  } catch (_) {
+    return false;
+  }
 }
 
 function buildPlist(nodePath, installPath, comprehensivePath) {
@@ -197,8 +224,8 @@ function main() {
       .replace(/__NODE_PATH__/g, nodePath)
       .replace(/__INSTALL_PATH__/g, installPath)
       .replace(
-        /\/opt\/homebrew\/bin:\/usr\/local\/bin:\/usr\/bin:\/bin:\/usr\/sbin:\/sbin/g,
-        comprehensivePath
+        /(<key>PATH<\/key>\s*<string>)([^<]*)(<\/string>)/,
+        `$1${comprehensivePath}$3`
       );
   } else {
     plistContent = buildPlist(nodePath, installPath, comprehensivePath);
@@ -262,22 +289,17 @@ function main() {
   }
 
   // Poll for server to be ready (LaunchAgent's RunAtLoad starts it)
-  for (let i = 0; i < 20; i++) {
-    sleepSec(1);
-    if (portReady()) {
-      output({ success: true, message: '服务器已启动并配置为开机自动启动' });
-      process.exit(0);
-    }
+  // 某些机器 launchd 首次拉起较慢，这里放宽等待窗口，避免误报“自启动失败”。
+  if (waitForPortReady(60, 1)) {
+    output({ success: true, message: '服务器已启动并配置为开机自动启动' });
+    process.exit(0);
   }
 
   // Fallback: LaunchAgent didn't bring up the server; spawn directly
-  run(`${shQuote(nodePath)} ${shQuote(startScript)} >/tmp/screensync-server.log 2>/tmp/screensync-server-error.log &`);
-  for (let i = 0; i < 8; i++) {
-    sleepSec(1);
-    if (portReady()) {
-      output({ success: true, message: '服务器已启动（直接启动模式），自启动已配置' });
-      process.exit(0);
-    }
+  spawnDirectServer(nodePath, startScript, installPath, comprehensivePath);
+  if (waitForPortReady(20, 1)) {
+    output({ success: true, message: '服务器已启动（直接启动模式），自启动已配置' });
+    process.exit(0);
   }
 
   output({ success: false, error: '自启动已配置，但服务器未成功监听 8888 端口（请查看 /tmp/screensync-server-error.log）' });

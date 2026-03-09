@@ -765,13 +765,28 @@ window.finishInstallation = async function() {
     } else {
       // 配置自启动失败，但服务器已启动
       console.warn('自启动配置失败:', autostartResult.error);
-      button.textContent = t('server_started');
-      showToast(t('autostart_failed'), 'warning');
-      
-      // 仍然关闭安装器，因为服务器已经在运行
+      button.textContent = t('starting_server');
+
+      // setup-autostart 过程中会接管并重启 8888 进程。
+      // 如果自启动配置失败，补一次手动拉起，避免用户安装完成后插件仍显示“服务器未连接”。
+      const recoveryResult = await ipcRenderer.invoke('start-server', installPath);
+      if (recoveryResult.success) {
+        button.textContent = t('server_started');
+        showToast(t('autostart_failed'), 'warning');
         setTimeout(() => {
-        ipcRenderer.invoke('quit-app');
-      }, 2000);
+          ipcRenderer.invoke('quit-app');
+        }, 2500);
+      } else {
+        button.classList.remove('keep-raised');
+        button.disabled = false;
+        button.textContent = originalText;
+        showToast(t('config_failed'), 'error');
+        const detail = [
+          autostartResult.error || '',
+          recoveryResult.error ? `\n手动恢复启动失败:\n${recoveryResult.error}` : ''
+        ].filter(Boolean).join('\n');
+        showErrorDetailModal(detail, t('autostart_failed'));
+      }
     }
   } catch (err) {
     // 出错，恢复按钮状态
