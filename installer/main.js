@@ -86,6 +86,15 @@ try {
 let mainWindow;
 let currentInstallPath = '';
 let bundledRuntimeBinDirs = [];
+const INSTALLER_MOCK = process.env.SCREENSYNC_INSTALLER_MOCK === '1';
+const mockInstallerState = {
+  permissionApproved: false,
+  finalResult: 'success'
+};
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 function resolvePackageRootFromInstallPath(installPath) {
   if (!installPath || typeof installPath !== 'string') return '';
@@ -353,7 +362,9 @@ function createWindow() {
     show: false
   });
 
-  mainWindow.loadFile('index.html');
+  mainWindow.loadFile('index.html', {
+    query: { mock: INSTALLER_MOCK ? '1' : '0' }
+  });
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
@@ -379,8 +390,34 @@ app.on('window-all-closed', () => {
 });
 
 // IPC 处理函数
+ipcMain.handle('get-installer-env', async () => ({
+  mock: INSTALLER_MOCK,
+  mockState: { ...mockInstallerState },
+  version: app.getVersion()
+}));
+
+ipcMain.handle('set-installer-mock-state', async (event, patch = {}) => {
+  if (!INSTALLER_MOCK || !patch || typeof patch !== 'object') {
+    return { success: false, mockState: { ...mockInstallerState } };
+  }
+  if (typeof patch.permissionApproved === 'boolean') {
+    mockInstallerState.permissionApproved = patch.permissionApproved;
+  }
+  if (patch.finalResult === 'success' || patch.finalResult === 'error') {
+    mockInstallerState.finalResult = patch.finalResult;
+  }
+  if (patch.reset === true) {
+    mockInstallerState.permissionApproved = false;
+    mockInstallerState.finalResult = 'success';
+  }
+  return { success: true, mockState: { ...mockInstallerState } };
+});
+
 // 自动检测项目根目录
 ipcMain.handle('get-project-root', async () => {
+  if (INSTALLER_MOCK) {
+    return path.resolve(__dirname, '..');
+  }
   let appPath = app.getAppPath();
   console.log('原始 appPath:', appPath);
 
@@ -567,6 +604,10 @@ ipcMain.handle('select-project-root', async () => {
 });
 
 ipcMain.handle('set-install-path', async (event, installPath) => {
+  if (INSTALLER_MOCK) {
+    currentInstallPath = installPath || path.resolve(__dirname, '..');
+    return { success: true, runtimeApplied: true, runtimeBinDirs: [] };
+  }
   if (!installPath || typeof installPath !== 'string') {
     return { success: false, error: 'invalid-install-path' };
   }
@@ -854,6 +895,14 @@ ipcMain.handle('check-homebrew', async (event, installPath = null) => {
 });
 
 ipcMain.handle('check-fat-runtime', async (event, installPath = null) => {
+  if (INSTALLER_MOCK) {
+    await sleep(220);
+    return {
+      complete: true,
+      mock: true,
+      bins: [path.join(path.resolve(__dirname, '..'), 'runtime', 'bin')]
+    };
+  }
   if (installPath) {
     currentInstallPath = installPath;
     applyBundledRuntimeEnv(currentInstallPath);
@@ -1138,6 +1187,17 @@ ipcMain.handle('check-gifsicle', async (event, installPath = null) => {
 });
 
 ipcMain.handle('warmup-runtime-permissions', async (event, installPath = null) => {
+  if (INSTALLER_MOCK) {
+    await sleep(260);
+    if (mockInstallerState.permissionApproved) {
+      return { success: true, verifiedTools: ['Node.js', 'FFmpeg', 'Gifsicle', 'ImageMagick'] };
+    }
+    return {
+      success: false,
+      pendingTools: ['Node.js', 'FFmpeg', 'Gifsicle', 'ImageMagick'],
+      guidance: 'mock pending'
+    };
+  }
   const targetPath = installPath || currentInstallPath;
   if (targetPath) {
     currentInstallPath = targetPath;
@@ -1159,6 +1219,10 @@ ipcMain.handle('warmup-runtime-permissions', async (event, installPath = null) =
 });
 
 ipcMain.handle('open-security-settings', async () => {
+  if (INSTALLER_MOCK) {
+    mockInstallerState.permissionApproved = true;
+    return { success: true, mock: true };
+  }
   try {
     await execPromise('open "x-apple.systempreferences:com.apple.preference.security"', { timeout: 10000 });
     return { success: true };
@@ -1176,6 +1240,9 @@ ipcMain.handle('open-security-settings', async () => {
 });
 
 ipcMain.handle('check-icloud-space', async () => {
+  if (INSTALLER_MOCK) {
+    return { available: true, mock: true };
+  }
   const icloudPath = path.join(
     os.homedir(),
     'Library/Mobile Documents/com~apple~CloudDocs/ScreenSyncImg'
@@ -2193,6 +2260,10 @@ ipcMain.handle('install-all-dependencies', async (event, dependencyStatus, optio
 });
 
 ipcMain.handle('install-dependencies', async (event, installPath) => {
+  if (INSTALLER_MOCK) {
+    await sleep(700);
+    return { success: true, bundled: true, mock: true };
+  }
   return new Promise(async (resolve) => {
     console.log('📦 开始安装依赖...');
     console.log('📂 安装路径:', installPath);
@@ -2485,6 +2556,9 @@ ipcMain.handle('install-dependencies', async (event, installPath) => {
 });
 
 ipcMain.handle('save-language', async (event, installPath, language) => {
+  if (INSTALLER_MOCK) {
+    return { success: true, mock: true };
+  }
   try {
     const configPath = path.join(installPath, '.user-config.json');
     let config = {};
@@ -2501,6 +2575,10 @@ ipcMain.handle('save-language', async (event, installPath, language) => {
 });
 
 ipcMain.handle('setup-config', async (event, installPath, syncMode, localFolder) => {
+  if (INSTALLER_MOCK) {
+    await sleep(420);
+    return { success: true, userId: 'mock@screensync.local', mock: true };
+  }
   return new Promise((resolve) => {
     try {
       const configPath = path.join(installPath, '.user-config.json');
@@ -2751,6 +2829,17 @@ ipcMain.handle('setup-autostart', async (event, installPath) => {
 });
 
 ipcMain.handle('finalize-installation', async (event, installPath, options = {}) => {
+  if (INSTALLER_MOCK) {
+    await sleep(900);
+    if (mockInstallerState.finalResult === 'error') {
+      return {
+        success: false,
+        error: 'Mock final step failed',
+        detail: 'Mock 模式：模拟了最后一步失败。\n\n可在底部 Mock 工具栏切换为“最终成功”后重新进入最后一步。'
+      };
+    }
+    return { success: true, mock: true, message: 'Mock success' };
+  }
   const targetPath = installPath || currentInstallPath;
   if (!targetPath || typeof targetPath !== 'string') {
     return { success: false, error: '无效的安装路径。' };
@@ -2818,6 +2907,10 @@ ipcMain.handle('finalize-installation', async (event, installPath, options = {})
 
 // 配置 iCloud 文件夹为"始终保留下载"
 ipcMain.handle('setup-icloud-keep-downloaded', async () => {
+  if (INSTALLER_MOCK) {
+    await sleep(180);
+    return { success: true, mock: true };
+  }
   return new Promise((resolve) => {
     try {
       const icloudPath = path.join(
@@ -2874,6 +2967,9 @@ ipcMain.handle('setup-icloud-keep-downloaded', async () => {
 
 // 退出应用
 ipcMain.handle('quit-app', () => {
+  if (INSTALLER_MOCK) {
+    return { success: true, mock: true };
+  }
   console.log('收到退出请求，正在退出应用...');
   app.quit();
 });

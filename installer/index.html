@@ -221,7 +221,6 @@
       display: none;
       flex: 1;
       flex-direction: column;
-      gap: 20px;
       animation: fadeIn 0.4s var(--ease-out);
     }
 
@@ -239,79 +238,16 @@
     }
 
     .step-title {
-      font-size: 20px;
+      font-size: 18px;
       font-weight: 700;
-      margin: 0 0 8px;
+      margin: 0 0 8px 0;
       color: var(--text-primary);
     }
 
     .step-description {
-      font-size: 14px;
+      font-size: 13px;
       color: var(--text-secondary);
-      margin: 0;
-      line-height: 1.5;
-    }
-
-    .hero-step {
-      justify-content: center;
-      align-items: center;
-      text-align: center;
-      gap: 28px;
-    }
-
-    .hero-stack {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 16px;
-      width: 100%;
-    }
-
-    .hero-logo {
-      width: 88px;
-      height: 88px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      position: relative;
-      color: var(--text-primary);
-    }
-
-    .hero-logo img {
-      width: 72px;
-      height: 72px;
-      display: block;
-      filter: drop-shadow(0 4px 12px rgba(0,0,0,0.1));
-    }
-
-    .hero-copy {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 8px;
-      width: 100%;
-    }
-
-    .hero-title {
-      margin: 0;
-      font-size: 32px;
-      font-weight: 700;
-      line-height: 1.05;
-      letter-spacing: -0.02em;
-      color: var(--text-primary);
-    }
-
-    .hero-title.brand-title {
-      font-family: 'Archivo Black', sans-serif;
-      font-weight: 400;
-    }
-
-    .hero-subtitle {
-      margin: 0;
-      max-width: 360px;
-      font-size: 16px;
-      line-height: 1.5;
-      color: var(--text-secondary);
+      margin: 0 0 8px 0;
     }
 
     /* Buttons — Matches plugin .btn exactly */
@@ -453,6 +389,7 @@
     .status-label {
       font-size: 14px;
       font-weight: 500;
+      margin-bottom: 4px;
       color: var(--text-primary);
     }
 
@@ -464,49 +401,6 @@
     .status-item.success .status-icon { color: var(--success); }
     .status-item.error .status-icon { color: var(--danger); }
     .status-item.checking .status-icon { color: var(--accent); }
-
-    .status-details {
-      display: none;
-      border-top: 1px solid var(--divider);
-      background: rgba(0, 0, 0, 0.01);
-    }
-
-    .status-details.show {
-      display: block;
-    }
-
-    .status-detail-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 16px;
-      padding: 12px 20px;
-      font-size: 13px;
-      border-bottom: 1px solid var(--divider);
-    }
-
-    .status-detail-row:last-child {
-      border-bottom: none;
-    }
-
-    .status-detail-name {
-      color: var(--text-primary);
-      font-weight: 500;
-    }
-
-    .status-detail-state {
-      color: var(--danger);
-      flex-shrink: 0;
-    }
-
-    .status-progress {
-      padding: 14px 20px 16px;
-    }
-
-    .status-progress-label {
-      font-size: 13px;
-      color: var(--text-secondary);
-    }
 
     /* Progress — Glass card */
     .progress-container {
@@ -601,17 +495,31 @@
     .button-group {
       display: flex;
       gap: 16px;
-      margin: 0;
+      margin: 12px 0 0 0;
       padding: 0;
-      margin-top: auto;
       justify-content: flex-end;
     }
 
-    #step1 .button-group,
-    #step6 .button-group {
+    /* Step 1: Welcome layout */
+    #step1 {
+      justify-content: space-between;
+    }
+
+    #step1 .step-header {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      margin: 0;
+      text-align: center;
+    }
+
+    #step1 .button-group {
       width: 100%;
       justify-content: center;
       margin-top: 0;
+      padding-bottom: 20px;
     }
 
     /* Language Selection Cards */
@@ -764,22 +672,11 @@
       display: flex;
       align-items: center;
       justify-content: center;
+      margin: 0 0 18px 0;
       box-shadow: none;
       background: transparent;
       color: white;
       transition: background 0.2s ease, box-shadow 0.2s ease;
-    }
-
-    .completion-badge.overlay {
-      width: 36px;
-      height: 36px;
-      position: absolute;
-      right: 0;
-      bottom: 0;
-      background: var(--glass-bg);
-      color: var(--accent);
-      border: 1px solid var(--glass-border-subtle);
-      box-shadow: var(--glass-shadow);
     }
 
     .completion-badge.loading {
@@ -803,22 +700,15 @@
       stroke-width: 2.8 !important;
     }
 
-    .completion-badge.overlay .completion-icon svg {
-      width: 18px !important;
-      height: 18px !important;
-      stroke-width: 2.6 !important;
-    }
-
     .completion-badge.loading .completion-icon svg {
       width: 56px !important;
       height: 56px !important;
       stroke-width: 3.2 !important;
     }
 
-    .completion-badge.overlay.loading .completion-icon svg {
-      width: 18px !important;
-      height: 18px !important;
-      stroke-width: 2.6 !important;
+    #step6.active {
+      align-items: center;
+      justify-content: center;
     }
 
     .spinner {
@@ -1095,6 +985,230 @@
         background: rgba(118, 118, 128, 0.5);
       }
     }
+
+    /* Simplified Installer UI */
+    .content {
+      padding: 4px 24px 16px;
+    }
+
+    .step {
+      width: 100%;
+      max-width: 480px;
+      margin: 0 auto;
+    }
+
+    .step-header {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      text-align: left;
+    }
+
+    #step1 .step-header {
+      align-items: center;
+      text-align: center;
+      gap: 0;
+    }
+
+    .step-title {
+      font-size: 18px;
+      line-height: 1.15;
+      margin: 0 0 4px 0;
+    }
+
+    .step-description {
+      font-size: 12px;
+      color: var(--text-secondary);
+      line-height: 1.45;
+      margin: 0 0 12px 0;
+    }
+
+    .step-description:empty {
+      display: none;
+    }
+
+    .status-list,
+    .progress-container,
+    .alert {
+      border-radius: var(--radius-l);
+      box-shadow: none;
+    }
+
+    .status-item {
+      padding: 12px 16px;
+    }
+
+    .status-label {
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .status-detail {
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .progress-container {
+      padding: 18px 16px;
+    }
+
+    .button-group {
+      gap: 10px;
+    }
+
+    .btn {
+      min-height: 40px;
+      padding: 0 16px;
+    }
+
+    .lang-cards {
+      max-width: 316px;
+      padding: 4px;
+      gap: 4px;
+      border: 1px solid var(--glass-border-subtle);
+      border-radius: 14px;
+      background: var(--glass-bg);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      box-shadow: none;
+    }
+
+    .lang-card {
+      min-height: 0;
+      padding: 14px 12px;
+      gap: 6px;
+      border: none;
+      background: transparent;
+      box-shadow: none;
+    }
+
+    .lang-card:hover {
+      box-shadow: none;
+    }
+
+    .lang-card.selected {
+      background: var(--accent-soft);
+      box-shadow: none;
+      border-color: transparent;
+    }
+
+    .lang-card .lang-name {
+      font-size: 14px;
+    }
+
+    .lang-card .lang-check {
+      top: 8px;
+      right: 8px;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: transparent;
+      padding: 0;
+    }
+
+    .lang-card .lang-check svg {
+      width: 14px;
+      height: 14px;
+      stroke: var(--accent);
+      padding: 0;
+    }
+
+    #step1 .step-header > .alert:not(#pathAlert),
+    #step2 > .alert,
+    #step3 > .alert,
+    #step4 > .alert {
+      display: none !important;
+    }
+
+    #step5Guide {
+      padding: 14px 16px;
+    }
+
+    /* Ensure checkmark icon is visually centered */
+    .completion-icon {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .completion-icon svg {
+      display: block;
+    }
+
+    .footer {
+      padding: 14px 24px 18px;
+    }
+
+    .step-dots {
+      gap: 8px;
+    }
+
+    .mock-bar {
+      display: none;
+      width: 100%;
+      max-width: 480px;
+      margin: 0 auto 10px;
+      padding: 10px 12px;
+      border-radius: 14px;
+      border: 1px solid var(--glass-border-subtle);
+      background: var(--glass-bg);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .mock-bar.show {
+      display: flex;
+    }
+
+    .mock-badge {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--accent);
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+    }
+
+    .mock-step-group,
+    .mock-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .mock-step-group {
+      flex: 1;
+    }
+
+    .mock-step-btn,
+    .mock-toggle {
+      border: 1px solid var(--glass-border-subtle);
+      background: transparent;
+      color: var(--text-secondary);
+      border-radius: 10px;
+      min-height: 30px;
+      padding: 0 10px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .mock-step-btn.active,
+    .mock-toggle.active {
+      background: var(--accent-soft);
+      color: var(--text-primary);
+      border-color: rgba(0, 102, 255, 0.22);
+    }
+
+    .dot.mock-jump {
+      cursor: pointer;
+    }
   </style>
 </head>
 <body>
@@ -1116,16 +1230,20 @@
 
   <div class="content">
     <!-- Step 1: Welcome -->
-    <div class="step active hero-step" id="step1">
-      <div class="hero-stack">
-        <div class="hero-logo">
-          <img src="https://raw.githubusercontent.com/BorderWalker99/figma-plugin-figma_sync/refs/heads/main/images/logo.svg" width="72" height="72" />
+    <div class="step active" id="step1">
+      <div class="step-header">
+        <div style="margin-bottom: 12px;">
+          <img src="https://raw.githubusercontent.com/BorderWalker99/figma-plugin-figma_sync/refs/heads/main/images/logo.svg" width="72" height="72" style="filter: drop-shadow(0 4px 12px rgba(0,0,0,0.1));" />
         </div>
-        <div class="hero-copy">
-          <h1 class="hero-title brand-title">ScreenSync</h1>
-          <p class="hero-subtitle" data-i18n="welcome_subtitle">完成安装并启动 ScreenSync</p>
+        <h1 style="font-family: 'Archivo Black', sans-serif; font-size: 32px; margin: 0 0 4px 0; color: var(--text-primary); letter-spacing: -0.02em;">ScreenSync</h1>
+        <p data-i18n="welcome_subtitle" style="font-size: 16px; color: var(--text-secondary); margin: 0;"></p>
+
+        <div class="alert" style="margin-top: 20px; max-width: 420px;">
+          <div class="alert-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="currentColor" fill-opacity="0.12"/><path d="M12 8v5M12 16.5v.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+          <div style="text-align: left;" data-i18n="welcome_task_hint">确认语言后点击开始安装；如果安装器没有自动识别安装包，再选择文件夹即可。</div>
         </div>
-        <div class="lang-cards">
+
+        <div class="lang-cards" style="margin-top: 32px;">
           <div class="lang-card selected" id="langCardZh" onclick="selectLanguage('zh')">
             <div class="lang-check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg></div>
             <div class="lang-icon"><img src="https://raw.githubusercontent.com/BorderWalker99/figma-plugin-figma_sync/refs/heads/main/images/zh.svg" alt="中文"></div>
@@ -1151,18 +1269,50 @@
     <div class="step" id="step2">
       <div class="step-header">
         <h2 class="step-title" data-i18n="step2_title">确认安装包可用</h2>
-        <p class="step-description" data-i18n="step2_desc">检查安装资源</p>
+        <p class="step-description" data-i18n="step2_desc"></p>
+      </div>
+
+      <div class="alert">
+        <div class="alert-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="currentColor" fill-opacity="0.12"/><path d="M12 8v5M12 16.5v.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        <div data-i18n="step2_task_hint">这一页只是在确认安装包可直接使用，你无需手动处理每个组件。</div>
       </div>
 
       <div class="status-list" id="systemChecks">
-        <div class="status-item checking" id="systemChecksSummary">
+        <div class="status-item checking">
           <div class="status-icon"><svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg></div>
           <div class="status-content">
-            <div class="status-label" data-i18n="step2_title">确认安装包可用</div>
+            <div class="status-label" data-i18n="dep_label_package">安装资源</div>
             <div class="status-detail" data-i18n="checking">检查中...</div>
           </div>
         </div>
-        <div class="status-details" id="systemCheckDetails"></div>
+        <div class="status-item checking">
+          <div class="status-icon"><svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg></div>
+          <div class="status-content">
+            <div class="status-label" data-i18n="dep_label_node">Node.js 运行时</div>
+            <div class="status-detail" data-i18n="checking">检查中...</div>
+          </div>
+        </div>
+        <div class="status-item checking">
+          <div class="status-icon"><svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg></div>
+          <div class="status-content">
+            <div class="status-label" data-i18n="dep_label_imagemagick">图片处理组件</div>
+            <div class="status-detail" data-i18n="checking">检查中...</div>
+          </div>
+        </div>
+        <div class="status-item checking">
+          <div class="status-icon"><svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg></div>
+          <div class="status-content">
+            <div class="status-label" data-i18n="dep_label_ffmpeg">视频处理组件</div>
+            <div class="status-detail" data-i18n="checking">检查中...</div>
+          </div>
+        </div>
+        <div class="status-item checking">
+          <div class="status-icon"><svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg></div>
+          <div class="status-content">
+            <div class="status-label" data-i18n="dep_label_gifsicle">GIF 压缩组件</div>
+            <div class="status-detail" data-i18n="checking">检查中...</div>
+          </div>
+        </div>
       </div>
 
       <div class="button-group" id="step2Buttons" style="display: none;">
@@ -1178,26 +1328,22 @@
     <div class="step" id="step3">
       <div class="step-header">
         <h2 class="step-title" data-i18n="step3_title">准备运行环境</h2>
-        <p class="step-description" data-i18n="step3_desc">安装所需组件</p>
+        <p class="step-description" data-i18n="step3_desc"></p>
       </div>
 
-      <div class="status-list" id="installStatusCard">
-        <div class="status-item checking" id="installStatusSummary">
-          <div class="status-icon"><svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg></div>
-          <div class="status-content">
-            <div class="status-label" data-i18n="step3_title">准备运行环境</div>
-            <div class="status-detail" id="installSummaryDetail" data-i18n="installing">正在安装...</div>
-          </div>
-        </div>
-        <div class="status-details show" id="installProgressDetails">
-          <div class="status-progress">
-            <div class="status-progress-label" id="installStatusLabel" data-i18n="installing">正在安装...</div>
-            <div class="progress-bar">
-              <div class="progress-fill" id="installProgress" style="width: 0%"></div>
-            </div>
-          </div>
+      <div class="alert">
+        <div class="alert-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="currentColor" fill-opacity="0.12"/><path d="M12 8v5M12 16.5v.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        <div data-i18n="step3_task_hint">此过程可能需要几分钟，请保持安装器打开。</div>
+      </div>
+
+      <div class="progress-container">
+        <div class="status-label" id="installStatusLabel" data-i18n="installing">正在安装...</div>
+        <div class="progress-bar">
+          <div class="progress-fill" id="installProgress" style="width: 0%"></div>
         </div>
       </div>
+
+      <div id="installErrorAlert" style="display: none;"></div>
 
       <div class="button-group" id="step3Buttons" style="display: none;">
         <div style="flex:1"></div>
@@ -1212,18 +1358,22 @@
     <div class="step" id="step4">
       <div class="step-header">
         <h2 class="step-title" data-i18n="step4_title">设置本地工作区</h2>
-        <p class="step-description" data-i18n="step4_desc">创建文件夹并保存配置</p>
+        <p class="step-description" data-i18n="step4_desc"></p>
+      </div>
+
+      <div class="alert">
+        <div class="alert-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="currentColor" fill-opacity="0.12"/><path d="M12 8v5M12 16.5v.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        <div data-i18n="step4_task_hint">安装器会自动完成本地文件夹、语言和同步配置。</div>
       </div>
 
       <div class="status-list" id="configStatus">
-        <div class="status-item checking" id="configStatusSummary">
+        <div class="status-item checking">
           <div class="status-icon"><svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg></div>
           <div class="status-content">
             <div class="status-label" data-i18n="configuring">配置中...</div>
             <div class="status-detail" data-i18n="setting_permissions">正在设置权限和文件夹...</div>
           </div>
         </div>
-        <div class="status-details" id="configStatusDetails"></div>
       </div>
 
       <div class="button-group" id="step4Buttons" style="display: none;">
@@ -1238,55 +1388,45 @@
     <!-- Step 5: Runtime Permission Verification -->
     <div class="step" id="step5">
       <div class="step-header">
-        <h2 class="step-title" data-i18n="step5_title">安全权限验证</h2>
-        <p class="step-description" data-i18n="step5_desc">到系统设置点按“仍要打开”后返回</p>
+        <h2 class="step-title" id="step5Title" data-i18n="step5_waiting_title">正在检查系统授权</h2>
+        <p class="step-description" id="step5Desc" data-i18n="step5_desc">完成后回到安装器</p>
       </div>
 
       <div class="status-list" id="step5Status">
         <div class="status-item checking">
           <div class="status-icon"><svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg></div>
           <div class="status-content">
-            <div class="status-label" data-i18n="step5_waiting_title">正在检查系统授权</div>
-            <div class="status-detail" data-i18n="step5_waiting_detail">正在验证运行组件</div>
+            <div class="status-label" data-i18n="step5_waiting_detail">正在验证组件</div>
           </div>
         </div>
       </div>
 
-      <div class="alert" id="step5Guide" style="display:block;">
-        <div class="alert-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="currentColor" fill-opacity="0.12"/><path d="M12 8v5M12 16.5v.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-        <div style="flex: 1;">
-          <div style="font-weight: 600; margin-bottom: 0;" data-i18n="step5_pending_detail">到「系统设置 - 隐私与安全性 - 安全性」点按所有“仍要打开”</div>
-        </div>
-      </div>
-
       <div class="button-group" id="step5Buttons">
-        <button class="btn btn-primary" id="step5OpenSecurity" onclick="openSecuritySettings()">
+        <button class="btn" id="step5OpenSecurity" onclick="openSecuritySettings()">
           <span data-i18n="btn_open_security">打开系统设置</span>
         </button>
         <button class="btn" id="step5Retry" onclick="recheckRuntimePermissions()">
           <span data-i18n="recheck">重新检测</span>
         </button>
+        <div style="flex:1; display:none;" id="step5ButtonsSpacer"></div>
+        <button class="btn btn-primary" id="step5Next" onclick="nextStep()" disabled style="display:none;">
+          <span data-i18n="btn_continue_server">继续安装</span>
+          <svg viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+        </button>
       </div>
     </div>
 
     <!-- Step 6: Complete -->
-    <div class="step hero-step" id="step6">
-      <div class="hero-stack">
-        <div class="hero-logo">
-          <img src="https://raw.githubusercontent.com/BorderWalker99/figma-plugin-figma_sync/refs/heads/main/images/logo.svg" width="72" height="72" />
-          <div class="completion-badge overlay loading" id="step6IconBadge">
-            <div class="completion-icon" id="step6Icon">
-              <svg class="spinner" viewBox="0 0 24 24" fill="none">
-                <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
-              </svg>
-            </div>
-          </div>
-        </div>
-        <div class="hero-copy">
-          <h2 class="hero-title" id="step6Title" data-i18n="step6_starting_title">正在启动 ScreenSync</h2>
-          <p class="hero-subtitle" id="step6Detail" data-i18n="step6_detail_starting">正在完成最后一步</p>
+    <div class="step" id="step6">
+      <div class="completion-badge loading" id="step6IconBadge">
+        <div class="completion-icon" id="step6Icon">
+          <svg class="spinner" viewBox="0 0 24 24" fill="none">
+            <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+          </svg>
         </div>
       </div>
+      <h2 class="step-title" id="step6Title" data-i18n="step6_starting_title">正在启动 ScreenSync</h2>
+      <p class="step-description" style="text-align: center;" id="step6Detail" data-i18n="step6_detail_starting">正在完成最后配置，请稍候</p>
       <div class="button-group" id="step6Actions" style="justify-content: center; margin-top: 0; display: none;">
         <button class="btn btn-primary" id="step6Finish" onclick="acknowledgeInstallation()" style="min-width: 120px;">
           <span data-i18n="btn_done">完成安装</span>
@@ -1304,10 +1444,27 @@
       <div class="dot" data-step="5"></div>
       <div class="dot" data-step="6"></div>
     </div>
-    <div style="color: var(--text-tertiary); font-size: 12px;">
-      v1.0.0
+      <div style="color: var(--text-tertiary); font-size: 12px;" id="footerVersion">
+        v1.0.0
     </div>
   </div>
+
+    <div id="mockBar" class="mock-bar">
+      <div class="mock-badge">MOCK</div>
+      <div class="mock-step-group">
+        <button class="mock-step-btn" data-mock-step="1">1</button>
+        <button class="mock-step-btn" data-mock-step="2">2</button>
+        <button class="mock-step-btn" data-mock-step="3">3</button>
+        <button class="mock-step-btn" data-mock-step="4">4</button>
+        <button class="mock-step-btn" data-mock-step="5">5</button>
+        <button class="mock-step-btn" data-mock-step="6">6</button>
+      </div>
+      <div class="mock-actions">
+        <button class="mock-toggle" id="mockPermissionToggle"></button>
+        <button class="mock-toggle" id="mockFinalToggle"></button>
+        <button class="mock-toggle" id="mockResetBtn">重置</button>
+      </div>
+    </div>
 
   <div id="overlay" class="overlay">
     <div class="modal">

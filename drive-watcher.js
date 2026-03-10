@@ -1269,7 +1269,7 @@ async function handleDriveFile(file, deleteAfterSync = false, progressCb = null,
       const convStartTime = Date.now();
       const tempDir = videoTempDir || path.join(os.tmpdir(), `screensync-v2g-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
       fs.mkdirSync(tempDir, { recursive: true });
-
+      
       const videoExt = fileName.endsWith('.mov') ? '.mov' : '.mp4';
       const tempVideoPath = downloadedVideoPath || path.join(tempDir, `input${videoExt}`);
       const tempGifOut = path.join(tempDir, 'output.gif');
@@ -1314,26 +1314,26 @@ async function handleDriveFile(file, deleteAfterSync = false, progressCb = null,
           progressSpan: 58,
           log: (message) => console.log(message)
         });
-        throwIfAborted();
-
+          throwIfAborted();
+        
         const gifBuffer = fs.readFileSync(tempGifOut);
         const gifSizeMB = (gifBuffer.length / 1024 / 1024).toFixed(1);
         const convTime = ((Date.now() - convStartTime) / 1000).toFixed(1);
         emitProgress('converting', 88, { estimatedSec, isVideo: true, stageDetail: 'shared-gif-ready' });
         console.log(`   ✅ [Video→GIF] 共享链路完成 ${videoSizeMB}MB → ${gifSizeMB}MB (${convTime}秒)`);
-
+        
         processedBuffer = gifBuffer;
         file.name = file.name.replace(/\.(mov|mp4)$/i, '.gif');
         file.mimeType = 'image/gif';
         isVideo = false;
         isGif = true;
         conversionOk = true;
-
+        
         try {
           const gifCacheResult = userConfig.saveGifToCache(processedBuffer, file.name, file.id);
           if (gifCacheResult) gifCacheId = gifCacheResult.cacheId;
         } catch (_) {}
-
+        
         const backupMode = userConfig.getBackupMode();
         if (backupMode === 'gif_only' || backupMode === 'all') {
           if (processedBuffer.length > LARGE_GIF_URL_THRESHOLD) {
