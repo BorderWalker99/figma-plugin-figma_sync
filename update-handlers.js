@@ -4,7 +4,7 @@
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
-const { exec, spawn, execFileSync } = require('child_process');
+const { exec, spawn, execFileSync, spawnSync } = require('child_process');
 const os = require('os');
 const util = require('util');
 const execPromise = util.promisify(exec);
@@ -487,6 +487,183 @@ function triggerAutostartRepairAfterUpdate() {
   return true;
 }
 
+function getRuntimeToolDisplayName(toolId) {
+  if (toolId === 'node') return 'Node.js';
+  if (toolId === 'ffmpeg') return 'FFmpeg';
+  if (toolId === 'gifsicle') return 'Gifsicle';
+  if (toolId === 'magick') return 'ImageMagick';
+  return toolId;
+}
+
+function collectBundledRuntimeApprovalTargets() {
+  const packageRoot = getPackageRootDirForUpdate();
+  const archDir = getRuntimeArchDirForUpdate();
+  const runtimeRoot = path.join(packageRoot, 'runtime');
+  const bundledRuntime = detectBundledOfflineRuntime();
+  const candidates = [
+    runtimeRoot,
+    path.join(runtimeRoot, 'bin'),
+    path.join(runtimeRoot, archDir),
+    path.join(runtimeRoot, archDir, 'bin'),
+    bundledRuntime.node,
+    bundledRuntime.ffmpeg,
+    bundledRuntime.gifsicle,
+    bundledRuntime.magick
+  ];
+
+  const seen = new Set();
+  const result = [];
+  for (const candidate of candidates) {
+    if (!candidate || !fs.existsSync(candidate) || seen.has(candidate)) continue;
+    seen.add(candidate);
+    result.push(candidate);
+  }
+  return result;
+}
+
+function clearBundledRuntimeQuarantineForUpdate() {
+  if (process.platform !== 'darwin') return;
+  for (const target of collectBundledRuntimeApprovalTargets()) {
+    try {
+      spawnSync('xattr', ['-dr', 'com.apple.quarantine', target], {
+        stdio: 'ignore',
+        timeout: 10000
+      });
+    } catch (_) {}
+  }
+}
+
+function hasQuarantineAttribute(filePath) {
+  if (process.platform !== 'darwin' || !filePath || !fs.existsSync(filePath)) return false;
+  try {
+    const result = spawnSync('xattr', ['-p', 'com.apple.quarantine', filePath], {
+      encoding: 'utf8',
+      timeout: 5000
+    });
+    return result.status === 0 && String(result.stdout || '').trim().length > 0;
+  } catch (_) {
+    return false;
+  }
+}
+
+function isLikelyGatekeeperBlock(details) {
+  const source = String(details || '');
+  return (
+    /open anyway/i.test(source) ||
+    /仍要打开/.test(source) ||
+    /隐私与安全性/.test(source) ||
+    /privacy\s*&\s*security/i.test(source) ||
+    /gatekeeper/i.test(source) ||
+    /quarantine/i.test(source) ||
+    /com\.apple\.quarantine/i.test(source) ||
+    /operation not permitted/i.test(source) ||
+    /not permitted/i.test(source) ||
+    /cannot be opened/i.test(source) ||
+    /无法打开/.test(source) ||
+    /已损坏/.test(source) ||
+    /恶意软件/.test(source) ||
+    /developer cannot be verified/i.test(source) ||
+    /无法验证开发者/.test(source)
+  );
+}
+
+function runRuntimeProbe(executablePath, args, timeout = 12000) {
+  try {
+    const result = spawnSync(executablePath, args, {
+      encoding: 'utf8',
+      timeout
+    });
+    const details = [result.stdout, result.stderr, result.error && result.error.message]
+      .filter(Boolean)
+      .join('\n')
+      .trim();
+    return {
+      ok: !result.error && result.status === 0,
+      details
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      details: error && error.message ? error.message : String(error)
+    };
+  }
+}
+
+function verifyImageMagickPngHealthForUpdate(magickPath) {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'screensync-update-magick-'));
+  const outputPath = path.join(tempDir, 'probe.png');
+  try {
+    const result = spawnSync(magickPath, ['-size', '2x2', 'xc:#4ADE80', outputPath], {
+      encoding: 'utf8',
+      timeout: 15000
+    });
+    const details = [result.stdout, result.stderr, result.error && result.error.message]
+      .filter(Boolean)
+      .join('\n')
+      .trim();
+    return {
+      ok: !result.error && result.status === 0 && fs.existsSync(outputPath),
+      details
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      details: error && error.message ? error.message : String(error)
+    };
+  } finally {
+    try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch (_) {}
+  }
+}
+
+function detectPendingRuntimeApprovalsAfterUpdate() {
+  if (process.platform !== 'darwin') {
+    return { unlockRequired: false, pendingToolIds: [] };
+  }
+
+  const bundledRuntime = detectBundledOfflineRuntime();
+  if (!bundledRuntime.ready) {
+    return { unlockRequired: false, pendingToolIds: [] };
+  }
+
+  const probes = [
+    { id: 'node', path: bundledRuntime.node, probe: () => runRuntimeProbe(bundledRuntime.node, ['-v']) },
+    { id: 'ffmpeg', path: bundledRuntime.ffmpeg, probe: () => runRuntimeProbe(bundledRuntime.ffmpeg, ['-version']) },
+    { id: 'gifsicle', path: bundledRuntime.gifsicle, probe: () => runRuntimeProbe(bundledRuntime.gifsicle, ['--version']) },
+    {
+      id: 'magick',
+      path: bundledRuntime.magick,
+      probe: () => {
+        const versionProbe = runRuntimeProbe(bundledRuntime.magick, ['-version']);
+        if (!versionProbe.ok) return versionProbe;
+        return verifyImageMagickPngHealthForUpdate(bundledRuntime.magick);
+      }
+    }
+  ];
+
+  const pendingToolIds = [];
+  for (const item of probes) {
+    if (!item.path || !fs.existsSync(item.path)) continue;
+    const hasQuarantine = hasQuarantineAttribute(item.path);
+    const result = item.probe();
+    if (result.ok) continue;
+
+    const details = [result.details, hasQuarantine ? 'com.apple.quarantine' : '']
+      .filter(Boolean)
+      .join('\n');
+    if (hasQuarantine || isLikelyGatekeeperBlock(details)) {
+      pendingToolIds.push(item.id);
+      console.warn(`   ⚠️  [UpdateUnlock] ${getRuntimeToolDisplayName(item.id)} 仍需用户在系统设置中授权`);
+    } else {
+      console.warn(`   ⚠️  [UpdateUnlock] ${getRuntimeToolDisplayName(item.id)} 探测失败，但不像 Gatekeeper 拦截: ${details || 'unknown error'}`);
+    }
+  }
+
+  return {
+    unlockRequired: pendingToolIds.length > 0,
+    pendingToolIds
+  };
+}
+
 async function ensureUpdateDependencies(targetGroup) {
   addLocalDepsToPath();
   const bundledRuntime = detectBundledOfflineRuntime();
@@ -902,6 +1079,7 @@ async function handleServerUpdate(targetGroup, connectionId) {
       'update-manager.js',
       'update-handlers.js',
       'gif-composer.js',
+      'video-gif-pipeline.js',
       'image-processor.js',
       'icloud-watcher.js',
       'drive-watcher.js',
@@ -1194,6 +1372,7 @@ async function handleFullUpdate(targetGroup, connectionId) {
 
     const runtimeSynced = syncBundledRuntimeFromExtractedDir(extractedDir);
     if (runtimeSynced) {
+      clearBundledRuntimeQuarantineForUpdate();
       console.log('   ✅ 已同步离线 runtime（胖包）');
     } else {
       console.log('   ℹ️  更新包未携带 runtime，保留当前本地运行时');
@@ -1236,6 +1415,7 @@ async function handleFullUpdate(targetGroup, connectionId) {
         'start.js',
         'media-processing-tuning.js',
         'gif-composer.js',
+        'video-gif-pipeline.js',
         'image-processor.js',
         'googleDrive.js',
         'drive-watcher.js',
@@ -1330,6 +1510,9 @@ async function handleFullUpdate(targetGroup, connectionId) {
 
     // 在完成更新前自动补齐新增运行依赖（不打开终端）
     await ensureUpdateDependencies(targetGroup);
+    const updateUnlockStatus = runtimeSynced
+      ? detectPendingRuntimeApprovalsAfterUpdate()
+      : { unlockRequired: false, pendingToolIds: [] };
     
     // 清理临时文件
     if (fs.existsSync(tempFile)) {
@@ -1350,7 +1533,9 @@ async function handleFullUpdate(targetGroup, connectionId) {
         status: 'completed',
         message: `正在重连服务器(3-8秒)`,
         updatedCount: updatedCount,
-        latestVersion: releaseInfo.tag_name // 发送最新版本号
+        latestVersion: releaseInfo.tag_name, // 发送最新版本号
+        unlockRequired: updateUnlockStatus.unlockRequired,
+        unlockToolIds: updateUnlockStatus.pendingToolIds
       });
     }
     

@@ -127,11 +127,7 @@ function killAllChildProcesses() {
 // 引入用户配置
 const userConfig = require('./userConfig');
 const mediaTuning = require('./media-processing-tuning');
-const {
-  getSystemPressure,
-  getDynamicUltraTriggerMb,
-  buildWatcherAttemptProfiles
-} = require('./adaptive-processing');
+const { transcodeVideoToGif, probeVideoMeta } = require('./video-gif-pipeline');
 
 // ============= 配置 =============
 const CONFIG = {
@@ -152,7 +148,6 @@ const CONFIG = {
   }
 };
 const LARGE_GIF_URL_THRESHOLD = mediaTuning.thresholds.largeGifUrlMb * 1024 * 1024;
-const ULTRA_SPEED_VIDEO_THRESHOLD_BYTES = mediaTuning.thresholds.ultraSpeedVideoMb * 1024 * 1024;
 
 let ws = null;
 let reconnectTimer = null;
@@ -719,24 +714,7 @@ function saveCacheMapping(fileName, cacheId) {
  * 失败时返回 null，调用方退化为保守处理。
  */
 async function ffprobeVideoMeta(videoPath) {
-  try {
-    const { stdout } = await execAsync(
-      `ffprobe -v quiet -print_format json -show_streams -show_format "${videoPath}"`,
-      { timeout: 8000, maxBuffer: 2 * 1024 * 1024 }
-    );
-    const info = JSON.parse(stdout);
-    const vs = (info.streams || []).find(s => s.codec_type === 'video');
-    if (!vs) return null;
-    const [num, den] = (vs.r_frame_rate || '0/1').split('/');
-    const fps = den ? parseFloat(num) / parseFloat(den) : parseFloat(num);
-    return {
-      fps: Number.isFinite(fps) ? fps : null,
-      width: vs.width || 0,
-      height: vs.height || 0,
-      duration: parseFloat(info.format?.duration || vs.duration || '0'),
-      hasAudio: (info.streams || []).some(s => s.codec_type === 'audio')
-    };
-  } catch (_) { return null; }
+  return probeVideoMeta(execAsync, 'ffprobe', videoPath);
 }
 
 /**
@@ -757,295 +735,67 @@ async function convertVideoToGif(videoPath, displayFilename, progressCb) {
   const videoSizeMBNum = videoSizeBytes / 1024 / 1024;
   const videoSizeMB = videoSizeMBNum.toFixed(1);
   const convStartTime = Date.now();
-  const isLargeFile = videoSizeBytes >= mediaTuning.thresholds.largeVideoMb * 1024 * 1024;
-  const pressure = getSystemPressure(mediaTuning);
-  const dynamicUltraTriggerMb = getDynamicUltraTriggerMb(mediaTuning, {
-    sizeMB: videoSizeMBNum,
-    pressure
-  });
-  const adaptivePlan = buildWatcherAttemptProfiles(mediaTuning, {
-    videoSizeMB: videoSizeMBNum,
-    isLargeFile,
-    pressure
-  });
-  const isUltraLargeFile = videoSizeBytes >= ULTRA_SPEED_VIDEO_THRESHOLD_BYTES || videoSizeMBNum >= dynamicUltraTriggerMb;
-  console.log(`   🎬 [Video→GIF] 开始转换 ${displayFilename} (${videoSizeMB}MB) [${isUltraLargeFile ? '自适应极速' : (isLargeFile ? '大文件两遍' : '小文件两遍')}] (${pressure.label}, trigger=${dynamicUltraTriggerMb.toFixed(1)}MB)...`);
-
+  const sourceMeta = await ffprobeVideoMeta(videoPath);
+  const sourcePixels = Math.max(1, (sourceMeta?.width || 1) * (sourceMeta?.height || 1));
+  const sourceFrames = Math.max(0, Math.round((sourceMeta?.duration || 0) * (sourceMeta?.fps || 0)));
   const estimatedSec = Math.max(
-    5,
-    Math.ceil(
-      parseFloat(videoSizeMB) * (
-        isUltraLargeFile
-          ? mediaTuning.watcher.estimateFactor.ultra
-          : (isLargeFile ? mediaTuning.watcher.estimateFactor.large : mediaTuning.watcher.estimateFactor.normal)
-      )
-    )
+    6,
+    Math.ceil(videoSizeMBNum * (videoSizeMBNum >= 80 ? 0.7 : videoSizeMBNum >= 30 ? 1.0 : 1.4))
   );
+  console.log(`   🎬 [Video→GIF] 开始共享转码 ${displayFilename} (${videoSizeMB}MB, pixels=${sourcePixels}, frames=${sourceFrames || '?'})...`);
   if (progressCb) progressCb('converting', 25, { estimatedSec, isVideo: true });
 
   const tempDir = path.join(os.tmpdir(), `screensync-v2g-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`);
   fs.mkdirSync(tempDir, { recursive: true });
 
-  const tempPalette = path.join(tempDir, 'palette.png');
   const tempGifOut = path.join(tempDir, 'output.gif');
-  const tempCompressedVideo = path.join(tempDir, 'compressed.mp4');
-  const tempHalfVideo = path.join(tempDir, 'half-scale.mp4');
 
   const isAborted = () => _abortAllConversions;
   const throwIfAborted = () => { if (isAborted()) throw Object.assign(new Error('Conversion aborted'), { code: 'CONVERSION_ABORTED' }); };
 
-  const FF_OPT = '-nostdin -v warning';
-  let conversionSourceVideo = videoPath;
-  let halfScaleSucceeded = false;
-  if (progressCb) progressCb('converting', 18, { estimatedSec, isVideo: true, stageDetail: 'downscale-half-before-gif' });
-  const halfScaleCmd = `ffmpeg -hwaccel auto ${FF_OPT} -threads 0 -i "${videoPath}" -vf "setpts=PTS,scale='max(2,trunc(iw/4)*2)':'max(2,trunc(ih/4)*2)':flags=lanczos" -c:v libx264 -preset veryfast -crf 18 -pix_fmt yuv420p -an -movflags +faststart -y "${tempHalfVideo}"`;
   try {
-    await execAsync(halfScaleCmd, { timeout: 240000, maxBuffer: 120 * 1024 * 1024 });
-    if (fs.existsSync(tempHalfVideo) && fs.statSync(tempHalfVideo).size > 0) {
-      conversionSourceVideo = tempHalfVideo;
-      halfScaleSucceeded = true;
-    }
-  } catch (scaleErr) {
-    console.warn(`   ⚠️  预缩放失败，回退原视频继续转换: ${scaleErr.message}`);
-  }
-
-  const meta = await ffprobeVideoMeta(conversionSourceVideo);
-  const sourceFps = meta?.fps || 999;
-
-  const buildFilterChain = (targetFps, scaleDivisor = 1) => {
-    const parts = ['setpts=PTS'];
-    if (sourceFps > targetFps + 0.5) parts.push(`fps=${targetFps}`);
-    // 最终 GIF 尺寸固定为原视频的一半：若前面半缩放成功，这里不再继续降分辨率；
-    // 若半缩放失败，则仅在这里补做一次 1/2 缩放。
-    if (!halfScaleSucceeded) {
-      parts.push(`scale='max(2,trunc(iw/4)*2)':'max(2,trunc(ih/4)*2)':flags=lanczos`);
-    }
-    return parts.join(',');
-  };
-
-  const runWithProgressPulse = async (runner, {
-    startPercent,
-    endPercent,
-    stageDetail,
-    approxDurationMs = 60000
-  }) => {
-    let progressTimer = null;
-    const safeStart = Math.max(0, Math.min(99, Math.round(startPercent)));
-    const safeEnd = Math.max(safeStart, Math.min(99, Math.round(endPercent)));
-    const span = Math.max(1, safeEnd - safeStart);
-    const durationMs = Math.max(8000, Math.min(120000, Math.round(approxDurationMs)));
-    const begin = Date.now();
-
-    if (progressCb) {
-      progressCb('converting', safeStart, { estimatedSec, isVideo: true, stageDetail });
-    }
-
-    try {
-      if (progressCb && safeEnd > safeStart) {
-        progressTimer = setInterval(() => {
-          const elapsed = Date.now() - begin;
-          const ratio = Math.min(0.96, elapsed / durationMs);
-          const nextPercent = Math.max(
-            safeStart,
-            Math.min(safeEnd, safeStart + Math.floor(span * ratio))
-          );
-          progressCb('converting', nextPercent, { estimatedSec, isVideo: true, stageDetail });
-        }, 2000);
-      }
-      return await runner();
-    } finally {
-      if (progressTimer) clearInterval(progressTimer);
-    }
-  };
-
-  try {
-    // 大/超大文件专用两遍法：消除 split 帧缓冲，内存从 O(n_frames) 降至 O(1)
-    const runLargeTwoPass = async (sourceVideoPath, profile) => {
-      const filterBase = buildFilterChain(profile.fps, profile.scaleDivisor);
-      const totalTimeout = profile.timeoutMs;
-      const pass1Timeout = Math.ceil(totalTimeout * 0.45);
-      const pass2Timeout = Math.ceil(totalTimeout * 0.7);
-      const pass1Cmd = `ffmpeg -hwaccel auto -an ${FF_OPT} -threads 0 -i "${sourceVideoPath}" -vf "${filterBase},palettegen=max_colors=${profile.maxColors}:stats_mode=diff:reserve_transparent=0" -y "${tempPalette}"`;
-      await runWithProgressPulse(
-        () => execAsync(pass1Cmd, { timeout: pass1Timeout, maxBuffer: 50 * 1024 * 1024 }),
-        {
-          startPercent: 30,
-          endPercent: 48,
-          stageDetail: `palettegen:${profile.label}`,
-          approxDurationMs: Math.min(pass1Timeout, estimatedSec * 1000 * 0.45)
-        }
-      );
-      throwIfAborted();
-      if (progressCb) progressCb('converting', 50, { estimatedSec, isVideo: true });
-      const pass2Cmd = `ffmpeg -hwaccel auto -an ${FF_OPT} -threads 0 -i "${sourceVideoPath}" -i "${tempPalette}" -lavfi "${filterBase}[v];[v][1:v]paletteuse=dither=${profile.dither}:diff_mode=rectangle" -loop 0 -y "${tempGifOut}"`;
-      await runWithProgressPulse(
-        () => execAsync(pass2Cmd, { timeout: pass2Timeout, maxBuffer: 200 * 1024 * 1024 }),
-        {
-          startPercent: 52,
-          endPercent: 78,
-          stageDetail: `paletteuse:${profile.label}`,
-          approxDurationMs: Math.min(pass2Timeout, estimatedSec * 1000 * 0.75)
-        }
-      );
-    };
-
-    const runLargeSinglePass = async (sourceVideoPath, profile) => {
-      const baseFilter = buildFilterChain(profile.fps, profile.scaleDivisor);
-      const cmd = `ffmpeg -hwaccel auto -an ${FF_OPT} -threads 0 -i "${sourceVideoPath}" -lavfi "${baseFilter},split[s0][s1];[s0]palettegen=max_colors=${profile.maxColors}:stats_mode=diff:reserve_transparent=0[p];[s1][p]paletteuse=dither=${profile.dither}:diff_mode=rectangle" -loop 0 -y "${tempGifOut}"`;
-      await runWithProgressPulse(
-        () => execAsync(cmd, { timeout: profile.timeoutMs, maxBuffer: 200 * 1024 * 1024 }),
-        {
-          startPercent: 30,
-          endPercent: 78,
-          stageDetail: `singlepass:${profile.label}`,
-          approxDurationMs: Math.min(profile.timeoutMs, estimatedSec * 1000 * 0.8)
-        }
-      );
-    };
-
-    const runSmallTwoPass = async (sourceVideoPath, profile) => {
-      const filterBase = buildFilterChain(profile.fps, profile.scaleDivisor);
-      const pass1Cmd = `ffmpeg -hwaccel auto -an ${FF_OPT} -threads 0 -i "${sourceVideoPath}" -vf "${filterBase},palettegen=max_colors=${profile.maxColors}:stats_mode=full:reserve_transparent=0" -y "${tempPalette}"`;
-      await runWithProgressPulse(
-        () => execAsync(pass1Cmd, { timeout: profile.pass1TimeoutMs, maxBuffer: 50 * 1024 * 1024 }),
-        {
-          startPercent: 30,
-          endPercent: 53,
-          stageDetail: `palettegen:${profile.label}`,
-          approxDurationMs: Math.min(profile.pass1TimeoutMs, estimatedSec * 1000 * 0.35)
-        }
-      );
-      throwIfAborted();
-      if (progressCb) progressCb('converting', 55, { estimatedSec, isVideo: true });
-      const pass2Cmd = `ffmpeg -hwaccel auto -an ${FF_OPT} -threads 0 -i "${sourceVideoPath}" -i "${tempPalette}" -lavfi "${filterBase}[v];[v][1:v]paletteuse=dither=${profile.dither}:diff_mode=rectangle" -loop 0 -y "${tempGifOut}"`;
-      await runWithProgressPulse(
-        () => execAsync(pass2Cmd, { timeout: profile.pass2TimeoutMs, maxBuffer: 200 * 1024 * 1024 }),
-        {
-          startPercent: 57,
-          endPercent: 78,
-          stageDetail: `paletteuse:${profile.label}`,
-          approxDurationMs: Math.min(profile.pass2TimeoutMs, estimatedSec * 1000 * 0.65)
-        }
-      );
-    };
-
-    // 回退用单遍（已压缩过的小源文件，split 缓冲压力可接受）
-    const runFallbackSinglePass = async (sourceVideoPath, profile) => {
-      const baseFilter = buildFilterChain(profile.fps, profile.scaleDivisor);
-      const cmd = `ffmpeg -hwaccel auto -an ${FF_OPT} -threads 0 -i "${sourceVideoPath}" -lavfi "${baseFilter},split[s0][s1];[s0]palettegen=max_colors=${profile.maxColors}:stats_mode=diff:reserve_transparent=0[p];[s1][p]paletteuse=dither=${profile.dither}:diff_mode=rectangle" -loop 0 -y "${tempGifOut}"`;
-      await execAsync(cmd, { timeout: profile.timeoutMs, maxBuffer: 200 * 1024 * 1024 });
-    };
-
-    const isTimeoutLike = (err) => {
-      if (!err) return false;
-      const msg = String(err.message || '');
-      return Boolean(err.killed || err.signal === 'SIGTERM' || msg.includes('timed out') || msg.includes('ETIMEDOUT'));
-    };
-
-    let converted = false;
-    let primaryError = null;
-    // ── 主策略 ──
-    try {
-      let lastAdaptiveProfile = adaptivePlan.profiles[Math.max(0, adaptivePlan.profiles.length - 1)];
-      for (let attemptIndex = 0; attemptIndex < adaptivePlan.profiles.length; attemptIndex++) {
-        const profile = adaptivePlan.profiles[attemptIndex];
-        lastAdaptiveProfile = profile;
+    await transcodeVideoToGif({
+      execAsync,
+      ffmpegBin: 'ffmpeg',
+      ffprobeBin: 'ffprobe',
+      gifsicleBin: 'gifsicle',
+      sourcePath: videoPath,
+      outputPath: tempGifOut,
+      tempDir,
+      mediaTuning,
+      requestedMode: 'auto',
+      gifAlgorithm: 'smooth_gradient',
+      decisionSizeMB: videoSizeMBNum,
+      pixels: sourcePixels,
+      frameCount: sourceFrames,
+      optimizeOutput: true,
+      enableHalfScalePrepass: true,
+      shouldCancel: isAborted,
+      onProgress: (percent, extra = {}) => {
         if (progressCb) {
-          progressCb('converting', 30, {
+          progressCb('converting', percent, {
             estimatedSec,
             isVideo: true,
-            stageDetail: `adaptive-profile:${profile.label}`
+            stageDetail: extra.stageDetail
           });
         }
-        console.log(`   ⚙️  [Video→GIF] 尝试档位 ${attemptIndex + 1}/${adaptivePlan.profiles.length}: ${profile.label} fps=${profile.fps} scale=${profile.scaleDivisor} colors=${profile.maxColors}`);
-        if (profile.strategy === 'smallTwoPass') {
-          await runSmallTwoPass(conversionSourceVideo, profile);
-        } else if (profile.strategy === 'largeSinglePass') {
-          await runLargeSinglePass(conversionSourceVideo, profile);
-        } else {
-          await runLargeTwoPass(conversionSourceVideo, profile);
-        }
-        converted = true;
-        if (converted) {
-          adaptivePlan.lastProfile = profile;
-          break;
-        }
-      }
-    } catch (err) {
-      if (err.code === 'CONVERSION_ABORTED') throw err;
-      primaryError = err;
-      const reason = isTimeoutLike(err) ? 'progress-stalled-at-5' : 'primary-conversion-failed';
-      console.warn(`   ⚠️  [Video→GIF] 主转换失败，触发降级策略 (${reason}): ${err.message}`);
-      if (progressCb) progressCb('converting', 12, { estimatedSec, isVideo: true, degraded: true, reason });
-    }
-
-    // ── 回退策略 1：先压缩视频再转 GIF ──
-    if (!converted && !isUltraLargeFile) {
-      throwIfAborted();
-      try {
-        if (progressCb) progressCb('converting', 20, { estimatedSec, isVideo: true, degraded: true, stageDetail: 'compressing-video' });
-        const compressCmd = `ffmpeg -hwaccel auto ${FF_OPT} -threads 0 -i "${conversionSourceVideo}" -vf "setpts=PTS" -c:v libx264 -preset ${mediaTuning.watcher.fallbackCompressVideo.preset} -crf ${mediaTuning.watcher.fallbackCompressVideo.crf} -pix_fmt yuv420p -an -movflags +faststart -y "${tempCompressedVideo}"`;
-        await execAsync(compressCmd, { timeout: mediaTuning.watcher.fallbackCompressVideo.timeoutMs, maxBuffer: 120 * 1024 * 1024 });
-        throwIfAborted();
-
-        if (!fs.existsSync(tempCompressedVideo) || fs.statSync(tempCompressedVideo).size === 0) {
-          throw new Error('视频压缩输出为空');
-        }
-
-        if (progressCb) progressCb('converting', 35, { estimatedSec, isVideo: true, degraded: true, stageDetail: 'converting-compressed-video' });
-        const fallbackProfile = adaptivePlan.lastProfile || adaptivePlan.profiles[Math.max(0, adaptivePlan.profiles.length - 1)];
-        await runFallbackSinglePass(tempCompressedVideo, {
-          fps: Math.min(fallbackProfile.fps, mediaTuning.watcher.fallbackAfterCompressToGif.fps),
-          scaleDivisor: Math.max(fallbackProfile.scaleDivisor, mediaTuning.watcher.fallbackAfterCompressToGif.scaleDivisor || 2),
-          maxColors: Math.min(fallbackProfile.maxColors, mediaTuning.watcher.fallbackAfterCompressToGif.maxColors),
-          dither: fallbackProfile.dither === 'none' ? 'none' : mediaTuning.watcher.fallbackAfterCompressToGif.dither,
-          timeoutMs: mediaTuning.watcher.fallbackAfterCompressToGif.timeoutMs
-        });
-        converted = true;
-      } catch (fallbackErr) {
-        if (fallbackErr.code === 'CONVERSION_ABORTED') throw fallbackErr;
-        console.warn(`   ⚠️  [Video→GIF] 回退策略1失败: ${fallbackErr.message}`);
-      }
-    }
-
-    // ── 回退策略 2：直接有损转 GIF（保底） ──
-    if (!converted) {
-      throwIfAborted();
-      if (progressCb) progressCb('converting', 45, { estimatedSec, isVideo: true, degraded: true, stageDetail: 'lossy-gif-fallback' });
-      const lossySource = fs.existsSync(tempCompressedVideo) ? tempCompressedVideo : conversionSourceVideo;
-      const fallbackProfile = adaptivePlan.lastProfile || adaptivePlan.profiles[Math.max(0, adaptivePlan.profiles.length - 1)];
-      await runFallbackSinglePass(lossySource, {
-        fps: isUltraLargeFile
-          ? Math.max(mediaTuning.watcher.ultra.fallbackMinFps, fallbackProfile.fps - 1)
-          : Math.min(fallbackProfile.fps, mediaTuning.watcher.fallbackLossy.fps),
-        scaleDivisor: isUltraLargeFile
-          ? Math.max(mediaTuning.watcher.ultra.fallbackScaleDivisorMin, fallbackProfile.scaleDivisor + 1)
-          : Math.max(fallbackProfile.scaleDivisor, mediaTuning.watcher.fallbackLossy.scaleDivisor || 2),
-        maxColors: isUltraLargeFile
-          ? Math.max(mediaTuning.watcher.ultra.fallbackMinColors, fallbackProfile.maxColors - 16)
-          : Math.min(fallbackProfile.maxColors, mediaTuning.watcher.fallbackLossy.maxColors),
-        dither: isUltraLargeFile ? mediaTuning.watcher.ultra.fallbackDither : mediaTuning.watcher.fallbackLossy.dither,
-        timeoutMs: isUltraLargeFile
-          ? Math.max(mediaTuning.watcher.ultra.fallbackTimeoutFloorMs, fallbackProfile.timeoutMs - mediaTuning.watcher.ultra.fallbackTimeoutReduceMs)
-          : mediaTuning.watcher.fallbackLossy.timeoutMs
-      });
-      converted = true;
-    }
-
-    if (!converted && primaryError) {
-      throw primaryError;
-    }
+      },
+      progressBase: 18,
+      progressSpan: 70,
+      log: (message) => console.log(message)
+    });
+    throwIfAborted();
 
     if (!fs.existsSync(tempGifOut) || fs.statSync(tempGifOut).size === 0) {
       throw new Error('转换输出为空');
     }
 
-    if (progressCb) progressCb('converting', 80, { isVideo: true });
+    if (progressCb) progressCb('converting', 88, { estimatedSec, isVideo: true, stageDetail: 'shared-gif-ready' });
 
     const gifBuffer = fs.readFileSync(tempGifOut);
     const gifSizeMB = (gifBuffer.length / 1024 / 1024).toFixed(1);
     const convTime = ((Date.now() - convStartTime) / 1000).toFixed(1);
-    console.log(`   ✅ [Video→GIF] ${videoSizeMB}MB → ${gifSizeMB}MB GIF (${convTime}秒)`);
+    console.log(`   ✅ [Video→GIF] 共享链路完成 ${videoSizeMB}MB → ${gifSizeMB}MB (${convTime}秒)`);
 
     return gifBuffer;
   } finally {

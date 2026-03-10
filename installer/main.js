@@ -1,6 +1,6 @@
 const { app, BrowserWindow, ipcMain, dialog, clipboard } = require('electron');
 const path = require('path');
-const { exec, spawn } = require('child_process');
+const { exec, spawn, execFile } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 
@@ -101,6 +101,34 @@ function getLegacyRuntimeRootFromInstallPath(installPath) {
   return '';
 }
 
+function getBundledRuntimeArchAliases() {
+  return process.arch === 'arm64'
+    ? ['apple', 'arm64']
+    : ['intel', 'x64'];
+}
+
+function getBundledRuntimeRoots(installPath) {
+  const packageRoot = resolvePackageRootFromInstallPath(installPath);
+  const legacyRuntimeRoot = getLegacyRuntimeRootFromInstallPath(installPath);
+  const candidates = [];
+
+  if (packageRoot) {
+    candidates.push(
+      path.join(packageRoot, 'runtime'),
+      path.join(packageRoot, 'embedded-runtime')
+    );
+  }
+  if (legacyRuntimeRoot) {
+    candidates.push(legacyRuntimeRoot);
+  }
+
+  return candidates.filter((dir, index) => (
+    dir &&
+    candidates.indexOf(dir) === index &&
+    fs.existsSync(dir)
+  ));
+}
+
 function ensureRuntimeInsideProject(installPath) {
   if (!installPath || typeof installPath !== 'string') return false;
   const projectRoot = path.resolve(installPath);
@@ -131,48 +159,49 @@ function ensureRuntimeInsideProject(installPath) {
 }
 
 function collectBundledRuntimeBinDirs(installPath) {
-  const packageRoot = resolvePackageRootFromInstallPath(installPath);
-  if (!packageRoot) return [];
-  const legacyRuntimeRoot = getLegacyRuntimeRootFromInstallPath(installPath);
-  const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
-  const candidates = [
-    path.join(packageRoot, 'runtime', 'bin'),
-    path.join(packageRoot, 'runtime', arch, 'bin'),
-    path.join(packageRoot, 'runtime', process.arch, 'bin'),
-    path.join(packageRoot, 'runtime', 'node', 'bin'),
-    path.join(packageRoot, 'runtime', arch, 'node', 'bin'),
-    path.join(packageRoot, 'runtime', process.arch, 'node', 'bin'),
-    path.join(packageRoot, 'embedded-runtime', 'bin')
-  ];
-  if (legacyRuntimeRoot) {
+  const runtimeRoots = getBundledRuntimeRoots(installPath);
+  if (runtimeRoots.length === 0) return [];
+
+  const candidates = [];
+  for (const runtimeRoot of runtimeRoots) {
     candidates.push(
-      path.join(legacyRuntimeRoot, 'bin'),
-      path.join(legacyRuntimeRoot, arch, 'bin'),
-      path.join(legacyRuntimeRoot, process.arch, 'bin'),
-      path.join(legacyRuntimeRoot, 'node', 'bin'),
-      path.join(legacyRuntimeRoot, arch, 'node', 'bin'),
-      path.join(legacyRuntimeRoot, process.arch, 'node', 'bin')
+      path.join(runtimeRoot, 'bin'),
+      path.join(runtimeRoot, 'node', 'bin')
     );
+    for (const archName of getBundledRuntimeArchAliases()) {
+      candidates.push(
+        path.join(runtimeRoot, archName, 'bin'),
+        path.join(runtimeRoot, archName, 'node', 'bin')
+      );
+    }
   }
-  return candidates.filter((dir, index) => candidates.indexOf(dir) === index && fs.existsSync(dir));
+
+  return candidates.filter((dir, index) => (
+    candidates.indexOf(dir) === index &&
+    fs.existsSync(dir)
+  ));
 }
 
 function detectBundledRuntimeFolderStatus(installPath) {
   const packageRoot = resolvePackageRootFromInstallPath(installPath || currentInstallPath);
-  const runtimeRoot = packageRoot ? path.join(packageRoot, 'runtime') : '';
+  const runtimeRoots = getBundledRuntimeRoots(installPath || currentInstallPath);
+  const runtimeRoot = runtimeRoots[0] || (packageRoot ? path.join(packageRoot, 'runtime') : '');
   const bins = collectBundledRuntimeBinDirs(installPath || currentInstallPath);
   const result = {
     complete: false,
     packageRoot,
     runtimeRoot,
+    runtimeRoots,
     bins,
     node: null,
     ffmpeg: null,
+    ffprobe: null,
     gifsicle: null,
     magick: null,
+    convert: null,
     missing: []
   };
-  if (!runtimeRoot || !fs.existsSync(runtimeRoot)) {
+  if (runtimeRoots.length === 0) {
     result.missing = ['runtime-folder'];
     return result;
   }
@@ -180,7 +209,9 @@ function detectBundledRuntimeFolderStatus(installPath) {
   for (const binDir of bins) {
     if (!result.node && fs.existsSync(path.join(binDir, 'node'))) result.node = path.join(binDir, 'node');
     if (!result.ffmpeg && fs.existsSync(path.join(binDir, 'ffmpeg'))) result.ffmpeg = path.join(binDir, 'ffmpeg');
+    if (!result.ffprobe && fs.existsSync(path.join(binDir, 'ffprobe'))) result.ffprobe = path.join(binDir, 'ffprobe');
     if (!result.gifsicle && fs.existsSync(path.join(binDir, 'gifsicle'))) result.gifsicle = path.join(binDir, 'gifsicle');
+    if (!result.convert && fs.existsSync(path.join(binDir, 'convert'))) result.convert = path.join(binDir, 'convert');
     if (!result.magick) {
       const magickCandidate = fs.existsSync(path.join(binDir, 'magick'))
         ? path.join(binDir, 'magick')
@@ -195,6 +226,103 @@ function detectBundledRuntimeFolderStatus(installPath) {
   if (!result.magick) result.missing.push('imagemagick');
   result.complete = result.missing.length === 0;
   return result;
+}
+
+function collectBundledRuntimePermissionTargets(installPath) {
+  const status = detectBundledRuntimeFolderStatus(installPath);
+  const targets = new Set();
+
+  for (const runtimeRoot of status.runtimeRoots || []) {
+    targets.add(runtimeRoot);
+  }
+  for (const binDir of status.bins || []) {
+    targets.add(binDir);
+  }
+  for (const executablePath of [status.node, status.ffmpeg, status.ffprobe, status.gifsicle, status.magick, status.convert]) {
+    if (executablePath) targets.add(executablePath);
+  }
+
+  return Array.from(targets).filter(Boolean);
+}
+
+function isLikelyGatekeeperBlock(text) {
+  const normalized = String(text || '').toLowerCase();
+  return [
+    'developer cannot be verified',
+    'apple could not verify',
+    'cannot be opened because the developer cannot be verified',
+    'is damaged and can\'t be opened',
+    'is damaged and can’t be opened',
+    'operation not permitted',
+    'spawn eperm',
+    'killed: 9'
+  ].some(marker => normalized.includes(marker));
+}
+
+function buildPermissionRetryGuidance(displayName, executablePath, details) {
+  const gatekeeperHint = isLikelyGatekeeperBlock(details)
+    ? `macOS 拦截了 ${displayName} 的首次执行。`
+    : `${displayName} 在安装阶段执行失败。`;
+
+  return [
+    `${gatekeeperHint}`,
+    '',
+    '请前往“系统设置 -> 隐私与安全性”，点击对应项目后的“仍要打开”，然后回到安装器重新检测。',
+    '安装器会在安装阶段重新验证这些运行时工具，避免把权限问题拖到首次 GIF 导出或首次同步时才暴露。',
+    '',
+    `可执行文件: ${executablePath}`,
+    details ? `原始信息:\n${details}` : ''
+  ].filter(Boolean).join('\n');
+}
+
+function buildPermissionBatchGuidance(failures = []) {
+  const pending = failures.filter(Boolean);
+  const lines = [
+    '请前往“系统设置 -> 隐私与安全性”，找到“安全性”分区，并依次点击下面这些项目对应的“仍要打开”。',
+    '完成后回到安装器，点击“重新检测”；只有当下面所有项目都通过预热验证后，才可以继续后续安装流程。',
+    ''
+  ];
+
+  if (pending.length > 0) {
+    lines.push('待完成授权的运行时工具:');
+    for (const item of pending) {
+      lines.push(`- ${item.label}`);
+      if (item.path) {
+        lines.push(`  路径: ${item.path}`);
+      }
+    }
+    lines.push('');
+  }
+
+  lines.push('如果“隐私与安全性”页面里暂时没有出现对应按钮，请先回到安装器重新检测一次，让 macOS 记录这些被拦截的工具。');
+
+  const firstFailure = pending.find(item => item && item.detail);
+  if (firstFailure) {
+    lines.push('');
+    lines.push(`最近一次失败信息（${firstFailure.label}）:`);
+    lines.push(firstFailure.detail);
+  }
+
+  return lines.join('\n');
+}
+
+async function clearBundledRuntimeQuarantine(installPath, sendLog = () => {}) {
+  const targets = collectBundledRuntimePermissionTargets(installPath);
+  if (targets.length === 0) {
+    sendLog('⚠️ 未找到 bundled runtime，跳过隔离属性清理。');
+    return { success: false, targets: [] };
+  }
+
+  sendLog('🔐 正在清理内置运行时的隔离属性...');
+  for (const target of targets) {
+    try {
+      await execPromise(`xattr -dr com.apple.quarantine "${target}" 2>/dev/null || true`, { timeout: 20000 });
+      sendLog(`   已处理: ${target}`);
+    } catch (_) {
+      sendLog(`   跳过: ${target}`);
+    }
+  }
+  return { success: true, targets };
 }
 
 function applyBundledRuntimeEnv(installPath) {
@@ -784,6 +912,130 @@ async function detectBundledOfflineRuntime(installPath) {
   };
 }
 
+async function warmupBundledRuntimeExecutables(installPath, sendLog = () => {}, options = {}) {
+  currentInstallPath = installPath || currentInstallPath;
+  applyBundledRuntimeEnv(currentInstallPath);
+  const collectAllFailures = !!options.collectAllFailures;
+
+  const runtimeStatus = detectBundledRuntimeFolderStatus(currentInstallPath);
+  if (!runtimeStatus.complete) {
+    const missing = (runtimeStatus.missing || []).join(', ') || 'unknown';
+    return {
+      success: false,
+      failedTool: 'runtime',
+      error: `安装资源不完整，缺少运行时组件：${missing}`
+    };
+  }
+
+  const toolChecks = [
+    {
+      key: 'node',
+      label: 'Node.js',
+      path: runtimeStatus.node || resolveNodeBinary(currentInstallPath),
+      run: async (executablePath) => {
+        await execFilePromise(executablePath, ['-v'], { timeout: 10000 });
+      }
+    },
+    {
+      key: 'ffmpeg',
+      label: 'FFmpeg',
+      path: runtimeStatus.ffmpeg || findExecutable('ffmpeg'),
+      run: async (executablePath) => {
+        const { stdout, stderr } = await execFilePromise(executablePath, ['-version'], { timeout: 10000 });
+        const combined = `${stdout || ''}${stderr || ''}`;
+        if (!combined.includes('ffmpeg version')) {
+          throw new Error('ffmpeg -version 输出异常');
+        }
+      }
+    },
+    {
+      key: 'gifsicle',
+      label: 'Gifsicle',
+      path: runtimeStatus.gifsicle || findExecutable('gifsicle'),
+      run: async (executablePath) => {
+        const { stdout, stderr } = await execFilePromise(executablePath, ['--version'], { timeout: 10000 });
+        const combined = `${stdout || ''}${stderr || ''}`;
+        if (!combined.toLowerCase().includes('gifsicle')) {
+          throw new Error('gifsicle --version 输出异常');
+        }
+      }
+    },
+    {
+      key: 'imagemagick',
+      label: 'ImageMagick',
+      path: runtimeStatus.magick || runtimeStatus.convert || findExecutable('magick') || findExecutable('convert'),
+      run: async (executablePath) => {
+        await execFilePromise(executablePath, ['-version'], { timeout: 10000 });
+        const health = await verifyImageMagickPngHealth(executablePath);
+        if (!health.ok) {
+          throw new Error(health.details || health.reason || 'PNG 健康检查失败');
+        }
+      }
+    }
+  ];
+
+  sendLog('🧪 正在预热并验证内置运行时...');
+  const failures = [];
+  const verifiedTools = [];
+  for (const check of toolChecks) {
+    if (!check.path) {
+      const failure = {
+        key: check.key,
+        label: check.label,
+        path: '',
+        detail: `未找到 ${check.label} 可执行文件，安装资源可能不完整。`
+      };
+      failures.push(failure);
+      sendLog(`   ❌ ${check.label} 缺失`);
+      if (!collectAllFailures) {
+        return {
+          success: false,
+          failedTool: check.key,
+          failures,
+          error: failure.detail
+        };
+      }
+      continue;
+    }
+    sendLog(`   验证 ${check.label}...`);
+    try {
+      await check.run(check.path);
+      sendLog(`   ✅ ${check.label} 验证通过`);
+      verifiedTools.push(check.key);
+    } catch (error) {
+      const detail = String(error?.stderr || error?.stdout || error?.message || error || '');
+      const failure = {
+        key: check.key,
+        label: check.label,
+        path: check.path,
+        detail
+      };
+      failures.push(failure);
+      sendLog(`   ❌ ${check.label} 验证失败`);
+      if (!collectAllFailures) {
+        return {
+          success: false,
+          failedTool: check.key,
+          failures,
+          error: buildPermissionRetryGuidance(check.label, check.path, detail)
+        };
+      }
+    }
+  }
+
+  if (failures.length > 0) {
+    return {
+      success: false,
+      failedTool: failures[0].key,
+      failures,
+      verifiedTools,
+      error: buildPermissionBatchGuidance(failures)
+    };
+  }
+
+  return { success: true, verifiedTools };
+}
+
 async function verifyImageMagickPngHealth(magickPath) {
   if (!magickPath || !fs.existsSync(magickPath)) {
     return { ok: false, reason: 'magick-not-found' };
@@ -885,6 +1137,44 @@ ipcMain.handle('check-gifsicle', async (event, installPath = null) => {
   });
 });
 
+ipcMain.handle('warmup-runtime-permissions', async (event, installPath = null) => {
+  const targetPath = installPath || currentInstallPath;
+  if (targetPath) {
+    currentInstallPath = targetPath;
+  }
+
+  const logs = [];
+  const sendLog = (message) => {
+    const text = cleanPtyOutput(String(message || '')).trim();
+    if (text) logs.push(text);
+  };
+
+  await clearBundledRuntimeQuarantine(targetPath, sendLog);
+  const result = await warmupBundledRuntimeExecutables(targetPath, sendLog, { collectAllFailures: true });
+  return {
+    ...result,
+    pendingTools: Array.isArray(result.failures) ? result.failures.map(item => item.label) : [],
+    detail: logs.join('\n')
+  };
+});
+
+ipcMain.handle('open-security-settings', async () => {
+  try {
+    await execPromise('open "x-apple.systempreferences:com.apple.preference.security"', { timeout: 10000 });
+    return { success: true };
+  } catch (_) {
+    try {
+      await execPromise('open "/System/Library/PreferencePanes/Security.prefPane"', { timeout: 10000 });
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        error: error && error.message ? error.message : String(error)
+      };
+    }
+  }
+});
+
 ipcMain.handle('check-icloud-space', async () => {
   const icloudPath = path.join(
     os.homedir(),
@@ -932,16 +1222,11 @@ ipcMain.handle('check-icloud-space', async () => {
 });
 
 ipcMain.handle('enable-anywhere', async () => {
-  return new Promise((resolve) => {
-    // 使用 AppleScript 获取管理员权限执行命令
-    const command = "spctl --master-disable";
-    const script = `do shell script "${command}" with administrator privileges`;
-    
-    exec(`osascript -e '${script}'`, (error) => {
-      // 即使用户取消或失败，我们也继续，不阻塞安装流程
-      resolve({ success: !error });
-    });
-  });
+  return {
+    success: false,
+    skipped: true,
+    message: '安装器已不再通过 spctl --master-disable 全局关闭 Gatekeeper。'
+  };
 });
 
 // 辅助函数：运行 AppleScript
@@ -1015,6 +1300,20 @@ function execPromise(cmd, options = {}) {
     exec(cmd, { timeout: 600000, maxBuffer: 50 * 1024 * 1024, ...options }, (error, stdout, stderr) => {
       if (error) { error.stdout = stdout; error.stderr = stderr; reject(error); }
       else resolve({ stdout, stderr });
+    });
+  });
+}
+
+function execFilePromise(filePath, args = [], options = {}) {
+  return new Promise((resolve, reject) => {
+    execFile(filePath, args, { timeout: 600000, maxBuffer: 50 * 1024 * 1024, ...options }, (error, stdout, stderr) => {
+      if (error) {
+        error.stdout = stdout;
+        error.stderr = stderr;
+        reject(error);
+      } else {
+        resolve({ stdout, stderr });
+      }
     });
   });
 }
@@ -2397,8 +2696,7 @@ ipcMain.handle('copy-to-clipboard', async (event, text) => {
   return { success: true };
 });
 
-// 配置服务器自动启动（LaunchAgent）
-ipcMain.handle('setup-autostart', async (event, installPath) => {
+function setupAutostartInternal(installPath) {
   return new Promise((resolve) => {
     try {
       const nodePath = resolveNodeBinary(installPath);
@@ -2445,6 +2743,77 @@ ipcMain.handle('setup-autostart', async (event, installPath) => {
       resolve({ success: false, error: error.message });
     }
   });
+}
+
+// 配置服务器自动启动（LaunchAgent）
+ipcMain.handle('setup-autostart', async (event, installPath) => {
+  return setupAutostartInternal(installPath);
+});
+
+ipcMain.handle('finalize-installation', async (event, installPath, options = {}) => {
+  const targetPath = installPath || currentInstallPath;
+  if (!targetPath || typeof targetPath !== 'string') {
+    return { success: false, error: '无效的安装路径。' };
+  }
+
+  currentInstallPath = targetPath;
+  applyBundledRuntimeEnv(currentInstallPath);
+
+  const logs = [];
+  const sendLog = (message) => {
+    const text = cleanPtyOutput(String(message || '')).trim();
+    if (text) logs.push(text);
+  };
+
+  const appendDetail = (detail) => {
+    const text = cleanPtyOutput(String(detail || '')).trim();
+    if (text) logs.push(text);
+  };
+
+  try {
+    if (!options.skipWarmup) {
+      await clearBundledRuntimeQuarantine(currentInstallPath, sendLog);
+
+      const warmupResult = await warmupBundledRuntimeExecutables(currentInstallPath, sendLog);
+      if (!warmupResult.success) {
+        appendDetail(warmupResult.error);
+        return {
+          success: false,
+          error: warmupResult.error,
+          failedTool: warmupResult.failedTool || null,
+          detail: logs.join('\n')
+        };
+      }
+    } else {
+      sendLog('⏭️ 已完成权限验证，跳过重复预热。');
+    }
+
+    sendLog('🚀 正在配置开机自启动并验证服务器启动...');
+    const autostartResult = await setupAutostartInternal(currentInstallPath);
+    if (!autostartResult.success) {
+      appendDetail(autostartResult.error);
+      return {
+        success: false,
+        error: autostartResult.error,
+        failedTool: 'autostart',
+        detail: logs.join('\n')
+      };
+    }
+
+    sendLog('✅ 安装阶段权限预热与服务器配置完成。');
+    return {
+      success: true,
+      message: autostartResult.message || '安装成功',
+      detail: logs.join('\n')
+    };
+  } catch (error) {
+    appendDetail(error && error.message ? error.message : String(error));
+    return {
+      success: false,
+      error: error && error.message ? error.message : String(error),
+      detail: logs.join('\n')
+    };
+  }
 });
 
 // 配置 iCloud 文件夹为"始终保留下载"

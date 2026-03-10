@@ -7,6 +7,7 @@ const os = require('os');
 const crypto = require('crypto');
 const mediaTuning = require('./media-processing-tuning');
 const { buildComposerAttemptProfiles } = require('./adaptive-processing');
+const { transcodeVideoToGif, probeVideoMeta } = require('./video-gif-pipeline');
 
 // 🔒 并发导出序号锁：防止多个导出同时扫描文件夹时拿到相同序号
 const _reservedExportNumbers = new Set();
@@ -979,23 +980,19 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
     
     if (ext === '.mp4' || ext === '.mov') {
       const processedGifPath = path.join(tempDir, `processed_${i}.gif`);
-      const palettePath = path.join(tempDir, `palette_${i}.png`);
-      
       const targetW = Math.round(item.bounds.width);
       const targetH = Math.round(item.bounds.height);
       reportProgress(4, `正在预压缩视频 (${finishedVideoCount + 1}/${totalVideoCount})...`);
-      const videoSourceForGif = await buildHalfScaleVideo(item.path, `pre_${i}`);
       
       // 🚀 缓存：源视频→GIF 的转换结果（包含目标尺寸+抖动算法+当前帧率上限配置）
       // 这个缓存是安全的，因为它只缓存源视频/GIF 文件本身的转换，
       // 不影响后续的帧合成步骤（帧合成每次都会重新读取所有图层）
-      const fileStats = fs.statSync(videoSourceForGif);
+      const fileStats = fs.statSync(item.path);
       const adaptive = getAdaptiveProfile({
         preSizeMB: fileStats.size / (1024 * 1024),
         decisionSizeMB: Number.isFinite(item.sourceSizeMB) ? item.sourceSizeMB : null,
         hasVideoLayers: true
       });
-      const adaptivePlan = adaptive._plan;
       const composerCfg = mediaTuning.composer || {};
       const exportCfg = mediaTuning.composerExport || {};
       const fastCfg = exportCfg.fast || {};
@@ -1005,9 +1002,9 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
         `f${fastCfg.fpsCap || 24}_${fastCfg.fpsCapMedium || 20}_${fastCfg.fpsCapLarge || 16}_${fastCfg.fpsCapXLarge || 12}`,
         `q${qualityCfg.fpsCap || 60}_${qualityCfg.fpsCapMedium || 50}_${qualityCfg.fpsCapLarge || 30}_${qualityCfg.fpsCapXLarge || 15}`
       ].join('_');
-      // v8: 导出模式参数签名纳入缓存键，避免极速/高质切换误命中旧缓存
+      // v9: 共享 GIF 转码模块签名，避免旧缓存与新链路混用
       const cacheKey = crypto.createHash('md5')
-        .update(`v8_half_${videoSourceForGif}_${fileStats.size}_${fileStats.mtime.getTime()}_${targetW}x${targetH}_dither_${ditherMode}_vf${adaptive.videoFpsCap}_${composerSig}`)
+        .update(`v9_shared_${item.path}_${fileStats.size}_${fileStats.mtime.getTime()}_${targetW}x${targetH}_dither_${ditherMode}_vf${adaptive.videoFpsCap}_${composerSig}`)
         .digest('hex');
       
       const localFolder = userConfig.getLocalDownloadFolder();
@@ -1030,86 +1027,36 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
       
       const isVideo = true;
       console.log(`   🔄 ${isVideo ? '转换视频' : '重新处理 GIF'} (${targetW}x${targetH}, dither=${ditherMode})...`);
-      
-      // 根据文件类型选择不同的处理方式
-      let sourceFps = 15; // 默认帧率
-      
-      if (isVideo) {
-        // 视频文件：检测帧率
-        try {
-          const probeCmd = `${FFPROBE_BIN} -v error -select_streams v:0 -show_entries stream=r_frame_rate -of default=noprint_wrappers=1:nokey=1 "${videoSourceForGif}"`;
-          const probeResult = await execAsync(probeCmd, { timeout: 10000 });
-          const fpsStr = probeResult.stdout.trim();
-          if (fpsStr) {
-            const [num, den] = fpsStr.split('/').map(Number);
-            sourceFps = den ? num / den : num;
-          }
-        } catch (probeError) {
-          // 静默处理
-        }
-      }
-      
-      let gifFps = Math.min(sourceFps, adaptive.videoFpsCap);
       const conversionStartTime = Date.now();
-      let completedProfile = adaptive;
-      let lastVideoPrepErr = null;
-      for (let attemptIndex = 0; attemptIndex < adaptivePlan.profiles.length; attemptIndex++) {
-        const attemptProfile = getAdaptiveProfile({
-          preSizeMB: fileStats.size / (1024 * 1024),
-          decisionSizeMB: Number.isFinite(item.sourceSizeMB) ? item.sourceSizeMB : null,
-          hasVideoLayers: true
-        }, attemptIndex);
-        completedProfile = attemptProfile;
-        gifFps = Math.min(sourceFps, attemptProfile.videoFpsCap);
-        const scaleFilter = isVideo
-          ? `fps=${gifFps},scale=${targetW}:${targetH}:flags=lanczos`
-          : `scale=${targetW}:${targetH}:flags=lanczos`;
-        const effectiveDither = attemptProfile.effectiveDither || ditherMode;
-        const paletteGenCmd = `${FFMPEG_BIN} -threads 0 -i "${videoSourceForGif}" -vf "${scaleFilter},palettegen=max_colors=${attemptProfile.paletteMaxColors}:stats_mode=full" -y "${palettePath}"`;
-        const paletteUseFilter = `${scaleFilter}[v];[v][1:v]paletteuse=dither=${effectiveDither}:diff_mode=rectangle`;
-        const ffmpegCmdHwAccel = `${FFMPEG_BIN} -hwaccel videotoolbox -vsync 0 -threads 0 -i "${videoSourceForGif}" -i "${palettePath}" -lavfi "${paletteUseFilter}" -threads 0 "${processedGifPath}" -y`;
-        const ffmpegCmdSoftware = `${FFMPEG_BIN} -vsync 0 -threads 0 -i "${videoSourceForGif}" -i "${palettePath}" -lavfi "${paletteUseFilter}" -threads 0 "${processedGifPath}" -y`;
-        try {
-          console.log(`   ⚙️  预处理档位 ${attemptIndex + 1}/${adaptivePlan.profiles.length}: ${attemptProfile.label} fpsCap=${attemptProfile.videoFpsCap} colors=${attemptProfile.paletteMaxColors} dither=${effectiveDither}`);
-          await execAsync(paletteGenCmd, {
-            maxBuffer: 50 * 1024 * 1024,
-            timeout: Math.max(30000, attemptProfile.paletteGenTimeoutMs)
-          });
-          try {
-            await execAsync(ffmpegCmdHwAccel, {
-              maxBuffer: 200 * 1024 * 1024,
-              timeout: Math.max(60000, Math.ceil(600000 * attemptProfile.timeoutScale))
-            });
-          } catch (_) {
-            await execAsync(ffmpegCmdSoftware, {
-              maxBuffer: 200 * 1024 * 1024,
-              timeout: Math.max(60000, Math.ceil(600000 * attemptProfile.timeoutScale))
-            });
-          }
-
-          const frameCount = await getGifFrameCount(processedGifPath);
-          if (frameCount <= 1) {
-            await execAsync(ffmpegCmdSoftware, {
-              maxBuffer: 200 * 1024 * 1024,
-              timeout: Math.max(60000, Math.ceil(600000 * attemptProfile.timeoutScale))
-            });
-          }
-          lastVideoPrepErr = null;
-          break;
-        } catch (videoPrepErr) {
-          lastVideoPrepErr = videoPrepErr;
-          try { if (fs.existsSync(processedGifPath)) fs.unlinkSync(processedGifPath); } catch (_) {}
-          try { if (fs.existsSync(palettePath)) fs.unlinkSync(palettePath); } catch (_) {}
-          if (attemptIndex >= adaptivePlan.profiles.length - 1) {
-            throw videoPrepErr;
-          }
-          console.warn(`   ⚠️  预处理档位失败，降档重试: ${attemptProfile.label} -> ${adaptivePlan.profiles[attemptIndex + 1].label} (${videoPrepErr.message})`);
-        }
-      }
-      if (lastVideoPrepErr) throw lastVideoPrepErr;
+      const sourceMeta = await probeVideoMeta(execAsync, FFPROBE_BIN, item.path);
+      const sourceFrames = Math.max(0, Math.round((sourceMeta?.duration || 0) * (sourceMeta?.fps || 0)));
+      const sharedResult = await transcodeVideoToGif({
+        execAsync,
+        ffmpegBin: FFMPEG_BIN,
+        ffprobeBin: FFPROBE_BIN,
+        gifsicleBin: GIFSICLE_BIN,
+        sourcePath: item.path,
+        outputPath: processedGifPath,
+        tempDir,
+        mediaTuning,
+        requestedMode: normalizedRequestedMode,
+        gifAlgorithm,
+        decisionSizeMB: Number.isFinite(item.sourceSizeMB) ? item.sourceSizeMB : null,
+        pixels: Math.max(1, targetW * targetH),
+        frameCount: sourceFrames,
+        hasVideoLayers: true,
+        targetWidth: targetW,
+        targetHeight: targetH,
+        optimizeOutput: false,
+        enableHalfScalePrepass: true,
+        shouldCancel,
+        progressBase: 4,
+        progressSpan: 2,
+        log: (message) => console.log(message)
+      });
       
       const conversionTime = ((Date.now() - conversionStartTime) / 1000).toFixed(1);
-      console.log(`   ✅ ${isVideo ? '视频转GIF' : 'GIF重新处理'}完成 (${conversionTime}s, mode=${completedProfile.mode}, dither=${completedProfile.effectiveDither || ditherMode})`);
+      console.log(`   ✅ ${isVideo ? '视频转GIF' : 'GIF重新处理'}完成 (${conversionTime}s, mode=${sharedResult.profile.mode}, dither=${sharedResult.profile.effectiveDither || ditherMode})`);
       
       try {
         // 快速验证：文件存在且非空即可（FFmpeg 出错时会抛异常，不需要再 identify）
@@ -1129,15 +1076,6 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
         finishedVideoCount++;
         const preProgress = Math.min(6, Math.round(4 + (finishedVideoCount / Math.max(1, totalVideoCount)) * 2));
         reportProgress(preProgress, `正在预处理视频 (${finishedVideoCount}/${totalVideoCount})...`);
-        
-        // 清理临时调色板文件
-        try {
-          if (fs.existsSync(palettePath)) {
-            fs.unlinkSync(palettePath);
-          }
-        } catch (cleanupError) {
-          console.warn(`   ⚠️  清理调色板文件失败（可忽略）: ${cleanupError.message}`);
-        }
       } catch (ffmpegError) {
         console.error(`   ❌ FFmpeg GIF 生成失败: ${ffmpegError.message}`);
         if (ffmpegError.stderr) {
@@ -1149,13 +1087,6 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
           try {
             fs.unlinkSync(processedGifPath);
           } catch (e) {
-          }
-        }
-        if (fs.existsSync(palettePath)) {
-          try {
-            fs.unlinkSync(palettePath);
-          } catch (e) {
-            console.warn(`   ⚠️  清理调色板失败:`, e.message);
           }
         }
         

@@ -673,10 +673,14 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      box-shadow: 0 4px 16px var(--accent-soft);
-      background: var(--accent);
+      box-shadow: none;
+      background: transparent;
       color: white;
       transition: background 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .completion-badge.loading {
+      color: #b8b8b8;
     }
 
     .completion-badge.success {
@@ -692,11 +696,17 @@
     .completion-icon svg {
       width: 40px !important;
       height: 40px !important;
-      stroke: white !important;
+      stroke: currentColor !important;
       stroke-width: 2.8 !important;
     }
 
-    #step5.active {
+    .completion-badge.loading .completion-icon svg {
+      width: 56px !important;
+      height: 56px !important;
+      stroke-width: 3.2 !important;
+    }
+
+    #step6.active {
       align-items: center;
       justify-content: center;
     }
@@ -1004,6 +1014,11 @@
         <h1 style="font-family: 'Archivo Black', sans-serif; font-size: 32px; margin: 0 0 4px 0; color: var(--text-primary); letter-spacing: -0.02em;">ScreenSync</h1>
         <p data-i18n="welcome_subtitle" style="font-size: 16px; color: var(--text-secondary); margin: 0;">自动化传输并整理截图</p>
 
+        <div class="alert" style="margin-top: 20px; max-width: 420px;">
+          <div class="alert-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="currentColor" fill-opacity="0.12"/><path d="M12 8v5M12 16.5v.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+          <div style="text-align: left;" data-i18n="welcome_task_hint">确认语言后点击开始安装；如果安装器没有自动识别安装包，再选择文件夹即可。</div>
+        </div>
+
         <div class="lang-cards" style="margin-top: 32px;">
           <div class="lang-card selected" id="langCardZh" onclick="selectLanguage('zh')">
             <div class="lang-check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg></div>
@@ -1029,43 +1044,48 @@
     <!-- Step 2: System Check -->
     <div class="step" id="step2">
       <div class="step-header">
-        <h2 class="step-title" data-i18n="step2_title">环境检查</h2>
-        <p class="step-description" data-i18n="step2_desc">检查系统环境是否满足运行要求</p>
+        <h2 class="step-title" data-i18n="step2_title">确认安装包可用</h2>
+        <p class="step-description" data-i18n="step2_desc">安装器正在确认安装资源完整；确认后即可继续</p>
+      </div>
+
+      <div class="alert">
+        <div class="alert-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="currentColor" fill-opacity="0.12"/><path d="M12 8v5M12 16.5v.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        <div data-i18n="step2_task_hint">这一页只是在确认安装包可直接使用，你无需手动处理每个组件。</div>
       </div>
 
       <div class="status-list" id="systemChecks">
         <div class="status-item checking">
           <div class="status-icon"><svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg></div>
           <div class="status-content">
-            <div class="status-label">Homebrew</div>
+            <div class="status-label" data-i18n="dep_label_package">安装资源</div>
             <div class="status-detail" data-i18n="checking">检查中...</div>
           </div>
         </div>
         <div class="status-item checking">
           <div class="status-icon"><svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg></div>
           <div class="status-content">
-            <div class="status-label">Node.js</div>
+            <div class="status-label" data-i18n="dep_label_node">Node.js 运行时</div>
             <div class="status-detail" data-i18n="checking">检查中...</div>
           </div>
         </div>
         <div class="status-item checking">
           <div class="status-icon"><svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg></div>
           <div class="status-content">
-            <div class="status-label">ImageMagick</div>
+            <div class="status-label" data-i18n="dep_label_imagemagick">图片处理组件</div>
             <div class="status-detail" data-i18n="checking">检查中...</div>
           </div>
         </div>
         <div class="status-item checking">
           <div class="status-icon"><svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg></div>
           <div class="status-content">
-            <div class="status-label">FFmpeg</div>
+            <div class="status-label" data-i18n="dep_label_ffmpeg">视频处理组件</div>
             <div class="status-detail" data-i18n="checking">检查中...</div>
           </div>
         </div>
         <div class="status-item checking">
           <div class="status-icon"><svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg></div>
           <div class="status-content">
-            <div class="status-label">Gifsicle</div>
+            <div class="status-label" data-i18n="dep_label_gifsicle">GIF 压缩组件</div>
             <div class="status-detail" data-i18n="checking">检查中...</div>
           </div>
         </div>
@@ -1083,8 +1103,13 @@
     <!-- Step 3: Install Dependencies -->
     <div class="step" id="step3">
       <div class="step-header">
-        <h2 class="step-title" data-i18n="step3_title">安装依赖</h2>
-        <p class="step-description" data-i18n="step3_desc">安装项目所需的依赖包，请保持网络畅通</p>
+        <h2 class="step-title" data-i18n="step3_title">准备运行环境</h2>
+        <p class="step-description" data-i18n="step3_desc">安装器正在准备 ScreenSync 所需组件</p>
+      </div>
+
+      <div class="alert">
+        <div class="alert-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="currentColor" fill-opacity="0.12"/><path d="M12 8v5M12 16.5v.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        <div data-i18n="step3_task_hint">此过程可能需要几分钟，请保持安装器打开。</div>
       </div>
 
       <div class="progress-container">
@@ -1099,7 +1124,7 @@
       <div class="button-group" id="step3Buttons" style="display: none;">
         <div style="flex:1"></div>
         <button class="btn btn-primary" onclick="nextStep()" id="step3Next" disabled>
-          <span data-i18n="btn_next">下一步</span>
+          <span data-i18n="btn_continue_install">继续安装</span>
           <svg viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
         </button>
       </div>
@@ -1108,8 +1133,13 @@
     <!-- Step 4: Configuration -->
     <div class="step" id="step4">
       <div class="step-header">
-        <h2 class="step-title" data-i18n="step4_title">系统配置</h2>
-        <p class="step-description" data-i18n="step4_desc">应用配置并设置本地环境</p>
+        <h2 class="step-title" data-i18n="step4_title">设置本地工作区</h2>
+        <p class="step-description" data-i18n="step4_desc">正在创建文件夹并保存本机配置</p>
+      </div>
+
+      <div class="alert">
+        <div class="alert-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="currentColor" fill-opacity="0.12"/><path d="M12 8v5M12 16.5v.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        <div data-i18n="step4_task_hint">安装器会自动完成本地文件夹、语言和同步配置。</div>
       </div>
 
       <div class="status-list" id="configStatus">
@@ -1125,25 +1155,71 @@
       <div class="button-group" id="step4Buttons" style="display: none;">
         <div style="flex:1"></div>
         <button class="btn btn-primary" onclick="nextStep()" id="step4Next" disabled>
-          <span data-i18n="btn_next">下一步</span>
+          <span data-i18n="btn_continue_install">继续安装</span>
           <svg viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
         </button>
       </div>
     </div>
 
-    <!-- Step 5: Complete -->
+    <!-- Step 5: Runtime Permission Verification -->
     <div class="step" id="step5">
-      <div class="completion-badge" id="step5IconBadge">
-        <div class="completion-icon" id="step5Icon">
+      <div class="step-header">
+        <h2 class="step-title" data-i18n="step5_title">安全权限验证</h2>
+        <p class="step-description" data-i18n="step5_desc">按指引完成所有运行时工具的“仍要打开”授权后，才可继续</p>
+      </div>
+
+      <div class="status-list" id="step5Status">
+        <div class="status-item checking">
+          <div class="status-icon"><svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg></div>
+          <div class="status-content">
+            <div class="status-label" data-i18n="step5_waiting_title">正在执行权限预热验证</div>
+            <div class="status-detail" data-i18n="step5_waiting_detail">安装器会依次尝试运行 Node.js、FFmpeg、Gifsicle 和 ImageMagick</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="alert" id="step5Guide" style="display:block;">
+        <div class="alert-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="currentColor" fill-opacity="0.12"/><path d="M12 8v5M12 16.5v.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        <div style="flex: 1;">
+          <div style="font-weight: 600; margin-bottom: 6px;" data-i18n="step5_pending_detail">打开「系统设置 - 隐私与安全性」，在「安全性」中点按所有“仍要打开”，然后回到安装器</div>
+          <div style="font-size: 12px; color: var(--text-secondary); line-height: 1.6;">
+            1. 打开「系统设置 - 隐私与安全性」<br>
+            2. 在「安全性」中点按所有“仍要打开”<br>
+            3. 返回安装器
+          </div>
+          <div style="margin-top: 10px; font-size: 12px; color: var(--text-tertiary);" data-i18n="step5_instruction_hint">返回安装器后会自动重新检测；如果没有出现“仍要打开”，再点一次“重新检测”。</div>
+        </div>
+      </div>
+
+      <div class="button-group" id="step5Buttons">
+        <button class="btn" id="step5OpenSecurity" onclick="openSecuritySettings()">
+          <span data-i18n="btn_open_security">打开系统设置</span>
+        </button>
+        <button class="btn" id="step5Retry" onclick="recheckRuntimePermissions()">
+          <span data-i18n="recheck">重新检测</span>
+        </button>
+        <div style="flex:1; display:none;" id="step5ButtonsSpacer"></div>
+        <button class="btn btn-primary" id="step5Next" onclick="nextStep()" disabled style="display:none;">
+          <span data-i18n="btn_continue_server">继续安装</span>
+          <svg viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Step 6: Complete -->
+    <div class="step" id="step6">
+      <div class="completion-badge loading" id="step6IconBadge">
+        <div class="completion-icon" id="step6Icon">
           <svg class="spinner" viewBox="0 0 24 24" fill="none">
             <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
           </svg>
         </div>
       </div>
-      <h2 class="step-title" style="margin: 0;" id="step5Title" data-i18n="step5_starting_title">正在启动服务器</h2>
-      <div class="button-group" style="justify-content: center; margin-top: 0;">
-        <button class="btn btn-primary" id="step5Finish" onclick="finishInstallation()" style="min-width: 120px;">
-          <span data-i18n="btn_done">我知道了</span>
+      <h2 class="step-title" style="margin: 0;" id="step6Title" data-i18n="step6_starting_title">正在启动 ScreenSync</h2>
+      <p class="step-description" style="margin: 0; text-align: center;" id="step6Detail" data-i18n="step6_detail_starting">正在完成最后配置，请稍候</p>
+      <div class="button-group" id="step6Actions" style="justify-content: center; margin-top: 0; display: none;">
+        <button class="btn btn-primary" id="step6Finish" onclick="acknowledgeInstallation()" style="min-width: 120px;">
+          <span data-i18n="btn_done">完成安装</span>
         </button>
       </div>
     </div>
@@ -1156,6 +1232,7 @@
       <div class="dot" data-step="3"></div>
       <div class="dot" data-step="4"></div>
       <div class="dot" data-step="5"></div>
+      <div class="dot" data-step="6"></div>
     </div>
     <div style="color: var(--text-tertiary); font-size: 12px;">
       v1.0.2

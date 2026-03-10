@@ -35,6 +35,97 @@ if ! command -v gh &> /dev/null; then
     exit 1
 fi
 
+REPO="BorderWalker99/figma-plugin-figma_sync"
+
+compare_versions() {
+    python3 - "$1" "$2" <<'PY'
+import re
+import sys
+
+def normalize(v):
+    text = (v or "").strip()
+    text = re.sub(r'^v', '', text, flags=re.I)
+    core = text.split('-', 1)[0]
+    parts = []
+    for part in core.split('.'):
+        m = re.search(r'\d+', part)
+        parts.append(int(m.group(0)) if m else 0)
+    return parts or [0]
+
+a = normalize(sys.argv[1] if len(sys.argv) > 1 else "")
+b = normalize(sys.argv[2] if len(sys.argv) > 2 else "")
+size = max(len(a), len(b))
+a += [0] * (size - len(a))
+b += [0] * (size - len(b))
+
+if a > b:
+    print(1)
+elif a < b:
+    print(-1)
+else:
+    print(0)
+PY
+}
+
+delete_remote_tag_if_exists() {
+    local tag_name="$1"
+    if gh api "/repos/${REPO}/git/ref/tags/${tag_name}" >/dev/null 2>&1; then
+        gh api -X DELETE "/repos/${REPO}/git/refs/tags/${tag_name}" >/dev/null 2>&1 || true
+        echo -e "   ${GREEN}✅ 已删除远程 Tag: ${tag_name}${NC}"
+    fi
+}
+
+delete_release_and_tag_if_exists() {
+    local tag_name="$1"
+    local reason="$2"
+
+    if gh release view "${tag_name}" >/dev/null 2>&1; then
+        echo -e "   ${YELLOW}⚠️  ${reason}: ${tag_name}${NC}"
+        gh release delete "${tag_name}" --yes --cleanup-tag >/dev/null 2>&1 || true
+        echo -e "   ${GREEN}✅ 已删除 Release 与远程 Tag: ${tag_name}${NC}"
+    else
+        if gh api "/repos/${REPO}/git/ref/tags/${tag_name}" >/dev/null 2>&1; then
+            echo -e "   ${YELLOW}⚠️  ${reason}: ${tag_name}（仅 Tag）${NC}"
+            delete_remote_tag_if_exists "${tag_name}"
+        fi
+    fi
+
+    if git rev-parse "${tag_name}" >/dev/null 2>&1; then
+        git tag -d "${tag_name}" >/dev/null 2>&1 || true
+        echo -e "   ${GREEN}✅ 已删除本地 Tag: ${tag_name}${NC}"
+    fi
+}
+
+delete_higher_remote_versions() {
+    local target_version="$1"
+    local candidate_tags=""
+    local release_tags=""
+    local remote_tags=""
+
+    release_tags=$(gh release list --limit 200 --json tagName --jq '.[].tagName' 2>/dev/null || true)
+    remote_tags=$(git ls-remote --tags origin 'refs/tags/v*' 2>/dev/null | awk -F'/' '{print $3}' | sed 's/\^{}$//' | awk 'NF' | sort -u)
+    candidate_tags=$(printf "%s\n%s\n" "$release_tags" "$remote_tags" | awk 'NF' | sort -u)
+
+    if [ -z "$candidate_tags" ]; then
+        echo -e "   ${GREEN}✅ 未发现需要清理的远端历史版本${NC}"
+        return 0
+    fi
+
+    local deleted_any=0
+    while IFS= read -r tag_name; do
+        [ -z "$tag_name" ] && continue
+        local version_no_prefix="${tag_name#v}"
+        if [ "$(compare_versions "$version_no_prefix" "$target_version")" -gt 0 ]; then
+            delete_release_and_tag_if_exists "$tag_name" "删除高于 v${target_version} 的线上版本"
+            deleted_any=1
+        fi
+    done <<< "$candidate_tags"
+
+    if [ "$deleted_any" -eq 0 ]; then
+        echo -e "   ${GREEN}✅ 未发现高于 v${target_version} 的线上版本${NC}"
+    fi
+}
+
 # 获取当前版本
 CURRENT_PLUGIN_VERSION=$(grep -o "PLUGIN_VERSION = '[^']*'" figma-plugin/code.js | cut -d"'" -f2)
 CURRENT_SERVER_VERSION=$(grep -o "版本: [^ ]*" VERSION.txt | awk '{print $2}')
@@ -55,6 +146,11 @@ fi
 # 验证版本号格式
 if ! [[ "$NEW_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     echo -e "${RED}❌ 版本号格式错误，应为 x.y.z（如 1.0.1）${NC}"
+    exit 1
+fi
+
+if [ "$(compare_versions "$NEW_VERSION" "1.0.0")" -lt 0 ]; then
+    echo -e "${RED}❌ Release 版本号需从 1.0.0 开始计数${NC}"
     exit 1
 fi
 
@@ -277,46 +373,28 @@ fi
 # ==================== 步骤 4: 创建 Git Tag ====================
 echo -e "\n${BLUE}🏷️  步骤 4/5: 创建 Git Tag...${NC}"
 
-# 检查 Tag 是否已存在
-if git rev-parse "v${NEW_VERSION}" >/dev/null 2>&1; then
-    echo -e "   ${YELLOW}⚠️  Tag v${NEW_VERSION} 已存在，尝试推送...${NC}"
+# 低版本回滚发布时，自动删除线上更高版本 Release 与 Tag
+echo -e "   ${YELLOW}正在清理线上高版本 Release/Tag...${NC}"
+delete_higher_remote_versions "$NEW_VERSION"
+
+# 覆盖同一版本时，无需确认，直接删除同名 Release/Tag 后重建
+echo -e "   ${YELLOW}正在处理同版本覆盖...${NC}"
+delete_release_and_tag_if_exists "v${NEW_VERSION}" "覆盖同一版本"
+
+if git tag -a "v${NEW_VERSION}" -m "Release v${NEW_VERSION}" 2>&1; then
     if git push origin "v${NEW_VERSION}" 2>&1; then
-        echo -e "   ${GREEN}✅ Git Tag v${NEW_VERSION} 已推送${NC}"
+        echo -e "   ${GREEN}✅ Git Tag v${NEW_VERSION} 已创建并推送${NC}"
     else
-        # 如果推送失败（可能是已经存在于远程），我们尝试继续，让 gh 命令处理
-        echo -e "   ${YELLOW}⚠️  Tag 推送警告（可能已存在于远程），继续尝试发布...${NC}"
-    fi
-else
-    if git tag -a "v${NEW_VERSION}" -m "Release v${NEW_VERSION}" 2>&1; then
-        if git push origin "v${NEW_VERSION}" 2>&1; then
-            echo -e "   ${GREEN}✅ Git Tag v${NEW_VERSION} 已创建并推送${NC}"
-        else
-            echo -e "   ${RED}❌ Tag 推送失败${NC}"
-            exit 1
-        fi
-    else
-        echo -e "   ${RED}❌ Tag 创建失败${NC}"
+        echo -e "   ${RED}❌ Tag 推送失败${NC}"
         exit 1
     fi
+else
+    echo -e "   ${RED}❌ Tag 创建失败${NC}"
+    exit 1
 fi
 
 # ==================== 步骤 5: 发布到 GitHub Releases ====================
 echo -e "\n${BLUE}🚀 步骤 5/5: 发布到 GitHub Releases...${NC}"
-
-# 检查 Release 是否已存在
-if gh release view "v${NEW_VERSION}" >/dev/null 2>&1; then
-    echo -e "   ${YELLOW}⚠️  Release v${NEW_VERSION} 已存在${NC}"
-    read -p "   是否删除并重新创建？(y/N): " RECREATE
-    RECREATE=${RECREATE:-N}
-    
-    if [[ "$RECREATE" =~ ^[Yy]$ ]]; then
-        gh release delete "v${NEW_VERSION}" --yes > /dev/null 2>&1
-        echo -e "   ${GREEN}✅ 已删除旧 Release${NC}"
-    else
-        echo -e "   ${YELLOW}已取消发布${NC}"
-        exit 0
-    fi
-fi
 
 # 创建 Release
 RELEASE_TITLE="v${NEW_VERSION} - ScreenSync"
@@ -379,7 +457,6 @@ echo -e "   Apple 包: ${APPLE_TAR} (${APPLE_SIZE})"
 echo ""
 
 echo -e "${BLUE}🔗 查看 Release：${NC}"
-REPO="BorderWalker99/figma-plugin-figma_sync"
 echo -e "   ${YELLOW}https://github.com/${REPO}/releases/tag/v${NEW_VERSION}${NC}"
 echo ""
 

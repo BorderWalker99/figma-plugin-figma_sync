@@ -10,20 +10,43 @@ let currentLang = 'zh';
 const i18n = {
   zh: {
     welcome_subtitle: '自动化传输并整理截图',
+    welcome_task_hint: '确认语言后点击开始安装；如果安装器没有自动识别安装包，再选择文件夹即可。',
     btn_start_install: '开始安装',
     btn_next: '下一步',
-    btn_done: '我知道了',
+    btn_continue_install: '继续安装',
+    btn_done: '完成安装',
     btn_checking: '检测中...',
     recheck: '重新检测',
     btn_copy: '一键复制',
-    step2_title: '安装检查',
-    step2_desc: '检查安装文件是否完整',
-    step3_title: '安装准备',
-    step3_desc: '正在完成安装前准备',
-    step4_title: '系统配置',
-    step4_desc: '应用配置并设置本地环境',
-    step5_title: '安装完成',
-    step5_starting_title: '正在启动服务器',
+    step2_title: '确认安装包可用',
+    step2_desc: '安装器正在确认安装资源完整；确认后即可继续',
+    step2_task_hint: '这一页只是在确认安装包可直接使用，你无需手动处理每个组件。',
+    step3_title: '准备运行环境',
+    step3_desc: '安装器正在准备 ScreenSync 所需组件',
+    step3_task_hint: '此过程可能需要几分钟，请保持安装器打开。',
+    step3_ready_bundled: '内置运行环境已准备完成',
+    step3_ready_generic: '运行环境已准备完成',
+    step4_title: '设置本地工作区',
+    step4_desc: '正在创建文件夹并保存本机配置',
+    step4_task_hint: '安装器会自动完成本地文件夹、语言和同步配置。',
+    step4_result_folder: '已准备本地文件夹',
+    step4_result_settings: '已保存当前设备配置',
+    step5_title: '完成系统授权',
+    step5_desc: '只需在系统设置中点按所有“仍要打开”，安装器会自动继续',
+    step5_waiting_title: '正在检查系统授权',
+    step5_waiting_detail: '正在验证安装所需组件，请稍候',
+    step5_pending_title: '请到系统设置完成授权',
+    step5_pending_detail: '打开「系统设置 - 隐私与安全性」，在「安全性」中点按所有“仍要打开”，然后回到安装器',
+    step5_ready_title: '授权已完成',
+    step5_ready_detail: '已检测到全部权限，正在继续安装...',
+    step5_instruction_hint: '返回安装器后会自动重新检测；如果没有出现“仍要打开”，再点一次“重新检测”。',
+    btn_open_security: '打开隐私与安全性',
+    btn_continue_server: '继续安装',
+    step6_title: 'ScreenSync 已准备就绪',
+    step6_starting_title: '正在启动 ScreenSync',
+    step6_detail_starting: '正在完成最后配置，请稍候',
+    step6_detail_success: '安装已完成，ScreenSync 现在会在后台运行',
+    step6_detail_error: '最后一步未完成，请查看失败详情后重试',
     installing: '正在安装...',
     configuring: '配置中...',
     setting_permissions: '正在设置权限和文件夹...',
@@ -43,8 +66,8 @@ const i18n = {
     starting_server: '正在启动服务器...',
     configuring_icloud: '正在配置 iCloud 文件夹...',
     configuring_autostart: '正在配置自启动...',
-    config_done: '配置完成',
-    config_failed: '配置失败',
+    config_done: '本地设置已完成',
+    config_failed: '本地设置失败',
     server_started: '服务器启动成功',
     server_start_failed: '服务器启动失败',
     autostart_done: '自启动已配置',
@@ -58,24 +81,52 @@ const i18n = {
     downloading_deps: '正在下载依赖包...',
     builtin_env_ready: '已检测到内置环境，可直接继续',
     package_invalid: '安装资源不完整，请重新下载安装包后重试',
-    package_missing_detail: '安装资源校验失败'
+    package_missing_detail: '安装资源校验失败',
+    dep_label_package: '安装资源',
+    dep_label_node: 'Node.js 运行时',
+    dep_label_imagemagick: '图片处理组件',
+    dep_label_ffmpeg: '视频处理组件',
+    dep_label_gifsicle: 'GIF 压缩组件'
   },
   en: {
     welcome_subtitle: 'Automate screenshot transfer & organization',
+    welcome_task_hint: 'Confirm the language, then start installation. If the package is not detected automatically, just choose the folder manually.',
     btn_start_install: 'Start Install',
     btn_next: 'Next',
-    btn_done: 'Got it',
+    btn_continue_install: 'Continue',
+    btn_done: 'Finish',
     btn_checking: 'Checking...',
     recheck: 'Recheck',
     btn_copy: 'Copy',
-    step2_title: 'Installation Check',
-    step2_desc: 'Verify installation files are complete',
-    step3_title: 'Setup Preparation',
-    step3_desc: 'Preparing required components',
-    step4_title: 'System Configuration',
-    step4_desc: 'Apply settings and configure local environment',
-    step5_title: 'Installation Complete',
-    step5_starting_title: 'Starting Server',
+    step2_title: 'Confirm the installer is ready',
+    step2_desc: 'The installer is checking that all required files are complete',
+    step2_task_hint: 'You do not need to inspect each component manually. This page only confirms the package is ready to install.',
+    step3_title: 'Prepare the runtime',
+    step3_desc: 'Setting up the components ScreenSync needs to run',
+    step3_task_hint: 'This may take a few minutes. Please keep the installer open.',
+    step3_ready_bundled: 'Bundled runtime is ready',
+    step3_ready_generic: 'Runtime is ready',
+    step4_title: 'Set up your workspace',
+    step4_desc: 'Creating folders and saving this device configuration',
+    step4_task_hint: 'The installer will finish the local folder and sync setup automatically.',
+    step4_result_folder: 'Local folder is ready',
+    step4_result_settings: 'Device configuration is saved',
+    step5_title: 'Complete Security Approval',
+    step5_desc: 'Approve every “Open Anyway” item once, and the installer will continue automatically',
+    step5_waiting_title: 'Checking security approval',
+    step5_waiting_detail: 'Verifying required components. Please wait a moment',
+    step5_pending_title: 'Finish approval in System Settings',
+    step5_pending_detail: 'Open System Settings -> Privacy & Security, click every “Open Anyway”, then return to the installer',
+    step5_ready_title: 'Approval complete',
+    step5_ready_detail: 'All permissions are detected. Continuing installation...',
+    step5_instruction_hint: 'The installer will recheck automatically when you come back. If no button appears yet, click “Recheck” once.',
+    btn_open_security: 'Open Privacy & Security',
+    btn_continue_server: 'Continue',
+    step6_title: 'ScreenSync Is Ready',
+    step6_starting_title: 'Starting ScreenSync',
+    step6_detail_starting: 'Finishing the last setup. Please wait',
+    step6_detail_success: 'Installation is complete and ScreenSync will keep running in the background',
+    step6_detail_error: 'The final step did not finish. Please review the error details and try again',
     installing: 'Installing...',
     configuring: 'Configuring...',
     setting_permissions: 'Setting permissions and folders...',
@@ -95,8 +146,8 @@ const i18n = {
     starting_server: 'Starting server...',
     configuring_icloud: 'Configuring iCloud folder...',
     configuring_autostart: 'Configuring autostart...',
-    config_done: 'Configuration complete',
-    config_failed: 'Configuration failed',
+    config_done: 'Local setup complete',
+    config_failed: 'Local setup failed',
     server_started: 'Server started',
     server_start_failed: 'Server failed to start',
     autostart_done: 'Autostart configured',
@@ -110,12 +161,27 @@ const i18n = {
     downloading_deps: 'Downloading dependencies...',
     builtin_env_ready: 'Built-in environment is ready, you can continue',
     package_invalid: 'Installation package is incomplete. Please re-download and try again',
-    package_missing_detail: 'Installation resource validation failed'
+    package_missing_detail: 'Installation resource validation failed',
+    dep_label_package: 'Installation files',
+    dep_label_node: 'Node.js runtime',
+    dep_label_imagemagick: 'Image processing',
+    dep_label_ffmpeg: 'Video processing',
+    dep_label_gifsicle: 'GIF compression'
   }
 };
 
 function t(key) {
   return (i18n[currentLang] && i18n[currentLang][key]) || i18n.zh[key] || key;
+}
+
+function getDependencyDisplayNames() {
+  return {
+    homebrew: t('dep_label_package'),
+    node: t('dep_label_node'),
+    imagemagick: t('dep_label_imagemagick'),
+    ffmpeg: t('dep_label_ffmpeg'),
+    gifsicle: t('dep_label_gifsicle')
+  };
 }
 
 function applyLanguage() {
@@ -126,14 +192,16 @@ function applyLanguage() {
   });
 }
 
-function setStep5VisualState(state) {
-  const titleEl = document.getElementById('step5Title');
-  const badgeEl = document.getElementById('step5IconBadge');
-  const iconEl = document.getElementById('step5Icon');
-  if (!titleEl || !badgeEl || !iconEl) return;
+function setFinalStepVisualState(state) {
+  const titleEl = document.getElementById('step6Title');
+  const detailEl = document.getElementById('step6Detail');
+  const badgeEl = document.getElementById('step6IconBadge');
+  const iconEl = document.getElementById('step6Icon');
+  if (!titleEl || !detailEl || !badgeEl || !iconEl) return;
 
-  let titleKey = 'step5_starting_title';
-  let badgeClass = '';
+  let titleKey = 'step6_starting_title';
+  let detailKey = 'step6_detail_starting';
+  let badgeClass = 'loading';
   let iconSvg = `
     <svg class="spinner" viewBox="0 0 24 24" fill="none">
       <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
@@ -141,7 +209,8 @@ function setStep5VisualState(state) {
   `;
 
   if (state === 'success') {
-    titleKey = 'step5_title';
+    titleKey = 'step6_title';
+    detailKey = 'step6_detail_success';
     badgeClass = 'success';
     iconSvg = `
       <svg viewBox="0 0 24 24" fill="none">
@@ -150,6 +219,7 @@ function setStep5VisualState(state) {
     `;
   } else if (state === 'error') {
     titleKey = 'install_failed';
+    detailKey = 'step6_detail_error';
     badgeClass = 'error';
     iconSvg = `
       <svg viewBox="0 0 24 24" fill="none">
@@ -162,8 +232,17 @@ function setStep5VisualState(state) {
 
   titleEl.setAttribute('data-i18n', titleKey);
   titleEl.textContent = t(titleKey);
+  detailEl.setAttribute('data-i18n', detailKey);
+  detailEl.textContent = t(detailKey);
   badgeEl.className = `completion-badge ${badgeClass}`.trim();
   iconEl.innerHTML = iconSvg.trim();
+}
+
+function setFinalStepButtonVisible(visible) {
+  const actionsEl = document.getElementById('step6Actions');
+  if (actionsEl) {
+    actionsEl.style.display = visible ? 'flex' : 'none';
+  }
 }
 
 window.selectLanguage = function(lang) {
@@ -198,6 +277,183 @@ let currentStep = 1; // 从 Step 1 (封面) 开始
 let installPath = '';
 let selectedMode = 'drive'; // 默认 Google 模式
 let userId = '';
+let step6HasStarted = false;
+let isFinishingInstallation = false;
+let permissionCheckInFlight = false;
+let permissionValidationPassed = false;
+let permissionNeedsApproval = false;
+let permissionFocusRetryTimer = null;
+let permissionAutoAdvanceTimer = null;
+let permissionSettingsAutoOpened = false;
+let installerAutoAdvanceTimer = null;
+
+function scheduleInstallerAutoAdvance(expectedStep, delayMs = 700) {
+  if (installerAutoAdvanceTimer) {
+    clearTimeout(installerAutoAdvanceTimer);
+  }
+  installerAutoAdvanceTimer = setTimeout(() => {
+    installerAutoAdvanceTimer = null;
+    if (currentStep === expectedStep) {
+      nextStep();
+    }
+  }, delayMs);
+}
+
+function setPermissionButtonsState({ checking = false, canContinue = false } = {}) {
+  const openBtn = document.getElementById('step5OpenSecurity');
+  const retryBtn = document.getElementById('step5Retry');
+  const nextBtn = document.getElementById('step5Next');
+  const spacer = document.getElementById('step5ButtonsSpacer');
+  if (openBtn) openBtn.disabled = checking;
+  if (retryBtn) {
+    retryBtn.disabled = checking;
+    retryBtn.innerHTML = checking ? `<span>${t('btn_checking')}</span>` : `<span>${t('recheck')}</span>`;
+  }
+  if (nextBtn) {
+    nextBtn.disabled = checking || !canContinue;
+    nextBtn.style.display = canContinue ? 'inline-flex' : 'none';
+  }
+  if (spacer) {
+    spacer.style.display = canContinue ? 'flex' : 'none';
+  }
+  if (openBtn) {
+    openBtn.style.display = canContinue ? 'none' : 'inline-flex';
+  }
+  if (retryBtn) {
+    retryBtn.style.display = canContinue ? 'none' : 'inline-flex';
+  }
+}
+
+function renderPermissionGuide(pendingTools = []) {
+  const guideEl = document.getElementById('step5Guide');
+  if (!guideEl) return;
+
+  const pendingList = Array.isArray(pendingTools) && pendingTools.length > 0
+    ? `<div style="margin-top: 10px; font-size: 12px; color: var(--text-secondary);">需要完成授权：${pendingTools.join('、')}</div>`
+    : '';
+
+  guideEl.innerHTML = `
+    <div style="font-weight: 600; margin-bottom: 6px;">${t('step5_pending_detail')}</div>
+    <div style="font-size: 12px; color: var(--text-secondary); line-height: 1.6;">
+      1. 打开「系统设置 - 隐私与安全性」<br>
+      2. 在「安全性」中点按所有“仍要打开”<br>
+      3. 返回安装器
+    </div>
+    ${pendingList}
+    <div style="margin-top: 10px; font-size: 12px; color: var(--text-tertiary);">${t('step5_instruction_hint')}</div>
+  `;
+}
+
+function renderPermissionStatus({ state = 'checking', detail = '', pendingTools = [] } = {}) {
+  const statusEl = document.getElementById('step5Status');
+  if (!statusEl) return;
+
+  let statusClass = 'checking';
+  let titleText = t('step5_waiting_title');
+  let detailText = detail || t('step5_waiting_detail');
+
+  if (state === 'pending') {
+    statusClass = 'error';
+    titleText = t('step5_pending_title');
+    detailText = detail || t('step5_pending_detail');
+  } else if (state === 'ready') {
+    statusClass = 'success';
+    titleText = t('step5_ready_title');
+    detailText = detail || t('step5_ready_detail');
+  }
+
+  statusEl.innerHTML = `
+    <div class="status-item ${statusClass}">
+      <div class="status-icon">
+        ${state === 'ready'
+          ? '<svg viewBox="0 0 24 24"><path d="M20 6L9 17L4 12"/></svg>'
+          : state === 'pending'
+            ? '<svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>'
+            : '<svg class="spinner" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>'
+        }
+      </div>
+      <div class="status-content">
+        <div class="status-label">${titleText}</div>
+        <div class="status-detail">${detailText}</div>
+      </div>
+    </div>
+  `;
+
+  renderPermissionGuide(pendingTools);
+}
+
+async function runPermissionWarmupCheck({ triggeredByFocus = false } = {}) {
+  if (permissionCheckInFlight) return;
+  permissionCheckInFlight = true;
+  permissionValidationPassed = false;
+  if (permissionAutoAdvanceTimer) {
+    clearTimeout(permissionAutoAdvanceTimer);
+    permissionAutoAdvanceTimer = null;
+  }
+  setPermissionButtonsState({ checking: true, canContinue: false });
+  renderPermissionStatus({ state: 'checking' });
+
+  try {
+    const result = await ipcRenderer.invoke('warmup-runtime-permissions', installPath);
+    if (result && result.success) {
+      permissionValidationPassed = true;
+      permissionNeedsApproval = false;
+      renderPermissionStatus({ state: 'ready' });
+      setPermissionButtonsState({ checking: false, canContinue: true });
+      if (!triggeredByFocus) {
+        showToast(t('step5_ready_title'), 'success');
+      }
+      permissionAutoAdvanceTimer = setTimeout(() => {
+        if (currentStep === 5 && permissionValidationPassed) {
+          nextStep();
+        }
+      }, 800);
+      return;
+    }
+
+    permissionNeedsApproval = true;
+    renderPermissionStatus({
+      state: 'pending',
+      detail: t('step5_pending_detail'),
+      pendingTools: result && Array.isArray(result.pendingTools) ? result.pendingTools : []
+    });
+    setPermissionButtonsState({ checking: false, canContinue: false });
+    if (!permissionSettingsAutoOpened && !triggeredByFocus) {
+      permissionSettingsAutoOpened = true;
+      window.openSecuritySettings({ silent: true });
+    }
+  } catch (error) {
+    permissionNeedsApproval = true;
+    renderPermissionStatus({
+      state: 'pending',
+      detail: error && error.message ? error.message : t('install_failed')
+    });
+    setPermissionButtonsState({ checking: false, canContinue: false });
+    if (!permissionSettingsAutoOpened && !triggeredByFocus) {
+      permissionSettingsAutoOpened = true;
+      window.openSecuritySettings({ silent: true });
+    }
+  } finally {
+    permissionCheckInFlight = false;
+  }
+}
+
+function initPermissionStep() {
+  permissionValidationPassed = false;
+  permissionNeedsApproval = false;
+  permissionSettingsAutoOpened = false;
+  renderPermissionStatus({ state: 'checking' });
+  setPermissionButtonsState({ checking: true, canContinue: false });
+  if (permissionFocusRetryTimer) {
+    clearTimeout(permissionFocusRetryTimer);
+    permissionFocusRetryTimer = null;
+  }
+  if (permissionAutoAdvanceTimer) {
+    clearTimeout(permissionAutoAdvanceTimer);
+    permissionAutoAdvanceTimer = null;
+  }
+  runPermissionWarmupCheck();
+}
 
 // 步骤管理
 function showStep(step) {
@@ -210,7 +466,7 @@ function showStep(step) {
     header.style.display = step === 1 ? 'none' : 'flex';
   }
   
-  // 更新步骤指示器（现在只有 5 步）
+  // 更新步骤指示器
   document.querySelectorAll('.dot').forEach((dot, index) => {
     dot.classList.remove('active', 'completed');
     if (index + 1 < step) {
@@ -221,6 +477,19 @@ function showStep(step) {
   });
   
   currentStep = step;
+  permissionValidationPassed = false;
+  if (permissionFocusRetryTimer) {
+    clearTimeout(permissionFocusRetryTimer);
+    permissionFocusRetryTimer = null;
+  }
+  if (installerAutoAdvanceTimer) {
+    clearTimeout(installerAutoAdvanceTimer);
+    installerAutoAdvanceTimer = null;
+  }
+  if (permissionAutoAdvanceTimer && step !== 5) {
+    clearTimeout(permissionAutoAdvanceTimer);
+    permissionAutoAdvanceTimer = null;
+  }
   
   // 执行步骤特定的初始化
   if (step === 2) {
@@ -230,7 +499,16 @@ function showStep(step) {
   } else if (step === 4) {
     setupConfiguration();
   } else if (step === 5) {
-    setStep5VisualState('loading');
+    initPermissionStep();
+  } else if (step === 6) {
+    setFinalStepVisualState('loading');
+    setFinalStepButtonVisible(false);
+    if (!step6HasStarted) {
+      step6HasStarted = true;
+      setTimeout(() => {
+        window.finishInstallation();
+      }, 0);
+    }
   }
 }
 
@@ -239,7 +517,7 @@ window.nextStep = function() {
   console.log('nextStep called, currentStep:', currentStep, 'selectedMode:', selectedMode);
   // iCloud 模式检查已移除，因为默认使用 Google 模式
   
-  if (currentStep < 5) {
+  if (currentStep < 6) {
     showStep(currentStep + 1);
   }
 }
@@ -290,9 +568,9 @@ function showManualSelectionUI() {
   alertDiv.innerHTML = `
     <div class="alert-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="currentColor"/><path d="M12 8v5M12 16.5v.5" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
     <div style="flex:1">
-      <div style="font-weight:600;margin-bottom:4px;">未找到项目文件</div>
-      <div style="font-size:12px;opacity:0.9;margin-bottom:8px;">无法自动定位安装包位置，请手动选择解压后的 ScreenSync 安装包文件夹（如 ScreenSync-Apple 或 ScreenSync-Intel）。</div>
-      <button id="selectPathBtn" class="btn btn-secondary" style="background:rgba(255,255,255,0.9);color:#333;font-size:12px;padding:4px 12px;">选择文件夹</button>
+      <div style="font-weight:600;margin-bottom:4px;">请选择安装包文件夹</div>
+      <div style="font-size:12px;opacity:0.9;margin-bottom:8px;">安装器没有自动找到解压后的 ScreenSync 文件夹。请选择包含“项目文件”目录的位置，例如 ScreenSync-Apple 或 ScreenSync-Intel。</div>
+      <button id="selectPathBtn" class="btn btn-secondary" style="background:rgba(255,255,255,0.9);color:#333;font-size:12px;padding:4px 12px;">选择安装包文件夹</button>
     </div>
   `;
   
@@ -436,6 +714,7 @@ async function checkSystemRequirements() {
   try {
     const fat = await ipcRenderer.invoke('check-fat-runtime', installPath);
     const ok = !!(fat && fat.complete);
+    const displayNames = getDependencyDisplayNames();
 
     dependencyStatus = {
       homebrew: ok,
@@ -445,7 +724,13 @@ async function checkSystemRequirements() {
       gifsicle: ok
     };
 
-    const labels = ['Homebrew', 'Node.js', 'ImageMagick', 'FFmpeg', 'Gifsicle'];
+    const labels = [
+      displayNames.homebrew,
+      displayNames.node,
+      displayNames.imagemagick,
+      displayNames.ffmpeg,
+      displayNames.gifsicle
+    ];
     labels.forEach((label, idx) => {
       const item = checks.children[idx];
       if (!item) return;
@@ -473,10 +758,11 @@ async function checkSystemRequirements() {
     actionBtn.disabled = false;
     if (ok) {
       lastFailedDependency = null;
-      actionBtn.innerHTML = `${t('btn_next')} <svg viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>`;
+      actionBtn.innerHTML = `${t('btn_continue_install')} <svg viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>`;
       actionBtn.style.padding = '10px 12px 10px 20px';
       actionBtn.onclick = window.nextStep;
       actionBtn.className = 'btn btn-primary';
+      scheduleInstallerAutoAdvance(2, 650);
     } else {
       showToast(t('package_invalid'), 'error');
       actionBtn.innerHTML = t('recheck');
@@ -512,7 +798,7 @@ async function installMissingDependencies() {
   let step2LogBuffer = '';
 
   const depIndices = { homebrew: 0, node: 1, imagemagick: 2, ffmpeg: 3, gifsicle: 4 };
-  const displayNames = { homebrew: 'Homebrew', node: 'Node.js', imagemagick: 'ImageMagick', ffmpeg: 'FFmpeg', gifsicle: 'Gifsicle' };
+  const displayNames = getDependencyDisplayNames();
   const depOrder = ['homebrew', 'node', 'imagemagick', 'ffmpeg', 'gifsicle'];
   const restartIndex = depOrder.indexOf(lastFailedDependency);
 
@@ -649,12 +935,18 @@ async function installDependencies() {
   const progressBar = document.getElementById('installProgress');
   const errorAlert = document.getElementById('installErrorAlert');
   const statusLabel = document.getElementById('installStatusLabel');
+  const nextBtn = document.getElementById('step3Next');
   
   // 重置状态
   errorAlert.style.display = 'none';
   errorAlert.innerHTML = '';
   progressBar.classList.remove('success');
   progressBar.style.width = '10%';
+  if (nextBtn) {
+    nextBtn.disabled = true;
+    nextBtn.onclick = window.nextStep;
+    nextBtn.innerHTML = `<span>${t('btn_continue_install')}</span><svg viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>`;
+  }
   if (statusLabel) {
     statusLabel.textContent = t('installing');
   }
@@ -665,10 +957,11 @@ async function installDependencies() {
     progressBar.classList.add('success');
     if (statusLabel) {
       statusLabel.textContent = result.bundled
-        ? t('builtin_env_ready')
-        : t('all_deps_installed');
+        ? t('step3_ready_bundled')
+        : t('step3_ready_generic');
     }
-    document.getElementById('step3Next').disabled = false;
+    if (nextBtn) nextBtn.disabled = false;
+    scheduleInstallerAutoAdvance(3, 700);
   } else {
     progressBar.style.width = '0%';
     const detail = (result && result.error) || t('install_failed');
@@ -679,6 +972,11 @@ async function installDependencies() {
         showErrorDetailModal(detail);
       });
     }
+    if (nextBtn) {
+      nextBtn.disabled = false;
+      nextBtn.onclick = installDependencies;
+      nextBtn.innerHTML = `<span>${t('retry_install')}</span><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.34-5.66M4 4v6h6"/></svg>`;
+    }
   }
   
   document.getElementById('step3Buttons').style.display = 'flex';
@@ -687,14 +985,13 @@ async function installDependencies() {
 // Step 3: 配置
 async function setupConfiguration() {
   const configStatus = document.getElementById('configStatus');
-  
-  // 启用"任何来源"
-  try {
-    const enableResult = await ipcRenderer.invoke('enable-anywhere');
-  } catch (e) {
-    console.warn('Enable anywhere failed:', e);
+  const nextBtn = document.getElementById('step4Next');
+  if (nextBtn) {
+    nextBtn.disabled = true;
+    nextBtn.onclick = window.nextStep;
+    nextBtn.innerHTML = `<span>${t('btn_continue_install')}</span><svg viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>`;
   }
-  
+
   // 创建配置
   const os = require('os');
   const localFolder = selectedMode === 'drive' 
@@ -715,11 +1012,16 @@ async function setupConfiguration() {
       <div class="status-item success">
         <div class="status-icon"><svg viewBox="0 0 24 24"><polyline points="20 7 9 18 4 13"></polyline></svg></div>
         <div class="status-content">
-          <div class="status-label">${t('config_done')}</div>
+          <div>
+            <div class="status-label">${t('config_done')}</div>
+            <div class="status-detail">${t('step4_result_folder')}: ${localFolder}</div>
+            <div class="status-detail">${t('step4_result_settings')}</div>
+          </div>
         </div>
       </div>
     `;
-    document.getElementById('step4Next').disabled = false;
+    if (nextBtn) nextBtn.disabled = false;
+    scheduleInstallerAutoAdvance(4, 700);
   } else {
     configStatus.innerHTML = `
       <div class="status-item error">
@@ -730,6 +1032,11 @@ async function setupConfiguration() {
         </div>
       </div>
     `;
+    if (nextBtn) {
+      nextBtn.disabled = false;
+      nextBtn.onclick = setupConfiguration;
+      nextBtn.innerHTML = `<span>${t('retry_install')}</span><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.34-5.66M4 4v6h6"/></svg>`;
+    }
   }
   
   document.getElementById('step4Buttons').style.display = 'flex';
@@ -747,27 +1054,36 @@ async function copyUserId(userId) {
   }
 }
 
-// Step 5: 完成
-// 暴露到全局，供 HTML onclick 调用
+window.acknowledgeInstallation = function() {
+  ipcRenderer.invoke('quit-app');
+};
+
+window.openSecuritySettings = async function(options = {}) {
+  const result = await ipcRenderer.invoke('open-security-settings');
+  if ((!result || !result.success) && !options.silent) {
+    showToast((result && result.error) || t('install_failed'), 'error');
+  }
+};
+
+window.recheckRuntimePermissions = function() {
+  runPermissionWarmupCheck();
+};
+
+// Step 6: 完成
+// 自动进入最后一步并开始配置服务器
 window.finishInstallation = async function() {
-  console.log('finishInstallation called');
-  const button = document.querySelector('#step5 .btn-primary');
-  if (!button) {
-    console.error('finishInstallation button not found');
+  if (isFinishingInstallation) {
     return;
   }
-  const originalText = button.textContent;
-  
+  isFinishingInstallation = true;
+
   try {
     // 安装最后一步：完成剩余配置，并以自启动拉起服务器作为最终验收。
-    setStep5VisualState('loading');
-    button.classList.add('keep-raised'); // 保持凸起样式
-    button.disabled = true;
-    button.textContent = t('configuring');
+    setFinalStepVisualState('loading');
+    setFinalStepButtonVisible(false);
     
     // 步骤 1：如果是 iCloud 模式，配置文件夹为"始终保留下载"
     if (selectedMode === 'icloud') {
-      button.textContent = t('configuring_icloud');
       console.log('📁 检测到 iCloud 模式，配置文件夹为"始终保留下载"...');
       const icloudResult = await ipcRenderer.invoke('setup-icloud-keep-downloaded');
       if (icloudResult.success) {
@@ -780,44 +1096,40 @@ window.finishInstallation = async function() {
       }
     }
     
-    // 步骤 2：安装最后一步，配置自启动并验证服务器由 launchd 拉起成功
-    button.textContent = t('configuring_autostart');
-    const autostartResult = await ipcRenderer.invoke('setup-autostart', installPath);
+    // 步骤 2：安装最后一步，前置处理运行时权限并验证自启动。
+    const finalizeResult = await ipcRenderer.invoke('finalize-installation', installPath, { skipWarmup: true });
     
-    if (autostartResult.success) {
-      // 配置成功
-      setStep5VisualState('success');
-      button.textContent = t('config_done');
-      showToast(t('autostart_done'), 'success');
-      
-      // 延迟1.5秒后关闭，让用户看到成功消息
-      setTimeout(() => {
-        ipcRenderer.invoke('quit-app');
-      }, 1500);
+    if (finalizeResult.success) {
+      // 配置成功：显示成功图标和确认按钮，等待用户确认关闭
+      setFinalStepVisualState('success');
+      setFinalStepButtonVisible(true);
     } else {
-      // 自启动失败即视为安装失败，不再回退成“直接启动成功”。
-      console.warn('自启动配置失败:', autostartResult.error);
-      setStep5VisualState('error');
-      button.classList.remove('keep-raised');
-      button.disabled = false;
-      button.textContent = originalText;
-      showToast(t('install_failed'), 'error');
-      showErrorDetailModal(autostartResult.error || '', t('autostart_failed'));
+      // 自启动失败即视为安装失败，直接展示错误详情。
+      console.warn('安装最后一步失败:', finalizeResult.error);
+      setFinalStepVisualState('error');
+      setFinalStepButtonVisible(true);
+      showErrorDetailModal(finalizeResult.detail || finalizeResult.error || '', t('install_failed'));
     }
   } catch (err) {
-    // 出错，恢复按钮状态
-    setStep5VisualState('error');
-    button.classList.remove('keep-raised');
-    button.disabled = false;
-    button.textContent = originalText;
-    showToast(t('install_failed'), 'error');
+    // 出错时同样展示失败态和详情弹窗
+    setFinalStepVisualState('error');
+    setFinalStepButtonVisible(true);
     console.error('配置自启动失败:', err);
     showErrorDetailModal(err && err.message ? err.message : String(err), t('install_failed'));
+  } finally {
+    isFinishingInstallation = false;
   }
 }
 
 function extractErrorLog(logText) {
   const source = (logText || '').replace(/\r\n/g, '\n');
+  if (
+    source.includes('系统设置 -> 隐私与安全性') ||
+    source.includes('Open Anyway') ||
+    source.includes('可执行文件:')
+  ) {
+    return source.trim() || '（无日志）';
+  }
   const lines = source.split('\n');
   const errorLikeRegex = /(❌|⚠️|\berror\b|\bfailed\b|\btimeout\b|exit code|curl:\s*\(\d+\)|无法|失败|不可用|网络|超时|镜像源)/i;
   const keep = [];
@@ -895,4 +1207,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   const success = await detectProjectRoot();
+});
+
+window.addEventListener('focus', () => {
+  if (currentStep === 5 && permissionNeedsApproval && !permissionCheckInFlight) {
+    permissionFocusRetryTimer = setTimeout(() => {
+      runPermissionWarmupCheck({ triggeredByFocus: true });
+    }, 400);
+  }
 });
