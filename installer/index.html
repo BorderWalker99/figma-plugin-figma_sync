@@ -148,6 +148,13 @@
       filter: none;
     }
 
+    .spinner path {
+      stroke-width: 2.0;
+      transform-box: fill-box;
+      transform-origin: center;
+      transform: scale(1.2);
+    }
+
     * {
       box-sizing: border-box;
       -webkit-font-smoothing: antialiased;
@@ -211,7 +218,7 @@
     /* Content */
     .content {
       flex: 1;
-      padding: 12px 24px;
+      padding: 12px 24px 16px;
       overflow-y: auto;
       display: flex;
       flex-direction: column;
@@ -221,6 +228,9 @@
       display: none;
       flex: 1;
       flex-direction: column;
+      width: 100%;
+      max-width: 480px;
+      margin: 0 auto;
       animation: fadeIn 0.4s var(--ease-out);
     }
 
@@ -234,25 +244,35 @@
     }
 
     .step-header {
-      text-align: center;
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      text-align: left;
     }
 
     .step-title {
       font-size: 18px;
       font-weight: 700;
-      margin: 0 0 8px 0;
+      line-height: 1.15;
+      margin: 0 0 4px 0;
       color: var(--text-primary);
     }
 
     .step-description {
       font-size: 13px;
-      color: var(--text-secondary);
-      margin: 0 0 8px 0;
+      color: var(--text-tertiary);
+      line-height: 1.45;
+      margin: 0 0 12px 0;
+    }
+
+    .step-description:empty {
+      display: none;
     }
 
     /* Buttons — Matches plugin .btn exactly */
     .btn {
-      padding: 10px 12px 10px 20px;
+      min-height: 40px;
+      padding: 0 16px;
       border-radius: var(--radius-btn);
       font-size: 14px;
       font-weight: 600;
@@ -348,19 +368,19 @@
     .status-list {
       display: flex;
       flex-direction: column;
-      border-radius: var(--radius-m);
+      border-radius: var(--radius-l);
       overflow: hidden;
       background: var(--glass-bg);
       backdrop-filter: blur(var(--glass-blur));
       -webkit-backdrop-filter: blur(var(--glass-blur));
       border: 1px solid var(--glass-border-subtle);
-      box-shadow: var(--glass-shadow);
+      box-shadow: none;
     }
 
     .status-item {
       display: flex;
       align-items: center;
-      padding: 14px 20px;
+      padding: 12px 16px;
       transition: all 0.3s ease;
       background: transparent;
       border-bottom: 1px solid var(--divider);
@@ -388,13 +408,14 @@
 
     .status-label {
       font-size: 14px;
-      font-weight: 500;
+      font-weight: 600;
       margin-bottom: 4px;
       color: var(--text-primary);
     }
 
     .status-detail {
       font-size: 12px;
+      line-height: 1.45;
       color: var(--text-secondary);
     }
 
@@ -404,13 +425,13 @@
 
     /* Progress — Glass card */
     .progress-container {
-      border-radius: var(--radius-m);
-      padding: 24px;
+      border-radius: var(--radius-l);
+      padding: 18px 16px;
       background: var(--glass-bg);
       backdrop-filter: blur(var(--glass-blur));
       -webkit-backdrop-filter: blur(var(--glass-blur));
       border: 1px solid var(--glass-border-subtle);
-      box-shadow: var(--glass-shadow);
+      box-shadow: none;
     }
 
     .progress-bar {
@@ -433,29 +454,9 @@
       background: var(--unified-green);
     }
 
-    /* Logs — Dark inset */
-    .log-container {
-      background: #1a1a1a;
-      color: #d4d4d4;
-      padding: 16px;
-      border-radius: var(--radius-s);
-      font-family: "SF Mono", Monaco, Menlo, monospace;
-      font-size: 12px;
-      height: 200px;
-      overflow-y: auto;
-      margin-top: 16px;
-      border: 1px solid var(--border);
-    }
-
-    .log-line {
-      padding: 2px 0;
-      white-space: pre-wrap;
-      word-break: break-all;
-    }
-
     /* Footer — Glass surface */
     .footer {
-      padding: 20px 24px;
+      padding: 14px 24px 18px;
       display: flex;
       justify-content: space-between;
       align-items: center;
@@ -469,7 +470,7 @@
 
     .step-dots {
       display: flex;
-      gap: 12px;
+      gap: 8px;
     }
 
     .dot {
@@ -494,7 +495,7 @@
 
     .button-group {
       display: flex;
-      gap: 16px;
+      gap: 10px;
       margin: 12px 0 0 0;
       padding: 0;
       justify-content: flex-end;
@@ -512,6 +513,7 @@
       justify-content: center;
       align-items: center;
       margin: 0;
+      gap: 0;
       text-align: center;
     }
 
@@ -526,9 +528,16 @@
     .lang-cards {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 10px;
       width: 100%;
-      max-width: 320px;
+      max-width: 316px;
+      padding: 4px;
+      gap: 4px;
+      border: 1px solid var(--glass-border-subtle);
+      border-radius: 14px;
+      background: var(--glass-bg);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      box-shadow: none;
     }
 
     .lang-card {
@@ -537,25 +546,25 @@
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      gap: 12px;
+      min-height: 0;
+      padding: 14px 12px;
+      gap: 6px;
       border-radius: var(--radius-m);
-      background: var(--glass-bg);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      border: 1.5px solid var(--glass-border-subtle);
+      border: none;
+      background: transparent;
       cursor: pointer;
       transition: all 0.25s ease;
-      min-height: 106px;
+      box-shadow: none;
     }
 
     .lang-card:hover {
-      border-color: var(--glass-border);
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+      box-shadow: none;
     }
 
     .lang-card.selected {
-      border-color: var(--accent);
-      box-shadow: 0 0 0 1px var(--accent);
+      background: var(--accent-soft);
+      box-shadow: none;
+      border-color: transparent;
     }
 
     .lang-card .lang-icon {
@@ -571,7 +580,7 @@
     }
 
     .lang-card .lang-name {
-      font-size: 15px;
+      font-size: 14px;
       font-weight: 600;
       line-height: 1.1;
       color: var(--text-primary);
@@ -579,17 +588,16 @@
 
     .lang-card .lang-check {
       position: absolute;
-      top: 0;
-      right: 0;
-      width: 26px;
-      height: 22px;
-      border-radius: 0 var(--radius-s) 0 14px;
-      background: var(--accent);
+      top: 8px;
+      right: 8px;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: transparent;
       display: none;
       align-items: center;
       justify-content: center;
-      padding-left: 2px;
-      padding-bottom: 2px;
+      padding: 0;
     }
 
     .lang-card.selected .lang-check {
@@ -599,15 +607,15 @@
     .lang-card .lang-check svg {
       width: 14px;
       height: 14px;
-      stroke: white;
+      stroke: var(--accent);
       stroke-width: 2.8;
       fill: none;
-      padding-left: 1px;
+      padding: 0;
     }
 
     @media (prefers-color-scheme: dark) {
       .lang-card {
-        background: rgba(255, 255, 255, 0.06);
+        background: transparent;
       }
       .lang-card:hover {
         background: rgba(255, 255, 255, 0.1);
@@ -617,7 +625,7 @@
     /* Alerts — Glass card */
     .alert {
       padding: 12px 16px;
-      border-radius: var(--radius-s);
+      border-radius: var(--radius-l);
       font-size: 13px;
       display: flex;
       align-items: flex-start;
@@ -627,11 +635,10 @@
       backdrop-filter: blur(var(--glass-blur));
       -webkit-backdrop-filter: blur(var(--glass-blur));
       border: 1px solid var(--glass-border-subtle);
-      box-shadow: var(--glass-shadow);
+      box-shadow: none;
       margin-bottom: 16px;
     }
 
-    .alert-success { color: var(--success); }
     .alert-error { color: var(--danger); }
 
     .alert-icon {
@@ -693,11 +700,21 @@
       box-shadow: 0 4px 16px rgba(255, 59, 48, 0.28);
     }
 
+    .completion-icon {
+      width: 100%;
+      height: 100%;
+      margin-top: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
     .completion-icon svg {
-      width: 40px !important;
-      height: 40px !important;
+      display: block;
+      width: 48px !important;
+      height: 48px !important;
       stroke: currentColor !important;
-      stroke-width: 2.8 !important;
+      stroke-width: 3.5 !important;
     }
 
     .completion-badge.loading .completion-icon svg {
@@ -986,165 +1003,7 @@
       }
     }
 
-    /* Simplified Installer UI */
-    .content {
-      padding: 4px 24px 16px;
-    }
-
-    .step {
-      width: 100%;
-      max-width: 480px;
-      margin: 0 auto;
-    }
-
-    .step-header {
-      display: flex;
-      flex-direction: column;
-      gap: 0;
-      text-align: left;
-    }
-
-    #step1 .step-header {
-      align-items: center;
-      text-align: center;
-      gap: 0;
-    }
-
-    .step-title {
-      font-size: 18px;
-      line-height: 1.15;
-      margin: 0 0 4px 0;
-    }
-
-    .step-description {
-      font-size: 12px;
-      color: var(--text-secondary);
-      line-height: 1.45;
-      margin: 0 0 12px 0;
-    }
-
-    .step-description:empty {
-      display: none;
-    }
-
-    .status-list,
-    .progress-container,
-    .alert {
-      border-radius: var(--radius-l);
-      box-shadow: none;
-    }
-
-    .status-item {
-      padding: 12px 16px;
-    }
-
-    .status-label {
-      font-size: 14px;
-      font-weight: 600;
-    }
-
-    .status-detail {
-      font-size: 12px;
-      line-height: 1.45;
-    }
-
-    .progress-container {
-      padding: 18px 16px;
-    }
-
-    .button-group {
-      gap: 10px;
-    }
-
-    .btn {
-      min-height: 40px;
-      padding: 0 16px;
-    }
-
-    .lang-cards {
-      max-width: 316px;
-      padding: 4px;
-      gap: 4px;
-      border: 1px solid var(--glass-border-subtle);
-      border-radius: 14px;
-      background: var(--glass-bg);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      box-shadow: none;
-    }
-
-    .lang-card {
-      min-height: 0;
-      padding: 14px 12px;
-      gap: 6px;
-      border: none;
-      background: transparent;
-      box-shadow: none;
-    }
-
-    .lang-card:hover {
-      box-shadow: none;
-    }
-
-    .lang-card.selected {
-      background: var(--accent-soft);
-      box-shadow: none;
-      border-color: transparent;
-    }
-
-    .lang-card .lang-name {
-      font-size: 14px;
-    }
-
-    .lang-card .lang-check {
-      top: 8px;
-      right: 8px;
-      width: 18px;
-      height: 18px;
-      border-radius: 50%;
-      background: transparent;
-      padding: 0;
-    }
-
-    .lang-card .lang-check svg {
-      width: 14px;
-      height: 14px;
-      stroke: var(--accent);
-      padding: 0;
-    }
-
-    #step1 .step-header > .alert:not(#pathAlert),
-    #step2 > .alert,
-    #step3 > .alert,
-    #step4 > .alert {
-      display: none !important;
-    }
-
-    #step5Guide {
-      padding: 14px 16px;
-    }
-
-    /* Ensure checkmark icon is visually centered */
-    .completion-icon {
-      width: 100%;
-      height: 100%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .completion-icon svg {
-      display: block;
-    }
-
-    .footer {
-      padding: 14px 24px 18px;
-    }
-
-    .step-dots {
-      gap: 8px;
-    }
-
+    /* Mock mode (dev only) */
     .mock-bar {
       display: none;
       width: 100%;

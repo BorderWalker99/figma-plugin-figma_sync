@@ -1224,18 +1224,44 @@ ipcMain.handle('open-security-settings', async () => {
     return { success: true, mock: true };
   }
   try {
-    await execPromise('open "x-apple.systempreferences:com.apple.preference.security"', { timeout: 10000 });
-    return { success: true };
-  } catch (_) {
-    try {
-      await execPromise('open "/System/Library/PreferencePanes/Security.prefPane"', { timeout: 10000 });
-      return { success: true };
-    } catch (error) {
-      return {
-        success: false,
-        error: error && error.message ? error.message : String(error)
-      };
+    const attempts = [
+      {
+        label: 'privacy-security-extension',
+        run: () => execFilePromise('/usr/bin/open', ['x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension'], { timeout: 10000 })
+      },
+      {
+        label: 'security-privacy-tab',
+        run: () => execFilePromise('/usr/bin/open', ['x-apple.systempreferences:com.apple.preference.security?Privacy'], { timeout: 10000 })
+      },
+      {
+        label: 'security-pane',
+        run: () => execFilePromise('/usr/bin/open', ['x-apple.systempreferences:com.apple.preference.security'], { timeout: 10000 })
+      },
+      {
+        label: 'security-prefpane',
+        run: () => execFilePromise('/usr/bin/open', ['/System/Library/PreferencePanes/Security.prefPane'], { timeout: 10000 })
+      }
+    ];
+
+    let lastError = null;
+    for (const attempt of attempts) {
+      try {
+        await attempt.run();
+        return { success: true, target: attempt.label };
+      } catch (error) {
+        lastError = error;
+      }
     }
+
+    return {
+      success: false,
+      error: lastError && lastError.message ? lastError.message : 'Failed to open Privacy & Security settings'
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error && error.message ? error.message : String(error)
+    };
   }
 });
 
