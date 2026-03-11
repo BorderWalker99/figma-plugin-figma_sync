@@ -239,6 +239,7 @@ function buildComposerAttemptProfiles(mediaTuning = {}, {
   const runtimeCfg = getAdaptiveRuntimeConfig(mediaTuning);
   const isLowCoreMachine = effectivePressure.cpuCount <= runtimeCfg.lowCoreCount;
   const lowCoreFastTriggerMb = Math.min(runtimeCfg.softUltraTriggerMb, runtimeCfg.lowCoreIdleUltraTriggerMb);
+  const isLegacyIntelMac = process.platform === 'darwin' && process.arch === 'x64';
 
   let score = pixels;
   if (frameCount > 0) score *= Math.min(6, Math.max(1, frameCount / 120));
@@ -255,6 +256,13 @@ function buildComposerAttemptProfiles(mediaTuning = {}, {
       modeSizeMB >= (isLowCoreMachine ? lowCoreFastTriggerMb : runtimeCfg.softUltraTriggerMb) ||
       frameCount >= (isLowCoreMachine ? runtimeCfg.lowCoreExportFastMinFrames : runtimeCfg.exportFastMinFrames) ||
       pixels >= (isLowCoreMachine ? runtimeCfg.lowCoreExportFastMinPixels : runtimeCfg.exportFastMinPixels);
+  }
+
+  if (!autoFast && isLegacyIntelMac) {
+    autoFast =
+      modeSizeMB >= Math.max(45, lowCoreFastTriggerMb - 10) ||
+      frameCount >= Math.max(120, runtimeCfg.lowCoreExportFastMinFrames - 20) ||
+      pixels >= Math.max(1600000, runtimeCfg.lowCoreExportFastMinPixels - 600000);
   }
 
   const normalizedRequestedMode = (requestedMode === 'fast' || requestedMode === 'quality') ? requestedMode : 'auto';
@@ -299,7 +307,15 @@ function buildComposerAttemptProfiles(mediaTuning = {}, {
     };
   };
 
-  const tierSeed = clamp(effectivePressure.recommendedTierBump + (baseMode === 'fast' ? 0 : 0), 0, 2);
+  const compatibilityTierBump =
+    isLegacyIntelMac && (modeSizeMB >= 45 || frameCount >= 160 || pixels >= 1800000) ? 1 : 0;
+  const lowCoreLargeVideoBump =
+    isLowCoreMachine && modeSizeMB >= 90 ? 1 : 0;
+  const tierSeed = clamp(
+    effectivePressure.recommendedTierBump + compatibilityTierBump + lowCoreLargeVideoBump,
+    0,
+    2
+  );
   const profiles = [];
   if (baseMode === 'quality') {
     profiles.push(makeProfile('quality', tierSeed));

@@ -1,4 +1,5 @@
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 const { buildComposerAttemptProfiles } = require('./adaptive-processing');
@@ -13,7 +14,12 @@ function evenDimension(value, fallback = 2) {
 }
 
 function toShellPath(filePath) {
-  return String(filePath).replace(/"/g, '\\"');
+  const raw = String(filePath == null ? '' : filePath).trim();
+  const normalized = (
+    (raw.startsWith('"') && raw.endsWith('"')) ||
+    (raw.startsWith("'") && raw.endsWith("'"))
+  ) ? raw.slice(1, -1) : raw;
+  return normalized.replace(/"/g, '\\"');
 }
 
 function parseRate(raw) {
@@ -109,6 +115,13 @@ function buildTargetDimensions({ sourceMeta, targetWidth, targetHeight, scaleDiv
   };
 }
 
+function getDarwinMajorVersion() {
+  if (process.platform !== 'darwin') return 0;
+  const release = typeof os.release === 'function' ? os.release() : '';
+  const major = parseInt(String(release || '').split('.')[0], 10);
+  return Number.isFinite(major) ? major : 0;
+}
+
 async function maybeHalfScaleVideo({
   execAsync,
   ffmpegBin,
@@ -146,6 +159,31 @@ async function maybeHalfScaleVideo({
     applied: false,
     scaleFactorFromOriginal: 1
   };
+}
+
+async function normalizeVideoInputForGif({
+  execAsync,
+  ffmpegBin,
+  sourcePath,
+  tempDir,
+  sourceSizeMB,
+  log
+}) {
+  const normalizedPath = path.join(tempDir, 'normalized-input.mp4');
+  const timeoutMs = Math.max(90000, Math.min(10 * 60 * 1000, Math.ceil(Math.max(1, sourceSizeMB || 1)) * 6000));
+  const normalizeCmd = `"${toShellPath(ffmpegBin)}" -threads 0 -fflags +genpts -i "${toShellPath(sourcePath)}" -map 0:v:0 -an -sn -dn -vf "scale='trunc(iw/2)*2':'trunc(ih/2)*2':flags=bicubic" -c:v libx264 -preset veryfast -crf 18 -pix_fmt yuv420p -movflags +faststart -video_track_timescale 600 -y "${toShellPath(normalizedPath)}"`;
+
+  await execAsync(normalizeCmd, {
+    timeout: timeoutMs,
+    maxBuffer: 120 * 1024 * 1024
+  });
+
+  if (!fs.existsSync(normalizedPath) || fs.statSync(normalizedPath).size <= 0) {
+    throw new Error('Normalized video output is empty');
+  }
+
+  log(`   ✅ 输入视频已统一为标准 MP4: ${path.basename(normalizedPath)}`);
+  return normalizedPath;
 }
 
 async function transcodeVideoToGif({
@@ -196,16 +234,85 @@ async function transcodeVideoToGif({
 
   const progressStart = Math.max(0, Math.min(95, progressBase));
   const progressEnd = Math.max(progressStart + 1, Math.min(99, progressBase + progressSpan));
+  let maxReportedProgress = progressStart;
   const palettePath = path.join(tempDir, 'palette.png');
   const tempGifPath = optimizeOutput ? path.join(tempDir, 'encoded.gif') : outputPath;
   const optimizedGifPath = optimizeOutput ? outputPath : tempGifPath;
+  const darwinMajor = getDarwinMajorVersion();
+  const isLegacyIntelMac = process.platform === 'darwin' && process.arch === 'x64' && darwinMajor > 0 && darwinMajor <= 22;
+  const isLowCoreMachine = plan.pressure && plan.pressure.cpuCount <= plan.pressure.lowCoreCount;
+  const shouldPreferSoftwareOnly =
+    isLegacyIntelMac ||
+    (process.platform === 'darwin' && process.arch === 'x64' && sourceSizeMB >= 90) ||
+    (isLowCoreMachine && sourceSizeMB >= 120);
+  const shouldRunHalfScalePrepass =
+    enableHalfScalePrepass && !(
+      (process.platform === 'darwin' && process.arch === 'x64' && sourceSizeMB >= 80) ||
+      (isLowCoreMachine && sourceSizeMB >= 120)
+    );
+
+  const reportProgress = (percent, extra = {}) => {
+    if (!onProgress) return;
+    const safePercent = Math.max(progressStart, Math.min(progressEnd, Math.round(percent)));
+    maxReportedProgress = Math.max(maxReportedProgress, safePercent);
+    onProgress(maxReportedProgress, extra);
+  };
+
+  const runPulse = async (runner, { stageDetail, startPercent, endPercent, approxDurationMs }) => {
+    let timer = null;
+    const safeStart = Math.max(progressStart, Math.min(progressEnd, Math.round(startPercent)));
+    const safeEnd = Math.max(safeStart, Math.min(progressEnd, Math.round(endPercent)));
+    const span = Math.max(1, safeEnd - safeStart);
+    const begin = Date.now();
+    const duration = Math.max(5000, Math.min(120000, Math.round(approxDurationMs || 45000)));
+
+    reportProgress(safeStart, { stageDetail });
+
+    try {
+      if (onProgress && safeEnd > safeStart) {
+        timer = setInterval(() => {
+          const ratio = Math.min(0.96, (Date.now() - begin) / duration);
+          const nextPercent = safeStart + Math.floor(span * ratio);
+          reportProgress(Math.max(safeStart, Math.min(safeEnd, nextPercent)), { stageDetail });
+        }, 1500);
+      }
+      return await runner();
+    } finally {
+      if (timer) clearInterval(timer);
+    }
+  };
+
+  if (shouldPreferSoftwareOnly) {
+    log(`   ℹ️  兼容模式启用：跳过 videotoolbox，优先走软件编码 (${process.arch}, darwin ${darwinMajor || 'n/a'})`);
+  }
+  if (enableHalfScalePrepass && !shouldRunHalfScalePrepass) {
+    log('   ℹ️  大文件兼容模式：跳过预缩放，减少额外转码开销');
+  }
+
+  const normalizedSourcePath = await runPulse(
+    () => normalizeVideoInputForGif({
+      execAsync,
+      ffmpegBin,
+      sourcePath,
+      tempDir,
+      sourceSizeMB,
+      log
+    }),
+    {
+      startPercent: progressStart,
+      endPercent: progressStart + Math.max(8, Math.round(progressSpan * 0.16)),
+      stageDetail: 'normalize-input',
+      approxDurationMs: Math.max(20000, Math.min(120000, Math.ceil(Math.max(1, sourceSizeMB)) * 2500))
+    }
+  );
+  checkCancelled();
 
   const halfScaleResult = await maybeHalfScaleVideo({
     execAsync,
     ffmpegBin,
-    sourcePath,
+    sourcePath: normalizedSourcePath,
     tempDir,
-    enabled: enableHalfScalePrepass,
+    enabled: shouldRunHalfScalePrepass,
     log
   });
 
@@ -216,32 +323,6 @@ async function transcodeVideoToGif({
 
   let lastError = null;
   let lastProfile = normalizeAttemptProfile(plan.profiles[plan.profiles.length - 1] || {}, ditherMode);
-
-  const runPulse = async (runner, { stageDetail, startPercent, endPercent, approxDurationMs }) => {
-    let timer = null;
-    const safeStart = Math.max(progressStart, Math.min(progressEnd, Math.round(startPercent)));
-    const safeEnd = Math.max(safeStart, Math.min(progressEnd, Math.round(endPercent)));
-    const span = Math.max(1, safeEnd - safeStart);
-    const begin = Date.now();
-    const duration = Math.max(5000, Math.min(120000, Math.round(approxDurationMs || 45000)));
-
-    if (onProgress) {
-      onProgress(safeStart, { stageDetail });
-    }
-
-    try {
-      if (onProgress && safeEnd > safeStart) {
-        timer = setInterval(() => {
-          const ratio = Math.min(0.96, (Date.now() - begin) / duration);
-          const nextPercent = safeStart + Math.floor(span * ratio);
-          onProgress(Math.max(safeStart, Math.min(safeEnd, nextPercent)), { stageDetail });
-        }, 1500);
-      }
-      return await runner();
-    } finally {
-      if (timer) clearInterval(timer);
-    }
-  };
 
   const encodeWithProfile = async (profile) => {
     checkCancelled();
@@ -288,18 +369,23 @@ async function transcodeVideoToGif({
     );
     checkCancelled();
 
+    const paletteUseStage = {
+      startPercent: progressStart + Math.max(12, Math.round(progressSpan * 0.38)),
+      endPercent: progressStart + Math.max(24, Math.round(progressSpan * 0.78)),
+      stageDetail: `paletteuse:${normalizedProfile.label}`,
+      approxDurationMs: normalizedProfile.paletteUseTimeoutMs
+    };
+
     try {
+      if (shouldPreferSoftwareOnly) {
+        throw Object.assign(new Error('Skip videotoolbox for compatibility'), { code: 'SKIP_HWACCEL' });
+      }
       await runPulse(
         () => execAsync(ffmpegCmdHwAccel, {
           maxBuffer: 200 * 1024 * 1024,
           timeout: Math.max(60000, normalizedProfile.paletteUseTimeoutMs)
         }),
-        {
-          startPercent: progressStart + Math.max(12, Math.round(progressSpan * 0.38)),
-          endPercent: progressStart + Math.max(24, Math.round(progressSpan * 0.78)),
-          stageDetail: `paletteuse:${normalizedProfile.label}`,
-          approxDurationMs: normalizedProfile.paletteUseTimeoutMs
-        }
+        paletteUseStage
       );
     } catch (_) {
       await runPulse(
@@ -307,12 +393,7 @@ async function transcodeVideoToGif({
           maxBuffer: 200 * 1024 * 1024,
           timeout: Math.max(60000, normalizedProfile.paletteUseTimeoutMs)
         }),
-        {
-          startPercent: progressStart + Math.max(12, Math.round(progressSpan * 0.38)),
-          endPercent: progressStart + Math.max(24, Math.round(progressSpan * 0.78)),
-          stageDetail: `paletteuse:${normalizedProfile.label}`,
-          approxDurationMs: normalizedProfile.paletteUseTimeoutMs
-        }
+        paletteUseStage
       );
     }
 

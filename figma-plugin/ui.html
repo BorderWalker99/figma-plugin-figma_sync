@@ -437,6 +437,10 @@
         padding: 0;
     }
 
+    .settings-section.isLast {
+        margin-bottom: 0;
+    }
+
     /* Add extra space for the first section to avoid clipping hover effects */
     .tab-content > .settings-section:first-child {
         padding-top: 4px;
@@ -679,7 +683,7 @@
     .header-actions {
       display: flex;
       align-items: center;
-      gap: 16px; /* Increased gap for neumorphic button shadows */
+      gap: 12px; /* Increased gap for neumorphic button shadows */
     }
 
     /* Icon Button - Liquid Glass Style */
@@ -735,7 +739,6 @@
       color: var(--btn-icon);
       transition: all 0.25s ease;
       filter: drop-shadow(0 1px 1px rgba(255, 255, 255, 0.5));
-      stroke-width: inherit; 
     }
 
     /* Force specific stroke width for folder icon */
@@ -809,6 +812,91 @@
       border-color: transparent;
       box-shadow: none;
     }
+
+    .settings-modal-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .settings-modal-icon-btn {
+      width: 26px;
+      height: 26px;
+      padding: 0;
+      animation: none;
+      opacity: 1;
+      flex-shrink: 0;
+    }
+    .settings-modal-icon-btn svg {
+      width: 12px;
+      height: 12px;
+    }
+    .lang-select-icon-btn {
+      flex-shrink: 0;
+      border-radius: 50%;
+      border: none;
+      outline: none;
+      background: var(--btn-bg);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
+      position: relative;
+      z-index: 100;
+      padding: 2px;
+      overflow: visible;
+      box-shadow: var(--btn-shadow);
+    }
+    .lang-select-icon-btn .lang-select-display {
+      box-sizing: border-box;
+      width: 100%;
+      height: 100%;
+      padding: 0;
+      border-radius: 50%;
+      border: none;
+      background: transparent;
+      background-image: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0;
+      color: inherit;
+      white-space: nowrap;
+    }
+    .lang-select-icon-btn:hover {
+      transform: scale(1.05);
+      background: var(--btn-bg-hover);
+      box-shadow: var(--btn-shadow-hover);
+    }
+    .lang-select-icon-btn:hover .lang-select-display {
+      background: transparent;
+    }
+    .lang-select-icon-btn:active {
+      transform: scale(0.95);
+      background: var(--btn-bg-active);
+      box-shadow: var(--btn-shadow-active);
+    }
+    .lang-select-icon-btn:active .lang-select-display {
+      background: transparent;
+    }
+
+    .clear-cloud-btn-icon {
+      width: 100%;
+      height: 100%;
+      flex-shrink: 0;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+    }
+    .clear-cloud-btn-icon svg {
+      width: 13px;
+      height: 13px;
+      stroke: currentColor;
+    }
     
     /* Language Select with SVG Flags */
     .lang-select-wrapper {
@@ -838,7 +926,7 @@
       background-size: 14px;
       white-space: nowrap;
     }
-    .lang-select-wrapper:hover .lang-select-display {
+    .lang-select-wrapper:not(.lang-select-icon-btn):hover .lang-select-display {
       background-color: var(--input-bg-hover);
     }
     .lang-select-native {
@@ -853,8 +941,8 @@
     }
     .lang-flag img {
       display: block;
-      width: 14px;
-      height: 14px;
+      width: 12px;
+      height: 12px;
       border-radius: 2px;
       overflow: hidden;
     }
@@ -2175,6 +2263,7 @@
 
     .btn-secondary {
       color: var(--btn-text);
+      font-weight: 400;
     }
 
     .btn-secondary:hover {
@@ -2449,6 +2538,21 @@
         display: none;
         overflow: visible; /* Allow glow effects */
     }
+    .settings-tab-layout {
+        flex-direction: column;
+        justify-content: space-between;
+        min-height: 100%;
+    }
+    .settings-tab-stack {
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        min-height: 100%;
+    }
+    .settings-tab-layout > *,
+    .settings-tab-stack > * {
+        flex-shrink: 0;
+    }
     
     .tab-content.active {
         opacity: 1;
@@ -2499,7 +2603,6 @@
     .modal .btn {
       height: auto;
     }
-    
     .close-btn {
         width: 26px;
         height: 26px;
@@ -3879,19 +3982,41 @@
             <button class="tab-btn active" id="tabDesktop" data-i18n="tab_plugin">插件端</button>
             <button class="tab-btn" id="tabMobile" data-i18n="tab_mobile">手机端</button>
         </div>
-        <button id="settingsClose" class="close-btn">
-          <div class="neu-icon-inner" style="width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center;">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18"></line>
-              <line x1="6" y1="6" x2="18" y2="18"></line>
-            </svg>
+        <div class="settings-modal-actions" id="languageSection">
+          <div class="lang-select-wrapper lang-select-icon-btn icon-btn settings-modal-icon-btn" data-tooltip="切换语言" data-i18n-tooltip="tooltip_switch_language">
+            <div class="lang-select-display neu-icon-inner">
+              <span class="lang-flag" id="langFlag"></span>
+            </div>
+            <select id="languageSelect" class="lang-select-native">
+              <option value="zh">中文</option>
+              <option value="en">English</option>
+            </select>
           </div>
-        </button>
+          <button id="clearCloudFilesBtn" class="icon-btn settings-modal-icon-btn" data-tooltip="一键清空云文件" data-i18n-tooltip="settings_clear_cloud_files">
+            <span id="clearCloudFilesIcon" class="clear-cloud-btn-icon neu-icon-inner" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 6h18"></path>
+                <path d="M8 6V4.8c0-.99.81-1.8 1.8-1.8h4.4c.99 0 1.8.81 1.8 1.8V6"></path>
+                <path d="M18 6l-1 13.2A2 2 0 0 1 15.01 21H8.99a2 2 0 0 1-1.99-1.8L6 6"></path>
+                <path d="M10 10.5v6"></path>
+                <path d="M14 10.5v6"></path>
+              </svg>
+            </span>
+          </button>
+          <button id="settingsClose" class="close-btn">
+            <div class="neu-icon-inner" style="width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center;">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </div>
+          </button>
+        </div>
       </div>
       <div class="modal-content" id="settingsContent">
         
         <!-- Tab Content: Desktop -->
-        <div id="contentDesktop" class="tab-content active">
+        <div id="contentDesktop" class="tab-content active settings-tab-layout">
         <!-- Cloud Provider Selection (开发者模式下显示) -->
         <div id="modeSwitchSection" class="settings-section" style="display: none;">
             <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
@@ -3962,7 +4087,7 @@
         </div>
 
         <!-- Backup Settings -->
-        <div class="settings-section" id="backupSection" style="display: flex; align-items: center; justify-content: space-between;">
+        <div class="settings-section isLast" id="backupSection" style="display: flex; align-items: center; justify-content: space-between;">
             <h3 style="margin: 0;" data-i18n="settings_backup">备份到本地</h3>
             <select id="backupModeSelect" class="settings-select">
                 <option value="gif_only" data-i18n-option="backup_gif">GIF</option>
@@ -3979,27 +4104,11 @@
             </select>
         </div>
 
-        <!-- Language Settings -->
-        <div class="settings-section" id="languageSection" style="display: flex; align-items: center; justify-content: space-between;">
-            <h3 style="margin: 0;" data-i18n="settings_language">界面语言</h3>
-            <div class="lang-select-wrapper">
-                <div class="lang-select-display">
-                    <span class="lang-flag" id="langFlag"></span>
-                    <span id="langText" style = "padding-bottom: 2px;" >中文</span>
-                </div>
-                <select id="languageSelect" class="lang-select-native">
-                    <option value="zh">中文</option>
-                    <option value="en">English</option>
-                </select>
-            </div>
-        </div>
-
-
               </div>
 
         <!-- Tab Content: Mobile -->
         <div id="contentMobile" class="tab-content" style="display:none;">
-             <div style="display: flex; flex-direction: column; gap: 14px;">
+             <div id="contentMobileStack" class="settings-tab-stack" style="gap: 14px;">
               <div id="shortcutGuideSection"  style="display: flex; flex-direction: column; gap: 8px;">
                  <div id="shortcutGuideTitle" style="font-weight: 600; margin-bottom: 6px; font-size: 13px;" data-i18n="mobile_step1">01 配置快捷指令</div>
                  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;" id="qrCodesContainer">
@@ -4362,6 +4471,7 @@
         settings_backup: '备份到本地',
         settings_gif_quality: 'GIF 画质优化',
         settings_language: '界面语言',
+        settings_clear_cloud_files: '一键清空云文件',
         // Settings inputs
         input_width: '宽',
         input_height: '高',
@@ -4384,6 +4494,7 @@
         tooltip_open_folder: '打开文件夹',
         tooltip_settings: '设置',
         tooltip_minimize: '最小化窗口',
+        tooltip_switch_language: '切换语言',
         tooltip_restore: '恢复',
         tooltip_manual_sync: '手动同步',
         tooltip_cancel_sync: '点击取消同步',
@@ -4434,6 +4545,9 @@
         toast_columns_invalid: '列数须大于 0',
         toast_update_done_restart: '更新完成，请重启',
         toast_update_fail: '更新失败',
+        toast_clear_cloud_done: '已清空 {0} 个云文件',
+        toast_clear_cloud_empty: '云端无文件可清理',
+        toast_clear_cloud_fail: '清空云文件失败',
         toast_format_unsupported: '仅支持 GIF / MOV / MP4',
         toast_oversized_cleaned: '{0} 个超大文件已自动清理',
         toast_file_mismatch: '文件与图层不匹配',
@@ -4583,6 +4697,7 @@
         settings_backup: 'Auto Save',
         settings_gif_quality: 'GIF Quality',
         settings_language: 'Language',
+        settings_clear_cloud_files: 'Clear cloud files',
         // Settings inputs
         input_width: 'W',
         input_height: 'H',
@@ -4605,6 +4720,7 @@
         tooltip_open_folder: 'Open folder',
         tooltip_settings: 'Settings',
         tooltip_minimize: 'Minimize',
+        tooltip_switch_language: 'Switch language',
         tooltip_restore: 'Restore',
         tooltip_manual_sync: 'Manual sync',
         tooltip_cancel_sync: 'Click to cancel sync',
@@ -4661,6 +4777,9 @@
         toast_columns_invalid: 'Columns must be > 0',
         toast_update_done_restart: 'Updated, please restart',
         toast_update_fail: 'Update failed',
+        toast_clear_cloud_done: 'Cleared {0} cloud files',
+        toast_clear_cloud_empty: 'No cloud files to clear',
+        toast_clear_cloud_fail: 'Failed to clear cloud files',
         toast_format_unsupported: 'Only GIF / MOV / MP4',
         toast_oversized_cleaned: '{0} oversized files auto-cleaned',
         toast_file_mismatch: 'File doesn\u2019t match layer',
@@ -4887,6 +5006,7 @@
     postToPlugin('get-language');
     
     const SERVER_URL = 'ws://localhost:8888';
+    const LOCAL_SERVER_HTTP_URL = 'http://localhost:8888';
     const connectionId = 'sync-session-1';
     const figmaInstanceId = 'figma-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
     
@@ -5470,6 +5590,17 @@
               showToast(t('toast_large_download_failed_unknown'), 'warning');
             }
           }
+        } else if (data.type === 'clear-user-cloud-files-done') {
+          setClearCloudFilesLoading(false);
+          if (data.success) {
+            const clearedCount = Math.max(0, Number(data.count || 0));
+            showToast(
+              clearedCount > 0 ? t('toast_clear_cloud_done', clearedCount) : t('toast_clear_cloud_empty'),
+              'success'
+            );
+          } else {
+            showToast(data.message || t('toast_clear_cloud_fail'), 'error');
+          }
         } else if (data.type === 'manual-sync-complete') {
           if (manualSyncTimeoutId) {
             clearTimeout(manualSyncTimeoutId);
@@ -5881,6 +6012,9 @@
               if (data.userId) el.removeAttribute('data-i18n');
               scheduleIdContentMaskUpdate();
             }
+            if (settingsOverlay && settingsOverlay.classList.contains('show')) {
+              scheduleSettingsModalLayout();
+            }
         } else if (data.type === 'plugin-update-info') {
           // 处理插件更新信息
           handlePluginUpdateInfo(data);
@@ -5954,6 +6088,7 @@
 
       ws.onclose = function () {
         isWsConnecting = false;
+        setClearCloudFilesLoading(false);
         if (isForceClosingPlugin) {
           cleanupRuntimeResources({ closeSocket: false, skipStopRealtime: true, preserveInitialFallbackTimer: true });
           return;
@@ -6928,6 +7063,10 @@
         // No mode selected or unknown mode
         if (noModeMessage) noModeMessage.style.display = 'block';
       }
+
+      if (settingsOverlay && settingsOverlay.classList.contains('show')) {
+        scheduleSettingsModalLayout();
+      }
     }
 
     // Tab Switching Logic
@@ -6935,8 +7074,87 @@
     const tabMobile = document.getElementById('tabMobile');
     const contentDesktop = document.getElementById('contentDesktop');
     const contentMobile = document.getElementById('contentMobile');
+    const settingsContent = document.getElementById('settingsContent');
+    const contentMobileStack = document.getElementById('contentMobileStack');
 
     let currentTab = 'desktop';
+    let settingsModalLayoutRaf = 0;
+
+    function getSettingsTabDisplayMode(tabEl) {
+      return tabEl === contentDesktop ? 'flex' : 'block';
+    }
+
+    function setSettingsTabVisibility(tabEl, isVisible) {
+      if (!tabEl) return;
+      tabEl.style.display = isVisible ? getSettingsTabDisplayMode(tabEl) : 'none';
+    }
+
+    function getSettingsTabStack(tabEl) {
+      if (tabEl === contentDesktop) return contentDesktop;
+      if (tabEl === contentMobile) return contentMobileStack || contentMobile;
+      return tabEl;
+    }
+
+    function measureSettingsTabHeight(tabEl) {
+      if (!tabEl) return 0;
+      const stackEl = getSettingsTabStack(tabEl);
+      if (!stackEl) return 0;
+
+      const prevDisplay = tabEl.style.display;
+      const prevVisibility = tabEl.style.visibility;
+      const prevMinHeight = tabEl.style.minHeight;
+      const prevHeight = tabEl.style.height;
+      const prevStackMinHeight = stackEl.style.minHeight;
+      const prevStackHeight = stackEl.style.height;
+
+      tabEl.style.display = getSettingsTabDisplayMode(tabEl);
+      tabEl.style.visibility = 'hidden';
+      tabEl.style.minHeight = '0';
+      tabEl.style.height = 'auto';
+      stackEl.style.minHeight = '0';
+      stackEl.style.height = 'auto';
+
+      const measuredHeight = Math.ceil(stackEl.scrollHeight);
+
+      tabEl.style.display = prevDisplay;
+      tabEl.style.visibility = prevVisibility;
+      tabEl.style.minHeight = prevMinHeight;
+      tabEl.style.height = prevHeight;
+      stackEl.style.minHeight = prevStackMinHeight;
+      stackEl.style.height = prevStackHeight;
+
+      return measuredHeight;
+    }
+
+    function applySettingsModalLayout() {
+      if (!settingsContent || !contentDesktop || !contentMobile) return;
+
+      const computedStyle = window.getComputedStyle(settingsContent);
+      const paddingTop = parseFloat(computedStyle.paddingTop) || 0;
+      const paddingBottom = parseFloat(computedStyle.paddingBottom) || 0;
+      const desktopHeight = measureSettingsTabHeight(contentDesktop);
+      const mobileHeight = measureSettingsTabHeight(contentMobile);
+      const maxTabHeight = Math.max(desktopHeight, mobileHeight);
+
+      if (!maxTabHeight) return;
+
+      settingsContent.style.height = `${Math.ceil(maxTabHeight + paddingTop + paddingBottom)}px`;
+      contentDesktop.style.minHeight = `${maxTabHeight}px`;
+      contentMobile.style.minHeight = `${maxTabHeight}px`;
+      if (contentMobileStack) {
+        contentMobileStack.style.minHeight = `${maxTabHeight}px`;
+      }
+    }
+
+    function scheduleSettingsModalLayout() {
+      if (settingsModalLayoutRaf) {
+        cancelAnimationFrame(settingsModalLayoutRaf);
+      }
+      settingsModalLayoutRaf = requestAnimationFrame(() => {
+        settingsModalLayoutRaf = 0;
+        applySettingsModalLayout();
+      });
+    }
     
     function switchTab(tab) {
         if (tab === currentTab) return; // 如果已经是当前tab，不执行切换
@@ -6960,17 +7178,18 @@
         
         // 等待旧内容滑出后，显示新内容
         setTimeout(() => {
-            oldContent.style.display = 'none';
+            setSettingsTabVisibility(oldContent, false);
             oldContent.classList.remove('slide-out-left', 'slide-out-right');
             
             // 显示新内容
-            newContent.style.display = 'block';
+            setSettingsTabVisibility(newContent, true);
             newContent.classList.add(isGoingRight ? 'slide-in-right' : 'slide-in-left');
             
             // 在动画结束后清理动画类
             setTimeout(() => {
                 newContent.classList.remove('slide-in-left', 'slide-in-right');
                 newContent.classList.add('active');
+                scheduleSettingsModalLayout();
             }, 300);
         }, 150); // 滑出动画的一半时间，实现交叉淡入淡出
         
@@ -7006,28 +7225,29 @@
       updateSyncModeDisplay();
       loadSizeSettings();
       loadLayoutSettings();
+      updateQRCodeDisplay();
       
       // 初始化tab状态（无动画）
       currentTab = defaultTab;
       if (defaultTab === 'desktop') {
           tabDesktop.classList.add('active');
           tabMobile.classList.remove('active');
-          contentDesktop.style.display = 'block';
+          setSettingsTabVisibility(contentDesktop, true);
           contentDesktop.classList.add('active');
-          contentMobile.style.display = 'none';
+          setSettingsTabVisibility(contentMobile, false);
           contentMobile.classList.remove('active');
       } else {
           tabDesktop.classList.remove('active');
           tabMobile.classList.add('active');
-          contentDesktop.style.display = 'none';
+          setSettingsTabVisibility(contentDesktop, false);
           contentDesktop.classList.remove('active');
-          contentMobile.style.display = 'block';
+          setSettingsTabVisibility(contentMobile, true);
           contentMobile.classList.add('active');
-          updateQRCodeDisplay();
           scheduleIdContentMaskUpdate();
       }
       
       settingsOverlay.classList.add('show');
+      requestAnimationFrame(() => scheduleSettingsModalLayout());
     }
 
     if (viewUseCases) {
@@ -7080,6 +7300,8 @@
     const backupModeSelect = document.getElementById('backupModeSelect');
     const backupSection = document.getElementById('backupSection');
     const gifAlgorithmSelect = document.getElementById('gifAlgorithmSelect');
+    const clearCloudFilesBtn = document.getElementById('clearCloudFilesBtn');
+    const clearCloudFilesIcon = document.getElementById('clearCloudFilesIcon');
     const toggleMinimizeBtn = document.getElementById('toggleMinimize');
     
     // 禁用输入框的鼠标滚轮调整数值功能
@@ -7101,6 +7323,7 @@
       backupMode: 'gif_only',
       gifAlgorithm: 'smooth_gradient'
     };
+    let isClearingCloudFiles = false;
     
     // Auto-save debounce timers
     let _sizeSettingsTimer = null;
@@ -7156,6 +7379,23 @@
       postToPlugin('set-gif-algorithm', { algorithm: gifAlgorithm });
       originalSettings.gifAlgorithm = gifAlgorithm;
     }
+
+    function getClearCloudFilesIcon() {
+      return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M8 6V4.8c0-.99.81-1.8 1.8-1.8h4.4c.99 0 1.8.81 1.8 1.8V6"></path><path d="M18 6l-1 13.2A2 2 0 0 1 15.01 21H8.99a2 2 0 0 1-1.99-1.8L6 6"></path><path d="M10 10.5v6"></path><path d="M14 10.5v6"></path></svg>';
+    }
+
+    function setClearCloudFilesLoading(isLoading) {
+      isClearingCloudFiles = isLoading === true;
+      if (clearCloudFilesBtn) {
+        clearCloudFilesBtn.disabled = isClearingCloudFiles;
+      }
+      if (clearCloudFilesIcon) {
+        clearCloudFilesIcon.innerHTML = isClearingCloudFiles
+          ? (typeof getToastIcon === 'function' ? getToastIcon('loading') : '')
+          : getClearCloudFilesIcon();
+        clearCloudFilesIcon.setAttribute('aria-hidden', isClearingCloudFiles ? 'false' : 'true');
+      }
+    }
     
     // Add event listeners to inputs (auto-save on change)
     if (imageWidthInput) imageWidthInput.addEventListener('input', autoSaveSizeSettings);
@@ -7201,6 +7441,22 @@
         this.blur();
       });
       adjustSelectWidth(gifAlgorithmSelect);
+    }
+
+    if (clearCloudFilesBtn) {
+      clearCloudFilesBtn.addEventListener('click', function() {
+        if (isClearingCloudFiles) return;
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          showToast(t('toast_server_offline'), 'error');
+          return;
+        }
+        setClearCloudFilesLoading(true);
+        const sent = wsSend('clear-user-cloud-files');
+        if (!sent) {
+          setClearCloudFilesLoading(false);
+          showToast(t('toast_request_fail'), 'error');
+        }
+      });
     }
     
     // Language select handler
@@ -7795,6 +8051,10 @@
           if (currentSyncMode === 'icloud') icloudBtn.classList.add('selected');
           else icloudBtn.classList.remove('selected');
       }
+
+      if (settingsOverlay && settingsOverlay.classList.contains('show')) {
+        scheduleSettingsModalLayout();
+      }
     }
 
     settingsClose.onclick = closeSettings;
@@ -8195,16 +8455,17 @@
           if (progressBar) progressBar.style.width = `${percent}%`;
           if (progressText) progressText.textContent = t('upload_progress', currentUploaded, totalRequired);
           
-          // 读取文件内容为 Base64
-          const base64Data = await new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(reader.result.split(',')[1]);
-            reader.onerror = reject;
-            reader.readAsDataURL(file);
+          // 发送上传请求：大文件统一走分块 HTTP 上传，避免 Base64 / WebSocket 卡住
+          const baseCompleted = uploadedGifs.size + i;
+          const uploadResult = await uploadGifToCloud(file, gif.layerId, (state) => {
+            const ratio = Math.max(0, Math.min(1, Number(state && state.percent) || 0));
+            const overallPercent = Math.round(((baseCompleted + ratio) / totalRequired) * 100);
+            if (progressBar) progressBar.style.width = `${overallPercent}%`;
+            if (progressText) {
+              const currentLabel = Math.min(totalRequired, Math.max(1, baseCompleted + (ratio >= 1 ? 1 : 0)));
+              progressText.textContent = t('upload_progress', currentLabel, totalRequired);
+            }
           });
-          
-          // 发送上传请求
-          const uploadResult = await uploadGifToCloud(file.name, base64Data, gif.layerId);
           
           if (uploadResult.success) {
             uploadedGifs.add(gif.layerId);
@@ -8323,52 +8584,231 @@
       }
     }
     
-    // 上传 GIF 到云端的辅助函数
-    function uploadGifToCloud(filename, base64Data, layerId, progressCallback) {
-      return new Promise((resolve, reject) => {
-        if (!ws || ws.readyState !== WebSocket.OPEN) {
-          reject(new Error('WebSocket 未连接'));
-          return;
-        }
-        
-        const messageId = `upload-${layerId}-${Date.now()}`;
-        
-        // 监听上传结果
-        const uploadListener = function(event) {
-          const data = JSON.parse(event.data);
-          if (data.type === 'upload-gif-result' && data.messageId === messageId) {
-            ws.removeEventListener('message', uploadListener);
-            if (data.success) {
-              resolve({
-                success: true,
-                driveFileId: data.driveFileId,
-                ossFileId: data.ossFileId,
-                imageHash: data.imageHash,
-                gifCacheId: data.gifCacheId,
-                originalFilename: data.originalFilename
-              });
-            } else {
-              reject(new Error(data.error || '上传失败'));
-            }
+    function sleep(ms) {
+      return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    function getLocalUploadUserId() {
+      const userIdEl = document.getElementById('displayUserId');
+      const userId = userIdEl ? userIdEl.textContent.trim() : '';
+      if (!userId || userId === t('mobile_userid_loading') || userId === t('toast_unknown_error')) {
+        throw new Error(t('toast_userid_unavail'));
+      }
+      return userId;
+    }
+
+    function getUploadMimeType(file) {
+      if (file && file.type) return file.type;
+      const lowerName = String(file && file.name || '').toLowerCase();
+      if (lowerName.endsWith('.mov')) return 'video/quicktime';
+      if (lowerName.endsWith('.mp4')) return 'video/mp4';
+      if (lowerName.endsWith('.gif')) return 'image/gif';
+      return 'application/octet-stream';
+    }
+
+    async function fetchJsonWithTimeout(url, options = {}, timeoutMs = 30000) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const response = await fetch(url, { ...options, signal: controller.signal });
+        const text = await response.text();
+        let data = {};
+        if (text) {
+          try {
+            data = JSON.parse(text);
+          } catch (_) {
+            data = { raw: text };
           }
-        };
-        
-        ws.addEventListener('message', uploadListener);
-        
-        // 通知正在发送
-        if (progressCallback) progressCallback('sending');
-        
-        // 发送上传请求（使用 Base64 编码）
-        wsSend('upload-local-gif', { messageId: messageId, filename: filename, base64: base64Data, layerId: layerId });
-        
-        if (progressCallback) progressCallback('processing');
-        
-        // 120 秒超时（给大文件更多时间）
-        setTimeout(() => {
-          ws.removeEventListener('message', uploadListener);
-          reject(new Error('上传超时（120秒）'));
-        }, 120000);
+        }
+        if (!response.ok) {
+          throw new Error(data.error || `HTTP ${response.status}`);
+        }
+        return data;
+      } catch (error) {
+        if (error && error.name === 'AbortError') {
+          throw new Error(`请求超时（${Math.round(timeoutMs / 1000)}秒）`);
+        }
+        throw error;
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    async function getChunkedUploadStatus(sessionId, userId, totalChunks) {
+      const params = new URLSearchParams({
+        sessionId,
+        userId,
+        totalChunks: String(totalChunks)
       });
+      return fetchJsonWithTimeout(`${LOCAL_SERVER_HTTP_URL}/upload-status?${params.toString()}`, {
+        method: 'GET',
+        headers: {
+          'x-user-id': userId
+        }
+      }, 15000);
+    }
+
+    async function waitForChunkedUploadCompletion({ sessionId, userId, totalChunks, fileSizeBytes, progressCallback }) {
+      const timeoutMs = Math.min(
+        20 * 60 * 1000,
+        Math.max(90 * 1000, Math.round((fileSizeBytes / (1024 * 1024)) * 8000))
+      );
+      const startedAt = Date.now();
+      let lastProgressRatio = 0;
+
+      while (Date.now() - startedAt < timeoutMs) {
+        const status = await getChunkedUploadStatus(sessionId, userId, totalChunks);
+
+        if (status.failed || status.status === 'failed') {
+          throw new Error(status.error || '上传失败');
+        }
+
+        if (status.completed || status.status === 'completed') {
+          if (!status.uploadedFileId) {
+            throw new Error('上传完成，但未返回文件 ID');
+          }
+          if (progressCallback) progressCallback({ stage: 'completed', percent: 1 });
+          return status;
+        }
+
+        const receiveRatio = fileSizeBytes > 0
+          ? Math.max(0, Math.min(1, Number(status.receivedBytes || 0) / fileSizeBytes))
+          : Math.max(0, Math.min(1, Number(status.receivedChunks || 0) / Math.max(1, totalChunks)));
+        lastProgressRatio = Math.max(lastProgressRatio, receiveRatio);
+        if (progressCallback) {
+          progressCallback({
+            stage: status.status || 'finalizing',
+            percent: Math.max(0.98, lastProgressRatio)
+          });
+        }
+
+        await sleep(1500);
+      }
+
+      throw new Error('上传处理中超时，请稍后重试');
+    }
+
+    // 上传 GIF / Video 到云端的辅助函数
+    async function uploadGifToCloud(file, layerId, progressCallback) {
+      const userId = getLocalUploadUserId();
+      const mimeType = getUploadMimeType(file);
+      const initResult = await fetchJsonWithTimeout(`${LOCAL_SERVER_HTTP_URL}/upload-init`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': userId
+        },
+        body: JSON.stringify({
+          userId,
+          filename: file.name,
+          mimeType,
+          totalSize: file.size
+        })
+      }, 30000);
+
+      const sessionId = initResult.sessionId;
+      if (!sessionId) {
+        throw new Error('未获取到上传会话');
+      }
+
+      const chunkMaxBytes = Math.max(1024 * 1024, Number(initResult.chunkMaxBytes) || (32 * 1024 * 1024));
+      const recommendedBytes = Math.max(1024 * 1024, Number(initResult.recommendedChunkBytes) || (8 * 1024 * 1024));
+      const chunkBytes = Math.min(chunkMaxBytes, recommendedBytes);
+      const totalChunks = Math.max(1, Math.ceil(file.size / chunkBytes));
+
+      let chunkIndex = 0;
+      while (chunkIndex < totalChunks) {
+        const chunkStart = chunkIndex * chunkBytes;
+        const chunkEnd = Math.min(file.size, chunkStart + chunkBytes);
+        const blob = file.slice(chunkStart, chunkEnd);
+        let uploaded = false;
+
+        for (let attempt = 1; attempt <= 4; attempt++) {
+          try {
+            const chunkTimeoutMs = Math.max(45000, Math.round(blob.size / (1024 * 1024)) * 6000);
+            await fetchJsonWithTimeout(`${LOCAL_SERVER_HTTP_URL}/upload-chunk?sessionId=${encodeURIComponent(sessionId)}&chunkIndex=${chunkIndex}`, {
+              method: 'PUT',
+              headers: {
+                'Content-Type': 'application/octet-stream',
+                'x-user-id': userId,
+                'x-session-id': sessionId,
+                'x-chunk-index': String(chunkIndex),
+                'x-total-chunks': String(totalChunks)
+              },
+              body: blob
+            }, chunkTimeoutMs);
+
+            chunkIndex += 1;
+            uploaded = true;
+            if (progressCallback) {
+              progressCallback({
+                stage: 'uploading',
+                percent: Math.max(0, Math.min(0.96, chunkIndex / totalChunks))
+              });
+            }
+            break;
+          } catch (error) {
+            try {
+              const status = await getChunkedUploadStatus(sessionId, userId, totalChunks);
+              if (typeof status.nextChunkIndex === 'number' && status.nextChunkIndex > chunkIndex) {
+                chunkIndex = status.nextChunkIndex;
+                uploaded = true;
+                if (progressCallback) {
+                  progressCallback({
+                    stage: 'uploading',
+                    percent: Math.max(0, Math.min(0.96, chunkIndex / totalChunks))
+                  });
+                }
+                break;
+              }
+              if (status.failed || status.status === 'failed') {
+                throw new Error(status.error || error.message || '上传失败');
+              }
+            } catch (statusError) {
+              if (attempt >= 4) throw statusError;
+            }
+
+            if (attempt >= 4) throw error;
+            await sleep(500 * attempt);
+          }
+        }
+
+        if (!uploaded) {
+          throw new Error(`上传分块失败: ${chunkIndex + 1}/${totalChunks}`);
+        }
+      }
+
+      await fetchJsonWithTimeout(`${LOCAL_SERVER_HTTP_URL}/upload-finish`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': userId,
+          'x-session-id': sessionId,
+          'x-total-chunks': String(totalChunks)
+        },
+        body: JSON.stringify({
+          userId,
+          sessionId,
+          totalChunks
+        })
+      }, 30000);
+
+      const finalStatus = await waitForChunkedUploadCompletion({
+        sessionId,
+        userId,
+        totalChunks,
+        fileSizeBytes: file.size,
+        progressCallback
+      });
+
+      return {
+        success: true,
+        driveFileId: finalStatus.uploadedFileId,
+        ossFileId: null,
+        imageHash: null,
+        gifCacheId: null,
+        originalFilename: file.name
+      };
     }
     window.onmessage = function (event) {
       // 🛡️ 安全处理消息，防止错误导致插件崩溃

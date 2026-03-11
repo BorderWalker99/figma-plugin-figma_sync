@@ -144,6 +144,25 @@ function validateUploadToken(token, res) {
   return true;
 }
 
+function applyUploadCorsHeaders(res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, OPTIONS');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    [
+      'Content-Type',
+      'X-User-Id',
+      'X-Upload-Token',
+      'X-Session-Id',
+      'X-Chunk-Index',
+      'X-Total-Chunks',
+      'X-Resume-Session-Id',
+      'X-Filename',
+      'X-File-Name'
+    ].join(', ')
+  );
+}
+
 function resolveDefaultFolderId(useOSS) {
   if (useOSS) {
     return process.env.ALIYUN_ROOT_FOLDER || 'ScreenSync';
@@ -1758,6 +1777,16 @@ app.use((req, res, next) => {
   next();
 });
 
+app.use((req, res, next) => {
+  if (req.path && /^\/upload(?:-|$|\/)/.test(req.path)) {
+    applyUploadCorsHeaders(res);
+    if (req.method === 'OPTIONS') {
+      return res.sendStatus(204);
+    }
+  }
+  next();
+});
+
 // 添加错误处理中间件，捕获body parser错误
 app.use((err, req, res, next) => {
   // 捕获所有类型的body parser错误
@@ -2112,8 +2141,74 @@ if (googleDriveEnabled && uploadBuffer) {
     }
   }, 60000);
 
-  async function backgroundProxyUpload(tempPath, tempDir, userId, filename, mimeType, folderId = null) {
+  function chooseDriveProxyChunkBytes(totalSizeBytes = 0) {
+    const sizeMB = Math.max(0, Number(totalSizeBytes || 0)) / 1024 / 1024;
+    if (sizeMB >= 800) return 32 * 1024 * 1024;
+    if (sizeMB >= 250) return 16 * 1024 * 1024;
+    return 8 * 1024 * 1024;
+  }
+
+  function parseDriveRangeHeader(rangeHeader) {
+    const text = String(rangeHeader || '');
+    const match = text.match(/bytes=0-(\d+)/i);
+    if (!match) return -1;
+    const end = parseInt(match[1], 10);
+    return Number.isFinite(end) ? end : -1;
+  }
+
+  async function queryDriveResumableOffset(uploadUrl, totalSize = null, timeoutMs = 15000) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
+      const total = Number.isFinite(totalSize) && totalSize > 0 ? String(totalSize) : '*';
+      const response = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: {
+          'Content-Length': '0',
+          'Content-Range': `bytes */${total}`
+        },
+        signal: controller.signal
+      });
+
+      if (response.status === 308) {
+        const remoteEnd = parseDriveRangeHeader(response.headers.get('range'));
+        return {
+          completed: false,
+          offset: remoteEnd >= 0 ? remoteEnd + 1 : 0,
+          uploadedFileId: null
+        };
+      }
+
+      if (response.status === 200 || response.status === 201) {
+        let payload = null;
+        try { payload = await response.json(); } catch (_) {}
+        return {
+          completed: true,
+          offset: Number.isFinite(totalSize) && totalSize > 0 ? totalSize : 0,
+          uploadedFileId: payload && payload.id ? payload.id : null
+        };
+      }
+
+      const text = await response.text().catch(() => '');
+      throw new Error(`Drive resume probe failed: HTTP ${response.status} ${text.slice(0, 200)}`);
+    } catch (error) {
+      if (error && error.name === 'AbortError') {
+        throw new Error(`Drive resume probe timeout (${Math.round(timeoutMs / 1000)}s)`);
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async function backgroundProxyUpload(tempPath, tempDir, userId, filename, mimeType, folderId = null, session = null) {
+    try {
+      if (session) {
+        session.status = 'background-uploading';
+        session.finalizing = true;
+        session.error = null;
+        session.createdAt = Date.now();
+      }
       let uploadPath = tempPath;
       const origStat = await fs.promises.stat(tempPath);
       const origSizeBytes = origStat.size;
@@ -2153,7 +2248,7 @@ if (googleDriveEnabled && uploadBuffer) {
         }
       }
 
-      await uploadDriveFileDirect({
+      const uploadResult = await uploadDriveFileDirect({
         userId,
         filename,
         mimeType,
@@ -2161,7 +2256,22 @@ if (googleDriveEnabled && uploadBuffer) {
         folderId,
         startTime: Date.now()
       });
+      if (session) {
+        session.uploadedFileId = uploadResult && uploadResult.id ? uploadResult.id : null;
+        session.status = 'completed';
+        session.finalizing = false;
+        session.error = null;
+        session.createdAt = Date.now();
+      }
       console.log(`📤 [后台上传] ${filename} 已完成 Google Drive 直传`);
+    } catch (error) {
+      if (session) {
+        session.status = 'failed';
+        session.finalizing = false;
+        session.error = error && error.message ? error.message : String(error);
+        session.createdAt = Date.now();
+      }
+      throw error;
     } finally {
       try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch (_) {}
     }
@@ -2202,20 +2312,37 @@ if (googleDriveEnabled && uploadBuffer) {
 
         const proxyId = `proxy-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         const effectiveMime = normalizedMimeType || mimeType || 'application/octet-stream';
+        const totalSize = Math.max(0, Number(req.body.totalSize || 0));
         uploadProxySessions.set(proxyId, {
           userId, filename, mimeType: effectiveMime,
-          folderId: targetFolderId, createdAt: Date.now()
+          folderId: targetFolderId,
+          totalSize,
+          receivedBytes: 0,
+          driveOffset: 0,
+          status: 'ready',
+          finalizing: false,
+          uploadedFileId: null,
+          error: null,
+          createdAt: Date.now()
         });
 
         const proto = req.headers['x-forwarded-proto'] || 'https';
         const host = req.headers['host'] || req.hostname;
         const uploadUrl = `${proto}://${host}/upload-proxy?session=${proxyId}`;
+        const statusUrl = `${proto}://${host}/upload-proxy-status?session=${proxyId}`;
+        const recommendedChunkBytes = chooseDriveProxyChunkBytes(totalSize);
 
         res.json({
           success: true,
-          uploadUrl: uploadUrl,
-          filename: filename,
-          folderId: targetFolderId
+          uploadUrl,
+          statusUrl,
+          sessionId: proxyId,
+          filename,
+          folderId: targetFolderId,
+          totalSize,
+          recommendedChunkBytes,
+          recommendedChunkMB: Math.round(recommendedChunkBytes / 1024 / 1024),
+          recommendedStrategy: 'post-upload-url-then-put-file-then-poll-status'
         });
 
         const elapsed = Date.now() - startTime;
@@ -2225,6 +2352,33 @@ if (googleDriveEnabled && uploadBuffer) {
         console.error(`❌ [Upload URL] 生成链接失败: ${error.message}`);
         res.status(500).json({ error: error.message });
       }
+    });
+
+    app.get('/upload-proxy-status', (req, res) => {
+      const sessionId = req.query.session;
+      const session = uploadProxySessions.get(sessionId);
+      if (!sessionId) {
+        return res.status(400).json({ error: 'Missing session id' });
+      }
+      if (!session) {
+        return res.status(404).json({ error: 'Proxy session not found or expired' });
+      }
+
+      session.createdAt = Date.now();
+      return res.json({
+        success: true,
+        sessionId,
+        filename: session.filename,
+        totalSize: session.totalSize || 0,
+        receivedBytes: session.receivedBytes || 0,
+        driveOffset: session.driveOffset || 0,
+        status: session.status || 'ready',
+        finalizing: session.finalizing === true,
+        uploadedFileId: session.uploadedFileId || null,
+        error: session.error || null,
+        completed: session.status === 'completed',
+        failed: session.status === 'failed'
+      });
     });
 
     // ── PUT /upload-proxy ────────────────────────────────────────────────────
@@ -2238,7 +2392,7 @@ if (googleDriveEnabled && uploadBuffer) {
       }
 
       const { userId, filename, mimeType, folderId } = session;
-      const contentLength = parseInt(req.headers['content-length'], 10) || 0;
+      const contentLength = parseInt(req.headers['content-length'], 10) || session.totalSize || 0;
       const fileSizeMB = contentLength > 0 ? (contentLength / 1024 / 1024).toFixed(1) : '?';
       const receiveStart = Date.now();
 
@@ -2255,11 +2409,40 @@ if (googleDriveEnabled && uploadBuffer) {
       try {
         const driveSessionUrl = await getResumableUploadUrl({ filename, mimeType, folderId });
 
-        const driveProxyChunkMb = Math.max(8, Number(process.env.DRIVE_PROXY_CHUNK_MB) || 32);
-        const DRIVE_CHUNK_SIZE = driveProxyChunkMb * 1024 * 1024;
+        session.status = 'receiving';
+        session.finalizing = false;
+        session.error = null;
+        session.uploadedFileId = null;
+        session.totalSize = contentLength || session.totalSize || 0;
+        session.receivedBytes = 0;
+        session.driveOffset = 0;
+        session.createdAt = Date.now();
+
+        const configuredChunkMb = Number(process.env.DRIVE_PROXY_CHUNK_MB) || 0;
+        const DRIVE_CHUNK_SIZE = configuredChunkMb > 0
+          ? Math.max(8, configuredChunkMb) * 1024 * 1024
+          : chooseDriveProxyChunkBytes(contentLength);
         let pendingChunks = [];
         let pendingBytes = 0;
         let driveOffset = 0;
+        const inboundIdleTimeoutMs = Math.max(
+          45000,
+          Math.min(180000, Math.round(DRIVE_CHUNK_SIZE / (1024 * 1024)) * 8000)
+        );
+        const driveChunkTimeoutMs = Math.max(
+          45000,
+          Math.min(180000, Math.round(DRIVE_CHUNK_SIZE / (1024 * 1024)) * 6000)
+        );
+        let inboundTimer = null;
+
+        const armInboundTimer = () => {
+          if (inboundTimer) clearTimeout(inboundTimer);
+          inboundTimer = setTimeout(() => {
+            try {
+              req.destroy(new Error(`Upload stream idle timeout (${Math.round(inboundIdleTimeoutMs / 1000)}s)`));
+            } catch (_) {}
+          }, inboundIdleTimeoutMs);
+        };
 
         const pushPendingChunk = (chunk) => {
           if (!chunk || chunk.length === 0) return;
@@ -2291,13 +2474,13 @@ if (googleDriveEnabled && uploadBuffer) {
         };
 
         const forwardToDrive = async (chunk, isFinal) => {
-          const endByte = driveOffset + chunk.length - 1;
-          const total = isFinal
-            ? String(driveOffset + chunk.length)
-            : (contentLength > 0 ? String(contentLength) : '*');
-
+          if (!chunk || chunk.length === 0) return;
           let lastErr = null;
           for (let attempt = 0; attempt < 3; attempt++) {
+            const endByte = driveOffset + chunk.length - 1;
+            const total = contentLength > 0 ? String(contentLength) : (isFinal ? String(driveOffset + chunk.length) : '*');
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), driveChunkTimeoutMs);
             try {
               const resp = await fetch(driveSessionUrl, {
                 method: 'PUT',
@@ -2305,11 +2488,21 @@ if (googleDriveEnabled && uploadBuffer) {
                   'Content-Range': `bytes ${driveOffset}-${endByte}/${total}`,
                   'Content-Length': String(chunk.length)
                 },
-                body: chunk
+                body: chunk,
+                signal: controller.signal
               });
+              clearTimeout(timer);
 
               if (resp.status === 200 || resp.status === 201 || resp.status === 308) {
+                if (resp.status === 200 || resp.status === 201) {
+                  let payload = null;
+                  try { payload = await resp.json(); } catch (_) {}
+                  session.uploadedFileId = payload && payload.id ? payload.id : session.uploadedFileId || null;
+                }
                 driveOffset += chunk.length;
+                session.driveOffset = driveOffset;
+                session.status = isFinal ? 'completing' : 'streaming';
+                session.createdAt = Date.now();
                 return;
               }
               const errText = await resp.text().catch(() => '');
@@ -2317,15 +2510,51 @@ if (googleDriveEnabled && uploadBuffer) {
 
               if (resp.status === 404 || resp.status === 410) break;
             } catch (fetchErr) {
-              lastErr = fetchErr;
+              clearTimeout(timer);
+              if (fetchErr && fetchErr.name === 'AbortError') {
+                lastErr = new Error(`Drive chunk upload timeout (${Math.round(driveChunkTimeoutMs / 1000)}s)`);
+                lastErr.code = 'ETIMEDOUT';
+              } else {
+                lastErr = fetchErr;
+              }
             }
-            if (attempt < 2) await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+
+            try {
+              const probe = await queryDriveResumableOffset(driveSessionUrl, contentLength || 0, 15000);
+              if (probe.completed) {
+                session.uploadedFileId = probe.uploadedFileId || session.uploadedFileId || null;
+                driveOffset = probe.offset;
+                session.driveOffset = driveOffset;
+                session.status = 'completed';
+                session.finalizing = false;
+                session.createdAt = Date.now();
+                return;
+              }
+              if (probe.offset > driveOffset) {
+                driveOffset = probe.offset;
+                session.driveOffset = driveOffset;
+                if (driveOffset >= endByte + 1) {
+                  session.status = 'streaming';
+                  session.createdAt = Date.now();
+                  return;
+                }
+              }
+            } catch (_) {
+              // ignore resume probe errors, continue retry
+            }
+
+            if (attempt < 2) await new Promise(r => setTimeout(r, 800 * (attempt + 1)));
           }
           throw lastErr || new Error('Drive chunk upload failed after retries');
         };
 
+        armInboundTimer();
+        req.on('data', armInboundTimer);
+
         for await (const chunk of req) {
           totalReceived += chunk.length;
+          session.receivedBytes = totalReceived;
+          session.createdAt = Date.now();
           if (!diskStream.write(chunk)) {
             await new Promise((resolve) => diskStream.once('drain', resolve));
           }
@@ -2333,17 +2562,25 @@ if (googleDriveEnabled && uploadBuffer) {
           pushPendingChunk(chunk);
           while (pendingBytes >= DRIVE_CHUNK_SIZE) {
             const toSend = takePendingBytes(DRIVE_CHUNK_SIZE);
+            session.status = 'streaming';
             await forwardToDrive(toSend, false);
           }
         }
 
         if (pendingBytes > 0) {
           const tail = takePendingBytes(pendingBytes);
+          session.status = 'streaming';
           await forwardToDrive(tail, true);
         }
 
+        if (inboundTimer) clearTimeout(inboundTimer);
         diskStream.end();
-        uploadProxySessions.delete(sessionId);
+        session.receivedBytes = totalReceived;
+        session.driveOffset = driveOffset;
+        session.status = 'completed';
+        session.finalizing = false;
+        session.error = null;
+        session.createdAt = Date.now();
 
         const elapsedSeconds = (Date.now() - receiveStart) / 1000;
         const elapsed = elapsedSeconds.toFixed(1);
@@ -2352,10 +2589,13 @@ if (googleDriveEnabled && uploadBuffer) {
 
         res.json({
           success: true,
+          status: session.status,
           message: 'Uploaded to Google Drive (stream-through)',
           filename,
+          sessionId,
           receivedMB: (totalReceived / 1024 / 1024).toFixed(1),
-          elapsedSeconds: parseFloat(elapsed)
+          elapsedSeconds: parseFloat(elapsed),
+          uploadedFileId: session.uploadedFileId || null
         });
 
         process.nextTick(() => {
@@ -2363,6 +2603,11 @@ if (googleDriveEnabled && uploadBuffer) {
         });
 
       } catch (err) {
+        session.status = 'background-uploading';
+        session.finalizing = true;
+        session.error = null;
+        session.receivedBytes = totalReceived;
+        session.createdAt = Date.now();
         console.warn(`⚠️  [极速上传] 流式转发失败: ${err.message}，回退后台上传`);
         diskStream.end();
 
@@ -2378,12 +2623,13 @@ if (googleDriveEnabled && uploadBuffer) {
           } catch (_) {}
         }
 
-        uploadProxySessions.delete(sessionId);
-
         if (!res.headersSent) {
           res.json({
             success: true,
-            message: 'Upload received, processing in background',
+            status: session.status,
+            finalizing: true,
+            sessionId,
+            message: 'Upload received, continuing in background',
             filename,
             receivedMB: (totalReceived / 1024 / 1024).toFixed(1)
           });
@@ -2391,7 +2637,7 @@ if (googleDriveEnabled && uploadBuffer) {
 
         process.nextTick(async () => {
           try {
-            await backgroundProxyUpload(tempPath, tempDir, userId, filename, mimeType, folderId);
+            await backgroundProxyUpload(tempPath, tempDir, userId, filename, mimeType, folderId, session);
           } catch (bgErr) {
             console.error(`❌ [极速上传] 后台上传也失败: ${bgErr.message}`);
             try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch (_) {}
@@ -2588,7 +2834,9 @@ const _chunkSessionSweepTimer = setInterval(() => {
   for (const [sessionId, session] of chunkedSessions) {
     if (now - session.createdAt > CHUNK_SESSION_TIMEOUT_MS) {
       console.log(`🗑️  [分块上传] 清理超时会话: ${sessionId} (${session.filename})`);
-      try { fs.rmSync(session.tempDir, { recursive: true, force: true }); } catch (_) {}
+      if (session.tempDir) {
+        try { fs.rmSync(session.tempDir, { recursive: true, force: true }); } catch (_) {}
+      }
       chunkedSessions.delete(sessionId);
     }
   }
@@ -2652,7 +2900,12 @@ app.post('/upload-init', async (req, res) => {
   chunkedSessions.set(sessionId, {
     userId, filename, mimeType: normalizedMimeType || mimeType || 'application/octet-stream',
     totalSize: totalSize || 0, tempDir, folderId,
-    receivedChunks: new Set(), receivedBytes: 0, createdAt: Date.now()
+    receivedChunks: new Set(), receivedBytes: 0, createdAt: Date.now(),
+    status: 'receiving',
+    finalizing: false,
+    uploadedFileId: null,
+    uploadResult: null,
+    error: null
   });
 
   console.log(`📦 [分块上传] 新会话 ${sessionId}: ${filename} (预计 ${((totalSize || 0) / 1024 / 1024).toFixed(1)}MB)`);
@@ -2705,7 +2958,13 @@ app.get('/upload-status', (req, res) => {
     nextChunkIndex,
     receivedRanges: getChunkRanges(session.receivedChunks),
     expectedChunks,
-    missingSample
+    missingSample,
+    status: session.status || 'receiving',
+    finalizing: session.finalizing === true,
+    uploadedFileId: session.uploadedFileId || null,
+    error: session.error || null,
+    completed: session.status === 'completed',
+    failed: session.status === 'failed'
   });
 });
 
@@ -2756,6 +3015,28 @@ app.post('/upload-finish', async (req, res) => {
     return res.status(404).json({ error: 'Session not found or expired' });
   }
 
+  if (session.finalizing) {
+    return res.json({
+      success: true,
+      sessionId,
+      filename: session.filename,
+      finalizing: true,
+      status: session.status || 'finalizing',
+      uploadedFileId: session.uploadedFileId || null
+    });
+  }
+
+  if (session.status === 'completed') {
+    return res.json({
+      success: true,
+      sessionId,
+      filename: session.filename,
+      finalizing: false,
+      status: session.status,
+      uploadedFileId: session.uploadedFileId || null
+    });
+  }
+
   const expectedChunks = Number.isFinite(totalChunks) && totalChunks > 0 ? totalChunks : null;
   if (expectedChunks && session.receivedChunks.size < expectedChunks) {
     const waited = await waitForChunkCompletion(session, expectedChunks, 12000, 400);
@@ -2771,13 +3052,27 @@ app.post('/upload-finish', async (req, res) => {
     }
   }
 
-  // Respond immediately so the Shortcut finishes fast
-  res.json({ success: true, message: 'Upload finalizing', filename: session.filename });
+  session.finalizing = true;
+  session.status = 'assembling';
+  session.error = null;
+  session.createdAt = Date.now();
+
+  // Return a truthful transitional state so the client can poll /upload-status.
+  res.json({
+    success: true,
+    message: 'Upload finalizing',
+    filename: session.filename,
+    sessionId,
+    finalizing: true,
+    status: session.status
+  });
 
   // Reassemble + process in background
   process.nextTick(async () => {
     const { filename, mimeType, tempDir } = session;
     try {
+      session.status = 'assembling';
+      session.createdAt = Date.now();
       // Sort and reassemble chunks
       const chunkFiles = (await fs.promises.readdir(tempDir))
         .filter(f => f.startsWith('chunk-'))
@@ -2836,6 +3131,8 @@ app.post('/upload-finish', async (req, res) => {
 
       // ─── 步骤 2：大视频压缩（FFmpeg 直读磁盘文件，省去"加载到内存→写临时文件"的双重 I/O）───
       if (isVideo && origSizeBytes > mediaTuning.thresholds.uploadCompressMb * 1024 * 1024) {
+        session.status = 'compressing';
+        session.createdAt = Date.now();
         const tempOut = path.join(tempDir, `comp_${safeName}`);
         const sizeMB = origSizeBytes / 1024 / 1024;
         const isUltraLarge = sizeMB > mediaTuning.thresholds.ultraSpeedVideoMb;
@@ -2869,7 +3166,9 @@ app.post('/upload-finish', async (req, res) => {
 
       // ─── 步骤 3：加入上传队列 ───
       const effectiveUserId = userId || session.userId;
-      await uploadDriveFileDirect({
+      session.status = 'uploading';
+      session.createdAt = Date.now();
+      const uploadResult = await uploadDriveFileDirect({
         userId: effectiveUserId,
         filename,
         mimeType,
@@ -2877,14 +3176,24 @@ app.post('/upload-finish', async (req, res) => {
         folderId: session.folderId || null,
         startTime: Date.now()
       });
+      session.uploadResult = uploadResult || null;
+      session.uploadedFileId = uploadResult && uploadResult.id ? uploadResult.id : null;
+      session.status = 'completed';
+      session.finalizing = false;
+      session.error = null;
+      session.createdAt = Date.now();
 
       console.log(`📤 [分块上传] ${filename} 已完成直传上传`);
 
     } catch (err) {
+      session.status = 'failed';
+      session.finalizing = false;
+      session.error = err && err.message ? err.message : String(err);
+      session.createdAt = Date.now();
       console.error(`❌ [分块上传] 组装/处理失败 (${filename}):`, err.message);
     } finally {
       try { await fs.promises.rm(tempDir, { recursive: true, force: true }); } catch (_) {}
-      chunkedSessions.delete(sessionId);
+      session.tempDir = null;
     }
   });
 });
@@ -3040,6 +3349,7 @@ wss.on('connection', (ws, req) => {
         data.type === 'manual-sync' ||
         data.type === 'manual-sync-count-files' ||
         data.type === 'cancel-manual-sync' ||
+        data.type === 'clear-user-cloud-files' ||
         data.type === 'force-save-gif') {
       const tryForwardToMac = () => {
         const latestGroup = connections.get(connectionId);
@@ -3410,11 +3720,10 @@ wss.on('connection', (ws, req) => {
         
         const tempFilePath = path.join(tempDir, filename);
         fs.writeFileSync(tempFilePath, bytes);
+        const fileSizeMB = bytes.length / 1024 / 1024;
         bytes = null;
         
         const fileExt = path.extname(filename).toLowerCase();
-        
-        const fileSizeMB = bytes.length / 1024 / 1024;
         const isVideo = ['.mov', '.mp4'].includes(fileExt);
         const isGif = fileExt === '.gif';
         const COMPRESS_THRESHOLD_MB = mediaTuning.thresholds.uploadCompressMb;
@@ -3497,10 +3806,11 @@ wss.on('connection', (ws, req) => {
           type: 'upload-gif-result',
           messageId: messageId,
           success: true,
-          driveFileId: originalFilename,      // 原始文件名
-          ossFileId: originalFilename,        // 原始文件名
-          originalFilename: originalFilename, // 原始文件名
-          cacheId: cacheResult.cacheId,       // 缓存ID（关键）
+          driveFileId: null,
+          ossFileId: null,
+          originalFilename: originalFilename,
+          cacheId: cacheResult.cacheId,
+          gifCacheId: cacheResult.cacheId,
           imageHash: `manual_${timestamp}`
         });
         
@@ -4300,7 +4610,7 @@ wss.on('connection', (ws, req) => {
     if (['manual-sync-complete', 'manual-sync-cancelled', 'manual-sync-file-count', 'manual-sync-progress',
          'conversion-progress', 'oversized-files-cleaned',
          'gif-backup-setting-updated', 'keep-gif-in-icloud-setting-updated',
-         'force-save-gif-done', 'local-gif-saved'].includes(data.type)) {
+         'force-save-gif-done', 'local-gif-saved', 'clear-user-cloud-files-done'].includes(data.type)) {
       sendToFigma(targetGroup, data);
       return;
     }

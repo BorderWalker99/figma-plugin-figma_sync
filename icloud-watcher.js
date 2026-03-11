@@ -147,8 +147,6 @@ const CONFIG = {
     exportedGif: '导出的GIF'
   }
 };
-const LARGE_GIF_URL_THRESHOLD = mediaTuning.thresholds.largeGifUrlMb * 1024 * 1024;
-
 let ws = null;
 let reconnectTimer = null;
 let syncCount = 0;
@@ -537,7 +535,7 @@ async function processRealtimeSyncTask(task) {
         emitProgress('importing', 90, { isVideo: true });
 
         const gifDims = parseGifDimensions(result.gifBuffer);
-        const useGifUrl = !!(result.gifCacheId && result.gifBuffer.length > LARGE_GIF_URL_THRESHOLD);
+        const useGifUrl = !!result.gifCacheId;
         const gifUrl = useGifUrl
           ? `http://localhost:8888/gif-temp/${encodeURIComponent(result.gifCacheId)}?filename=${encodeURIComponent(result.gifFilename)}`
           : null;
@@ -1928,7 +1926,7 @@ async function performManualSync() {
             const keepGif = !shouldCleanupFile(gifSub);
             fileProgressCb('importing', 90);
             const gifDims = parseGifDimensions(result.gifBuffer);
-            const useGifUrl = !!(result.gifCacheId && result.gifBuffer.length > LARGE_GIF_URL_THRESHOLD);
+            const useGifUrl = !!result.gifCacheId;
             const gifUrl = useGifUrl
               ? `http://localhost:8888/gif-temp/${encodeURIComponent(result.gifCacheId)}?filename=${encodeURIComponent(result.gifFilename)}`
               : null;
@@ -2209,7 +2207,7 @@ async function syncScreenshot(filePath, deleteAfterSync = false, subfolder = nul
     }
 
     const gifDims = fileIsGif ? parseGifDimensions(imageBuffer) : null;
-    const useGifUrl = !!(fileIsGif && gifCacheId && imageBuffer.length > LARGE_GIF_URL_THRESHOLD);
+    const useGifUrl = !!(fileIsGif && gifCacheId);
     const gifUrl = useGifUrl
       ? `http://localhost:8888/gif-temp/${encodeURIComponent(gifCacheId)}?filename=${encodeURIComponent(filename)}`
       : null;

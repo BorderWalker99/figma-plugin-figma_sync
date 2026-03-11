@@ -592,6 +592,7 @@ async function downloadFileToPath(fileId, outputPath, timeoutMs = 60000, maxRetr
   let lastError = null;
   const expectedBytes = Math.max(0, Number(options.expectedBytes || 0));
   const onProgress = typeof options.onProgress === 'function' ? options.onProgress : null;
+  const sizeToleranceBytes = Math.max(256 * 1024, Math.round(expectedBytes * 0.01));
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     const drive = getDriveClient();
@@ -605,23 +606,32 @@ async function downloadFileToPath(fileId, outputPath, timeoutMs = 60000, maxRetr
         let totalBytes = 0;
         let settled = false;
         const writer = fs.createWriteStream(outputPath);
+        let timer = null;
+
+        const armActivityTimer = () => {
+          if (timer) clearTimeout(timer);
+          timer = setTimeout(() => {
+            const timeoutError = new Error(`文件下载超时（${Math.round(timeoutMs / 1000)}秒内无数据）`);
+            timeoutError.code = 'ETIMEDOUT';
+            cleanupAndReject(timeoutError);
+          }, timeoutMs);
+        };
 
         const cleanupAndReject = (err) => {
           if (settled) return;
           settled = true;
-          clearTimeout(timer);
+          if (timer) clearTimeout(timer);
           try { response.data.destroy(); } catch (_) {}
           try { writer.destroy(); } catch (_) {}
           try { fs.rmSync(outputPath, { force: true }); } catch (_) {}
           reject(err);
         };
 
-        const timer = setTimeout(() => {
-          cleanupAndReject(new Error(`文件下载超时（超过${Math.round(timeoutMs / 1000)}秒）`));
-        }, timeoutMs);
+        armActivityTimer();
 
         response.data.on('data', (chunk) => {
           totalBytes += chunk.length;
+          armActivityTimer();
           if (onProgress) {
             try {
               onProgress({
@@ -636,8 +646,13 @@ async function downloadFileToPath(fileId, outputPath, timeoutMs = 60000, maxRetr
         writer.on('error', cleanupAndReject);
         writer.on('finish', () => {
           if (settled) return;
+          if (expectedBytes > 0 && Math.abs(totalBytes - expectedBytes) > sizeToleranceBytes) {
+            const sizeError = new Error(`文件下载不完整（期望 ${(expectedBytes / 1024 / 1024).toFixed(1)}MB，实际 ${(totalBytes / 1024 / 1024).toFixed(1)}MB）`);
+            sizeError.code = 'EBADSIZE';
+            return cleanupAndReject(sizeError);
+          }
           settled = true;
-          clearTimeout(timer);
+          if (timer) clearTimeout(timer);
           resolve();
         });
 

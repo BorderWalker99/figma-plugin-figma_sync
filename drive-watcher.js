@@ -538,10 +538,15 @@ const knownFileIds = new Set();
 const knownFileMD5s = new Map(); // md5Checksum -> { fileId, filename, createdTime } - 用于去重
 const pendingDeletes = new Map(); // fileId -> { filename, timestamp }
 const processingFileIds = new Set(); // 正在处理中的文件 ID — 全局互斥锁，防止同一文件被实时同步和手动同步同时处理
+const realtimeProcessingFileIds = new Set(); // 实时模式当前正在处理/转换中的文件 ID，手动同步需要提前跳过
+const realtimeImageQueue = [];
+const realtimeQueuedImageFileIds = new Set();
 const realtimeVideoQueue = [];
 const realtimeQueuedVideoFileIds = new Set();
 const realtimeRetryTimers = new Set();
+let isDriveRealtimeImageQueueRunning = false;
 let isDriveRealtimeVideoQueueRunning = false;
+let isClearingUserCloudFiles = false;
 const MAX_KNOWN_FILES = 10000; // 限制已知文件数量，防止内存无限增长
 const DEEP_CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000; // 每 6 小时做一次深度清理
 const STALE_TEMP_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 临时文件保留 24 小时
@@ -680,11 +685,41 @@ function requestManualSyncCancel() {
   return true;
 }
 
+function getDriveRealtimeSortTime(file) {
+  return Math.max(
+    0,
+    new Date(file && (file.createdTime || file.modifiedTime) || 0).getTime() || 0
+  );
+}
+
+function compareDriveRealtimeFilesByTimestamp(a, b) {
+  const timeDiff = getDriveRealtimeSortTime(a) - getDriveRealtimeSortTime(b);
+  if (timeDiff !== 0) return timeDiff;
+  return String((a && a.id) || '').localeCompare(String((b && b.id) || ''));
+}
+
+function insertDriveRealtimeFileInOrder(queue, file) {
+  if (!Array.isArray(queue) || !file) return;
+  let index = queue.length;
+  while (index > 0 && compareDriveRealtimeFilesByTimestamp(file, queue[index - 1]) < 0) {
+    index -= 1;
+  }
+  queue.splice(index, 0, file);
+}
+
+function enqueueDriveRealtimeImage(file) {
+  if (!file || !file.id) return;
+  if (realtimeQueuedImageFileIds.has(file.id)) return;
+  realtimeQueuedImageFileIds.add(file.id);
+  insertDriveRealtimeFileInOrder(realtimeImageQueue, file);
+  drainDriveRealtimeImageQueue().catch(() => {});
+}
+
 function enqueueDriveRealtimeVideo(file) {
   if (!file || !file.id) return;
   if (realtimeQueuedVideoFileIds.has(file.id)) return;
   realtimeQueuedVideoFileIds.add(file.id);
-  realtimeVideoQueue.push(file);
+  insertDriveRealtimeFileInOrder(realtimeVideoQueue, file);
   drainDriveRealtimeVideoQueue().catch(() => {});
 }
 
@@ -710,22 +745,7 @@ function scheduleDriveRealtimeRetry(file, reason = 'retry') {
       enqueueDriveRealtimeVideo(retryFile);
       return;
     }
-
-    let timeoutId;
-    const timeoutMs = 60000;
-    const fileTimeout = new Promise((_, reject) => {
-      timeoutId = setTimeout(() => reject(new Error(`SYNC_TIMEOUT:${retryFile.name}`)), timeoutMs);
-    });
-
-    try {
-      await Promise.race([handleDriveFile(retryFile, true, null, null, 'realtime'), fileTimeout]);
-    } catch (retryError) {
-      const msg = String(retryError && retryError.message ? retryError.message : retryError || '');
-      console.warn(`⚠️  [Drive] 实时重试失败: ${retryFile.name} (${msg})`);
-      scheduleDriveRealtimeRetry(retryFile, msg);
-    } finally {
-      clearTimeout(timeoutId);
-    }
+    enqueueDriveRealtimeImage(retryFile);
   }, delayMs);
 
   realtimeRetryTimers.add(timer);
@@ -736,6 +756,10 @@ async function drainDriveRealtimeVideoQueue() {
   isDriveRealtimeVideoQueueRunning = true;
   try {
     while (realtimeVideoQueue.length > 0 && isRealTimeMode) {
+      if (realtimeImageQueue.length > 0) {
+        await drainDriveRealtimeImageQueue();
+        continue;
+      }
       const file = realtimeVideoQueue.shift();
       if (!file) continue;
       realtimeQueuedVideoFileIds.delete(file.id);
@@ -759,11 +783,75 @@ async function drainDriveRealtimeVideoQueue() {
       } finally {
         clearTimeout(_timeoutId);
       }
+
+      if (realtimeImageQueue.length > 0) {
+        await drainDriveRealtimeImageQueue();
+      }
+
+      // 让出事件循环，让新图片有机会插队
+      await new Promise(resolve => setTimeout(resolve, 0));
     }
   } finally {
     isDriveRealtimeVideoQueueRunning = false;
     if (realtimeVideoQueue.length > 0 && isRealTimeMode) {
       drainDriveRealtimeVideoQueue().catch(() => {});
+    }
+  }
+}
+
+async function drainDriveRealtimeImageQueue() {
+  if (isDriveRealtimeImageQueueRunning) return;
+  isDriveRealtimeImageQueueRunning = true;
+  try {
+    const IMAGE_TIMEOUT_MS = 60000;
+    while (realtimeImageQueue.length > 0 && isRealTimeMode) {
+      const file = realtimeImageQueue.shift();
+      if (!file) continue;
+      realtimeQueuedImageFileIds.delete(file.id);
+
+      let _timeoutId;
+      const fileTimeout = new Promise((_, reject) => {
+        _timeoutId = setTimeout(() => reject(new Error(`SYNC_TIMEOUT:${file.name}`)), IMAGE_TIMEOUT_MS);
+      });
+
+      try {
+        await Promise.race([handleDriveFile(file, true, null, null, 'realtime'), fileTimeout]);
+      } catch (fileError) {
+        const msg = String(fileError && fileError.message ? fileError.message : fileError || '');
+        const isTimeout = msg.startsWith('SYNC_TIMEOUT:') || msg.includes('超时');
+        if (isTimeout) {
+          safeSend({
+            type: 'large-file-download-failed',
+            reason: 'network-timeout',
+            count: 1,
+            primaryReason: 'network',
+            filenames: [file.name],
+            failures: [{ filename: file.name, reasonCode: 'network', detail: 'sync-timeout' }]
+          });
+          console.warn(`   ⚠️  [大文件] 下载/处理超时，保留云端文件避免丢失: ${file.name}`);
+        } else {
+          console.error(`   ❌ 实时图片处理失败: ${file.name} ${msg}`);
+          const reason = classifyLargeFileFailure(fileError);
+          if (reason.code !== 'unknown') {
+            safeSend({
+              type: 'large-file-download-failed',
+              reason: 'network-timeout',
+              count: 1,
+              primaryReason: reason.code,
+              filenames: [file.name],
+              failures: [{ filename: file.name, reasonCode: reason.code, detail: reason.detail }]
+            });
+          }
+        }
+        scheduleDriveRealtimeRetry(file, msg);
+      } finally {
+        clearTimeout(_timeoutId);
+      }
+    }
+  } finally {
+    isDriveRealtimeImageQueueRunning = false;
+    if (realtimeImageQueue.length > 0 && isRealTimeMode) {
+      drainDriveRealtimeImageQueue().catch(() => {});
     }
   }
 }
@@ -774,6 +862,7 @@ function cleanupFileRecord(fileId, md5Checksum = null) {
   // 文件一旦被处理过，即使云端删除成功/失败，都必须保留在 knownFileIds 中，
   // 否则下次轮询会把它当"新文件"再次同步，导致无限重复。
   processingFileIds.delete(fileId);
+  realtimeProcessingFileIds.delete(fileId);
   
   if (md5Checksum && knownFileMD5s.has(md5Checksum)) {
     const record = knownFileMD5s.get(md5Checksum);
@@ -991,11 +1080,7 @@ async function pollDrive() {
     if (newFiles.length > 0) {
       console.log(`🔄 [Drive] 检测到 ${newFiles.length} 个新文件，按时间顺序处理...`);
       
-      // 并发处理新文件（提高多图同步速度）
-      const IMAGE_TIMEOUT_MS = 60000; // 图片 60 秒
-      const downloadFailedFiles = []; // 记录失败明细（保留云端）
-      
-      // 分类：图片优先即时同步，录屏异步进入转换队列
+      // 分类：图片进入图片优先队列，录屏进入视频队列；两类内部都按时间顺序处理。
       const imageFiles = [];
       const videoFiles = [];
       for (const file of newFiles) {
@@ -1011,51 +1096,11 @@ async function pollDrive() {
       if (videoFiles.length > 0) {
         console.log(`   🎬 ${videoFiles.length} 段录屏进入后台转换队列（不阻塞图片同步）...`);
       }
-      
-      const processFile = async (file, timeoutMs) => {
-        let _fileTimeoutId;
-        const fileTimeout = new Promise((_, reject) => {
-          _fileTimeoutId = setTimeout(() => reject(new Error(`SYNC_TIMEOUT:${file.name}`)), timeoutMs);
-        });
-        try {
-          await Promise.race([handleDriveFile(file, true, null, null, 'realtime'), fileTimeout]);
-        } catch (fileError) {
-          const isTimeout = fileError.message.startsWith('SYNC_TIMEOUT:') || fileError.message.includes('超时');
-          if (isTimeout) {
-            const fNameLower = (file.name || '').toLowerCase();
-            const isVideoFile = fNameLower.endsWith('.mp4') || fNameLower.endsWith('.mov');
-            if (isVideoFile) {
-              console.warn(`   ⚠️  [Video→GIF] 视频转换超时，已保留源文件: ${file.name}`);
-            } else {
-              downloadFailedFiles.push({
-                filename: file.name,
-                reasonCode: 'network',
-                detail: 'sync-timeout'
-              });
-              console.warn(`   ⚠️  [大文件] 下载/处理超时，保留云端文件避免丢失: ${file.name}`);
-            }
-          } else {
-            console.error(`   ❌ 处理文件失败: ${file.name}`, fileError.message);
-            const reason = classifyLargeFileFailure(fileError);
-            if (reason.code !== 'unknown') {
-              downloadFailedFiles.push({
-                filename: file.name,
-                reasonCode: reason.code,
-                detail: reason.detail
-              });
-            }
-          }
-          scheduleDriveRealtimeRetry(file, fileError.message || 'realtime-failed');
-        } finally {
-          clearTimeout(_fileTimeoutId);
-        }
-      };
-      
-      // 图片优先：图片按时间顺序串行同步；视频进入后台队列继续按时间顺序转换。
+
       try {
         if (imageFiles.length > 0) {
           for (const imageFile of imageFiles) {
-            await processFile(imageFile, IMAGE_TIMEOUT_MS);
+            enqueueDriveRealtimeImage(imageFile);
           }
         }
         if (videoFiles.length > 0) {
@@ -1063,24 +1108,6 @@ async function pollDrive() {
         }
       } catch (timeoutError) {
         console.error('⚠️  批量处理超时，部分文件可能未处理完成');
-      }
-      
-      // 通知 Figma 插件：超大文件下载失败（云端文件已保留）
-      if (downloadFailedFiles.length > 0 && ws && ws.readyState === WebSocket.OPEN) {
-        const reasonCount = downloadFailedFiles.reduce((acc, f) => {
-          acc[f.reasonCode] = (acc[f.reasonCode] || 0) + 1;
-          return acc;
-        }, {});
-        const primaryReason = Object.entries(reasonCount).sort((a, b) => b[1] - a[1])[0][0];
-        ws.send(JSON.stringify({
-          type: 'large-file-download-failed',
-          reason: 'network-timeout',
-          count: downloadFailedFiles.length,
-          primaryReason,
-          filenames: downloadFailedFiles.map(f => f.filename),
-          failures: downloadFailedFiles
-        }));
-        console.log(`   📨 已通知插件：${downloadFailedFiles.length} 个超时文件下载失败（云端已保留）`);
       }
     }
     
@@ -1105,6 +1132,9 @@ async function handleDriveFile(file, deleteAfterSync = false, progressCb = null,
     return; // 静默跳过，不抛异常
   }
   processingFileIds.add(file.id);
+  if (syncSource === 'realtime') {
+    realtimeProcessingFileIds.add(file.id);
+  }
   let videoTempDir = null;
   let downloadedVideoPath = null;
   
@@ -1547,7 +1577,7 @@ async function handleDriveFile(file, deleteAfterSync = false, progressCb = null,
     throwIfAborted();
     
     const gifDims = isGif ? parseGifDimensions(processedBuffer) : null;
-    const useGifUrl = !!(isGif && gifCacheId && processedBuffer.length > LARGE_GIF_URL_THRESHOLD);
+    const useGifUrl = !!(isGif && gifCacheId);
     const gifUrl = useGifUrl
       ? `http://localhost:8888/gif-temp/${encodeURIComponent(gifCacheId)}?filename=${encodeURIComponent(file.name)}`
       : null;
@@ -1610,6 +1640,7 @@ async function handleDriveFile(file, deleteAfterSync = false, progressCb = null,
       try { fs.rmSync(videoTempDir, { recursive: true, force: true }); } catch (_) {}
     }
     processingFileIds.delete(file.id);
+    realtimeProcessingFileIds.delete(file.id);
   }
 }
 
@@ -1668,7 +1699,7 @@ async function countFilesForManualSync() {
       
       return mimeType.startsWith('image/') || mimeType.startsWith('video/') ||
              /\.(jpg|jpeg|png|gif|webp|heic|heif|mp4|mov)$/i.test(name);
-    });
+    }).filter(file => !realtimeProcessingFileIds.has(file.id));
     
     if (ws && ws.readyState === WebSocket.OPEN) {
       safeSend({
@@ -1679,6 +1710,89 @@ async function countFilesForManualSync() {
   } catch (error) {
     clearTimeout(_countTimeoutId);
     console.error('❌ [Drive] 统计文件失败:', error.message);
+  }
+}
+
+async function clearUserCloudFiles() {
+  if (isClearingUserCloudFiles) {
+    safeSend({
+      type: 'clear-user-cloud-files-done',
+      success: false,
+      count: 0,
+      message: '云文件清理正在进行中'
+    });
+    return;
+  }
+
+  if (!CONFIG.userFolderId) {
+    safeSend({
+      type: 'clear-user-cloud-files-done',
+      success: false,
+      count: 0,
+      message: '用户文件夹未初始化'
+    });
+    return;
+  }
+
+  const isBusy =
+    isSyncing ||
+    processingFileIds.size > 0 ||
+    realtimeProcessingFileIds.size > 0 ||
+    realtimeImageQueue.length > 0 ||
+    realtimeVideoQueue.length > 0 ||
+    isDriveRealtimeImageQueueRunning ||
+    isDriveRealtimeVideoQueueRunning;
+
+  if (isBusy) {
+    safeSend({
+      type: 'clear-user-cloud-files-done',
+      success: false,
+      count: 0,
+      message: '当前有同步任务进行中，请稍后重试'
+    });
+    return;
+  }
+
+  isClearingUserCloudFiles = true;
+  let clearedCount = 0;
+
+  try {
+    let pageToken = null;
+    const files = [];
+    do {
+      const { files: pageFiles, nextPageToken } = await listFolderFiles({
+        folderId: CONFIG.userFolderId,
+        pageSize: 1000,
+        orderBy: 'createdTime asc',
+        fields: 'files(id,name,mimeType,createdTime,modifiedTime,size,parents,md5Checksum),nextPageToken',
+        pageToken
+      });
+      if (Array.isArray(pageFiles) && pageFiles.length > 0) {
+        files.push(...pageFiles);
+      }
+      pageToken = nextPageToken || null;
+    } while (pageToken);
+
+    for (const file of files) {
+      if (!file || !file.id) continue;
+      await deleteDriveSourceFileWithFallback(file.id, file.name || 'unknown', file.md5Checksum || null);
+      clearedCount += 1;
+    }
+
+    safeSend({
+      type: 'clear-user-cloud-files-done',
+      success: true,
+      count: clearedCount
+    });
+  } catch (error) {
+    safeSend({
+      type: 'clear-user-cloud-files-done',
+      success: false,
+      count: clearedCount,
+      message: error && error.message ? error.message : String(error)
+    });
+  } finally {
+    isClearingUserCloudFiles = false;
   }
 }
 
@@ -1792,6 +1906,7 @@ async function performManualSync() {
     // 手动同步：只做媒体过滤，不做 MD5 去重
     // 原因：用户期望“云端有多少文件就同步多少文件”，即使内容相同也要全部计入
     const refreshedFiles = [];
+    let skippedRealtimeProcessingCount = 0;
     
     for (const file of files) {
       throwIfManualSyncAborted();
@@ -1803,6 +1918,12 @@ async function performManualSync() {
       const isMedia = mimeType.startsWith('image/') || mimeType.startsWith('video/') ||
                       /\.(jpg|jpeg|png|gif|webp|heic|heif|mp4|mov)$/i.test(name);
       if (!isMedia) continue;
+
+      if (realtimeProcessingFileIds.has(file.id)) {
+        skippedRealtimeProcessingCount++;
+        console.log(`   ⏭️  [手动同步] 跳过实时模式正在处理的文件: ${file.name} (${file.id})`);
+        continue;
+      }
       
       refreshedFiles.push(file);
     }
@@ -1814,7 +1935,8 @@ async function performManualSync() {
           type: 'manual-sync-complete',
           count: 0,
           gifCount: 0,
-          videoCount: 0
+          videoCount: 0,
+          skippedRealtimeProcessingCount
         });
       }
       return;
@@ -1859,6 +1981,8 @@ async function performManualSync() {
       (isVideoItem ? videoBatch : imageBatch).push(file);
     }
     const fileOrderMap = new Map(orderedFiles.map((file, idx) => [file.id, idx + 1]));
+    const manualPressure = getSystemPressure(mediaTuning);
+    const hasVeryLargeVideo = videoBatch.some(file => Math.max(0, Number(file.size || 0) / 1024 / 1024) >= 90);
     
     // 统一的单文件处理函数（按固定序号发送进度，避免 X/Y 跳动）
     const processOneFile = async (file, myIndex) => {
@@ -1886,12 +2010,13 @@ async function performManualSync() {
           throw createManualSyncCancelledError();
         }
         const filePct = Math.max(0, Math.min(100, Math.round(percent || 0)));
-        activeFileProgress.set(file.id, filePct);
+        const stableFilePct = Math.max(activeFileProgress.get(file.id) || 0, filePct);
+        activeFileProgress.set(file.id, stableFilePct);
         sendProgress('manual-sync-progress', {
           total: totalFiles, completed: completedCount,
           percent: getAggregatedManualPercent(),
           fileIndex: myIndex, filename: file.name,
-          filePercent: filePct, stage,
+          filePercent: stableFilePct, stage,
           isVideo: extra.isVideo === true || isVideoItem
         });
       };
@@ -1954,6 +2079,8 @@ async function performManualSync() {
           if (!isVideoFile2) {
             console.warn(`   ⚠️  [大文件] 手动同步下载/处理超时，保留云端文件: ${file.name}`);
           } else {
+            killAllChildProcesses();
+            _abortAllConversions = false;
             console.warn(`   ⚠️  [Video→GIF] 手动同步视频转换超时，已保留源文件: ${file.name}`);
           }
         }
@@ -1971,6 +2098,7 @@ async function performManualSync() {
     let skippedDuplicates = 0;
     let cancelled = false;
     const activeFileProgress = new Map();
+    let maxReportedManualPercent = 0;
 
     const getAggregatedManualPercent = () => {
       if (totalFiles <= 0) return 0;
@@ -1978,7 +2106,9 @@ async function performManualSync() {
       for (const pct of activeFileProgress.values()) {
         partialCompleted += Math.max(0, Math.min(100, Number(pct) || 0)) / 100;
       }
-      return Math.min(99, Math.max(0, Math.round(((completedCount + partialCompleted) / totalFiles) * 100)));
+      const nextPercent = Math.min(99, Math.max(0, Math.round(((completedCount + partialCompleted) / totalFiles) * 100)));
+      maxReportedManualPercent = Math.max(maxReportedManualPercent, nextPercent);
+      return maxReportedManualPercent;
     };
 
     const handleManualFileResult = (value, fileOrder, fileName) => {
@@ -2029,10 +2159,11 @@ async function performManualSync() {
       }
     };
 
-    await Promise.all([
-      runManualWorker(imageBatch),
-      runManualWorker(videoBatch)
-    ]);
+    console.log(`   ℹ️  [手动同步] 图片优先，随后处理视频: ${manualPressure.label}${hasVeryLargeVideo ? ', very-large-video' : ''}`);
+    await runManualWorker(imageBatch);
+    if (!cancelled) {
+      await runManualWorker(videoBatch);
+    }
 
     if (cancelled) {
       if (ws && ws.readyState === WebSocket.OPEN) {
@@ -2088,6 +2219,7 @@ async function performManualSync() {
         videoCount: 0,
         savedGifCount: savedGifCount,
         savedVideoCount: 0,
+        skippedRealtimeProcessingCount,
         errors: processingErrors
       };
       ws.send(JSON.stringify(message));
@@ -2179,8 +2311,12 @@ function releaseRuntimeResources(options = {}) {
   killAllChildProcesses();
   stopPolling();
   processingFileIds.clear();
+  realtimeProcessingFileIds.clear();
+  realtimeImageQueue.length = 0;
+  realtimeQueuedImageFileIds.clear();
   realtimeVideoQueue.length = 0;
   realtimeQueuedVideoFileIds.clear();
+  isDriveRealtimeImageQueueRunning = false;
   isDriveRealtimeVideoQueueRunning = false;
   manualSyncAbortRequested = false;
   pendingManualSync = false;
@@ -2322,6 +2458,11 @@ function connectWebSocket() {
 
       if (message.type === 'manual-sync') {
         await performManualSync();
+        return;
+      }
+
+      if (message.type === 'clear-user-cloud-files') {
+        await clearUserCloudFiles();
         return;
       }
 
