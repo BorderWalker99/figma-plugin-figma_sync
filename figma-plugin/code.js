@@ -1,6 +1,6 @@
 // code.js - 智能布局版本
-
-const PLUGIN_VERSION = '1.0.2'; // 插件版本号
+// 应用版本统一由 VERSION.txt 管理，通过 server-info 下发，此处仅缓存
+let appVersionFromServer = null;
 
 
 // 🛡️ 全局错误处理，防止切换文件时崩溃
@@ -1870,11 +1870,17 @@ figma.ui.onmessage = async (msg) => {
     return;
   }
   
-  // 处理插件版本信息请求
+  // 应用版本由服务器从 VERSION.txt 下发，收到 set-app-version 后缓存
+  if (msg.type === 'set-app-version' && msg.version != null) {
+    appVersionFromServer = String(msg.version).replace(/^v/, '');
+    return;
+  }
+
+  // 处理插件版本信息请求（版本与服务器一致，来自 VERSION.txt）
   if (msg.type === 'get-plugin-version') {
     figma.ui.postMessage({
       type: 'plugin-version-info',
-      version: PLUGIN_VERSION
+      version: appVersionFromServer || null
     });
     return;
   }

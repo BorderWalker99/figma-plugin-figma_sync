@@ -5063,12 +5063,14 @@
     
     // 兼容旧代码的变量（后续会逐步移除）
     let currentButtonState = null; // 'exported', 'video', 'gif-backup', or null - locks the pill state until user clicks
-    let currentPluginVersion = null; // 当前插件版本（初始为 null，等待 code.js 返回真实版本）
-    let latestPluginVersion = null; // 最新版本
-    let pluginUpdateUrl = null; // 更新下载地址
-    let dismissedPluginVersion = null; // 用户点击"稍后"后记录的版本
-    let dismissedServerVersion = null; // 用户点击"稍后"后记录的服务器版本
-    let pendingPluginUpdateInfo = null; // 暂存的插件更新信息（等待版本信息到达后处理）
+    let currentPluginVersion = null; // 当前插件版本（初始为 null，等待 code.js 返回真实版本；仅用于展示/诊断）
+    let latestPluginVersion = null; // 最新版本（兼容旧协议；更新提示不再依赖它）
+    let pluginUpdateUrl = null; // 更新下载地址（兼容旧协议）
+    let pendingPluginUpdateInfo = null; // 暂存的插件更新信息（等待版本信息到达后再做展示用途）
+
+    // ✅ 统一版本序号：只用一个 sequence 管理更新提示/忽略/已安装，避免“服务器/插件两套状态”错位
+    let installedAppVersionSeq = 0;
+    let dismissedAppVersionSeq = 0;
     
     // ✅ 新增：缓存手机同步的Video/大GIF的元数据（用于导出时自动关联）
     // 键：文件名，值：{ gifCacheId, driveFileId, ossFileId, timestamp }
@@ -5085,15 +5087,12 @@
       gifBackupCount = 0;
     }
     
-    // 从 localStorage 读取已安装的服务器版本（防止更新后 banner 再次弹出）
+    // 从 localStorage 读取已安装的 App 版本序号（防止更新后 banner 再次弹出）
     // 注意：Figma 插件环境可能不支持 localStorage，需要 try-catch 保护
-    let installedServerVersion = null;
     try {
-      installedServerVersion = localStorage.getItem('currentServerVersion') || null;
-      if (installedServerVersion) {
-      }
-    } catch (error) {
-    }
+      const storedSeq = Number(localStorage.getItem('currentAppVersionSeq') || '0');
+      installedAppVersionSeq = Number.isFinite(storedSeq) ? storedSeq : 0;
+    } catch (_) {}
     
     // 配置：定期检查更新的间隔（毫秒）
     const UPDATE_CHECK_INTERVAL = 60 * 60 * 1000; // 1小时检查一次
@@ -5506,6 +5505,11 @@
               // 移除占位符的特殊样式，使用普通文本样式
               pathEl.style.color = 'inherit';
             }
+          }
+          // 版本统一来自 VERSION.txt，服务器与插件共用
+          if (data.version) {
+            currentPluginVersion = String(data.version).replace(/^v/, '');
+            postToPlugin('set-app-version', { version: currentPluginVersion });
           }
         } else if (data.type === 'screenshot') {
           // ✅ 标记同步已开始（收到了服务器响应）
@@ -6035,6 +6039,8 @@
             if (settingsOverlay && settingsOverlay.classList.contains('show')) {
               scheduleSettingsModalLayout();
             }
+        } else if (data.type === 'update-info') {
+          handleUnifiedUpdateInfo(data);
         } else if (data.type === 'plugin-update-info') {
           // 处理插件更新信息
           handlePluginUpdateInfo(data);
@@ -7584,54 +7590,45 @@
       };
     }
     
-    // 全局变量：跟踪待更新的类型
-    let pendingUpdateType = null; // 'plugin' or 'server'
+    // 全局变量：统一更新信息（不再拆分 plugin/server）
+    let pendingUpdateType = 'app';
     let pendingUpdateData = {};
     
-    // 处理插件更新信息
+    function coerceSeq(value) {
+      const n = Number(value || 0);
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    }
+
+    // 统一处理更新信息（新版：update-info；旧版：server-update-info / plugin-update-info）
+    function handleUnifiedUpdateInfo(data) {
+      if (!data || !data.hasUpdate) return;
+
+      // 新协议优先：seq；旧协议降级：用版本号比较（不再持久化版本字符串）
+      const latestSeq = coerceSeq(data.latestSeq);
+      const currentSeq = coerceSeq(data.currentSeq);
+      const runtimeSeq = currentSeq || installedAppVersionSeq || 0;
+      if (latestSeq && runtimeSeq && latestSeq <= runtimeSeq) return;
+
+      const shouldShow = !dismissedAppVersionSeq || (latestSeq ? latestSeq > dismissedAppVersionSeq : true);
+      if (!shouldShow) return;
+
+      pendingUpdateType = 'app';
+      pendingUpdateData = data;
+      showUpdateBanner('app', data.currentVersion, data.latestVersion);
+    }
+
+    // 处理插件更新信息（旧协议兼容：仅用于拿到字段后走统一逻辑）
     function handlePluginUpdateInfo(data) {
-      latestPluginVersion = data.latestVersion;
-      pluginUpdateUrl = data.updateUrl;
-      
-      // 如果还没有收到真实的插件版本信息，暂存更新信息，等待版本信息到达后再处理
+      latestPluginVersion = data && data.latestVersion ? data.latestVersion : latestPluginVersion;
+      pluginUpdateUrl = data && data.updateUrl ? data.updateUrl : pluginUpdateUrl;
       if (currentPluginVersion === null) {
         pendingPluginUpdateInfo = data;
-        return;
       }
-      
-      // 比较版本号
-      if (data.hasUpdate && compareVersions(latestPluginVersion, currentPluginVersion) > 0) {
-        // 检查是否是用户已经点击"稍后"忽略的版本
-        const shouldShow = !dismissedPluginVersion || compareVersions(latestPluginVersion, dismissedPluginVersion) > 0;
-        
-        if (shouldShow) {
-          // 有新版本，且不是用户已忽略的版本，显示顶部通知条
-          pendingUpdateType = 'plugin';
-          pendingUpdateData = data;
-          showUpdateBanner('plugin', currentPluginVersion, latestPluginVersion);
-        }
-      }
+      handleUnifiedUpdateInfo(data);
     }
     
-    // 处理服务器更新信息
     function handleServerUpdateInfo(data) {
-      if (data.hasUpdate) {
-        // 以服务器实时上报版本为准，避免 localStorage 历史值导致误判
-        const runtimeCurrentVersion = data.currentVersion || installedServerVersion || null;
-        if (runtimeCurrentVersion && compareVersions(data.latestVersion, runtimeCurrentVersion) <= 0) {
-          return;
-        }
-        
-        // 检查是否是用户已经点击"稍后"忽略的版本
-        const shouldShow = !dismissedServerVersion || compareVersions(data.latestVersion, dismissedServerVersion) > 0;
-        
-        if (shouldShow) {
-          // 如果已经有插件更新待处理，服务器更新优先
-            pendingUpdateType = 'server';
-          pendingUpdateData = data;
-          showUpdateBanner('server', data.currentVersion, data.latestVersion);
-        }
-      }
+      handleUnifiedUpdateInfo(data);
     }
     
     // 显示顶部更新通知条（统一显示，不区分插件/服务器）
@@ -7683,9 +7680,10 @@
       }
     }
     
-    // 处理插件版本信息
+    // 处理插件版本信息（插件侧版本已与服务器一致，均来自 VERSION.txt）
     function handlePluginVersionInfo(data) {
-      currentPluginVersion = data.version || '1.0.0';
+      if (data.version != null && data.version !== '')
+        currentPluginVersion = String(data.version).replace(/^v/, '');
       
       // 如果有暂存的更新信息，现在可以处理了
       if (pendingPluginUpdateInfo) {
@@ -7831,13 +7829,14 @@
           }, 500);
         }
         
-        // 保存当前版本号到 localStorage，防止 banner 再次弹出
-        if (data.latestVersion) {
-          installedServerVersion = data.latestVersion.replace(/^v/, '');
-          try {
-            localStorage.setItem('currentServerVersion', installedServerVersion);
-          } catch (error) {
-          }
+        // 保存当前版本序号到 localStorage，防止 banner 再次弹出（统一序号，不再拆分 server/plugin）
+        const latestSeq = (() => {
+          const candidate = Number(data.latestSeq || (pendingUpdateData && pendingUpdateData.latestSeq) || 0);
+          return Number.isFinite(candidate) && candidate > 0 ? candidate : 0;
+        })();
+        if (latestSeq) {
+          installedAppVersionSeq = latestSeq;
+          try { localStorage.setItem('currentAppVersionSeq', String(installedAppVersionSeq)); } catch (_) {}
         }
         
         // 隐藏更新通知条 (延迟一点以便用户看到“更新完成”)
@@ -7853,8 +7852,7 @@
         // 清除待更新标记和忽略记录
         pendingUpdateType = null;
         pendingUpdateData = {};
-        dismissedPluginVersion = null;
-        dismissedServerVersion = null;
+        dismissedAppVersionSeq = 0;
         
         // 3秒后提示用户重启插件
         if (data.unlockRequired) {
@@ -8252,11 +8250,10 @@
     if (updateBannerCloseBtn) {
       updateBannerCloseBtn.onclick = function() {
         // 记录用户忽略的版本，避免重复提示同一版本
-        if (pendingUpdateType === 'plugin' && latestPluginVersion) {
-          dismissedPluginVersion = latestPluginVersion;
-        } else if (pendingUpdateType === 'server' && pendingUpdateData.latestVersion) {
-          dismissedServerVersion = pendingUpdateData.latestVersion;
-        }
+        dismissedAppVersionSeq = (function() {
+          const candidate = Number(pendingUpdateData && pendingUpdateData.latestSeq ? pendingUpdateData.latestSeq : 0);
+          return Number.isFinite(candidate) && candidate > 0 ? candidate : dismissedAppVersionSeq;
+        })();
         
         hideUpdateBanner();
       };

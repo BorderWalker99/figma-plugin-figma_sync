@@ -126,13 +126,11 @@ delete_higher_remote_versions() {
     fi
 }
 
-# 获取当前版本
-CURRENT_PLUGIN_VERSION=$(grep -o "PLUGIN_VERSION = '[^']*'" figma-plugin/code.js | cut -d"'" -f2)
-CURRENT_SERVER_VERSION=$(grep -o "版本: [^ ]*" VERSION.txt | awk '{print $2}')
+# 获取当前版本（统一来自 VERSION.txt）
+CURRENT_VERSION=$(grep -E '^(版本|Version)\s*:\s*' VERSION.txt | head -1 | sed -E 's/^(版本|Version)[[:space:]]*:[[:space:]]*//' | tr -d '\r\n')
 
 echo -e "${BLUE}📦 当前版本信息：${NC}"
-echo -e "   插件版本: ${GREEN}v${CURRENT_PLUGIN_VERSION}${NC}"
-echo -e "   服务器版本: ${GREEN}v${CURRENT_SERVER_VERSION}${NC}\n"
+echo -e "   应用版本 (VERSION.txt): ${GREEN}v${CURRENT_VERSION}${NC}\n"
 
 # 提示输入新版本号
 echo -e "${YELLOW}请输入新版本号（格式: x.y.z，如 1.0.1）：${NC}"
@@ -190,9 +188,10 @@ echo ""
 # ==================== 步骤 1: 更新版本号 ====================
 echo -e "${BLUE}📝 步骤 1/5: 更新版本号...${NC}"
 
-# 更新插件版本号 (code.js)
-sed -i '' "s/PLUGIN_VERSION = '[^']*'/PLUGIN_VERSION = '${NEW_VERSION}'/g" figma-plugin/code.js
-echo -e "   ${GREEN}✅ figma-plugin/code.js 版本号已更新: v${NEW_VERSION}${NC}"
+# 更新应用版本（唯一来源：VERSION.txt，服务器与插件共用）
+sed -i '' "s/版本: .*/版本: ${NEW_VERSION}/g" VERSION.txt
+sed -i '' "s/更新日期: .*/更新日期: $(date +"%Y-%m-%d")/g" VERSION.txt
+echo -e "   ${GREEN}✅ VERSION.txt 已更新: v${NEW_VERSION}${NC}"
 
 # 更新 package.json 版本号
 sed -i '' "1,10s/\"version\": \"[^\"]*\"/\"version\": \"${NEW_VERSION}\"/" package.json
@@ -202,11 +201,6 @@ echo -e "   ${GREEN}✅ package.json 版本号已更新: v${NEW_VERSION}${NC}"
 sed -i '' "1,10s/\"version\": \"[^\"]*\"/\"version\": \"${NEW_VERSION}\"/" installer/package.json
 sed -i '' "s/v[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*/v${NEW_VERSION}/g" installer/index.html
 echo -e "   ${GREEN}✅ Electron 安装器版本号已更新: v${NEW_VERSION}${NC}"
-
-# 更新服务器版本号 (VERSION.txt)
-sed -i '' "s/版本: .*/版本: ${NEW_VERSION}/g" VERSION.txt
-sed -i '' "s/更新日期: .*/更新日期: $(date +"%Y-%m-%d")/g" VERSION.txt
-echo -e "   ${GREEN}✅ 服务器版本号已更新: v${NEW_VERSION}${NC}"
 
 # ==================== 步骤 2: 打包 ====================
 echo -e "\n${BLUE}📦 步骤 2/5: 打包插件和服务器...${NC}"

@@ -4535,7 +4535,8 @@ wss.on('connection', (ws, req) => {
     // 同步模式切换消息处理
     if (data.type === 'switch-sync-mode' || data.type === 'get-sync-mode' || data.type === 'get-user-id' || data.type === 'get-server-info') {
       if (data.type === 'get-server-info') {
-        sendToFigma(targetGroup, { type: 'server-info', path: path.resolve(__dirname) });
+        const appVersion = getCurrentServerVersion ? getCurrentServerVersion() : null;
+        sendToFigma(targetGroup, { type: 'server-info', path: path.resolve(__dirname), version: appVersion || null });
       } else if (data.type === 'get-user-id') {
         sendToFigma(targetGroup, { type: 'user-id-info', userId: getUserId() });
       } else if (data.type === 'get-sync-mode') {
@@ -4894,7 +4895,7 @@ const _staleWsSweepTimer = setInterval(() => {
 
 
 // ─── Update System (extracted to update-handlers.js) ─────────────────────────
-const { checkAndNotifyUpdates, handlePluginUpdate, handleServerUpdate, handleFullUpdate } = require('./update-handlers')({ sendToFigma, WebSocket });
+const { checkAndNotifyUpdates, getCurrentServerVersion, handlePluginUpdate, handleServerUpdate, handleFullUpdate } = require('./update-handlers')({ sendToFigma, WebSocket });
 
 
 const PORT = process.env.PORT || 8888;

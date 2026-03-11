@@ -92,6 +92,23 @@ async function checkAndNotifyUpdates(targetGroup, connectionId) {
     // 单一版本源：统一使用 VERSION.txt 作为当前已安装版本
     const currentServerVersion = getCurrentServerVersion();
     const latestVersion = releaseInfo.tag_name.replace(/^v/, '');
+
+    const versionToSeq = (v) => {
+      if (!v) return 0;
+      const clean = String(v).trim().replace(/^v/i, '').split('-')[0];
+      const parts = clean.split('.').map(p => {
+        const m = String(p).match(/\d+/);
+        return m ? Number(m[0]) : 0;
+      });
+      const major = parts[0] || 0;
+      const minor = parts[1] || 0;
+      const patch = parts[2] || 0;
+      // 1.2.3 -> 1,002,003 (stable ordering)
+      return (major * 1000000) + (minor * 1000) + patch;
+    };
+
+    const currentSeq = versionToSeq(currentServerVersion);
+    const latestSeq = versionToSeq(latestVersion);
     
     // 检测当前系统架构，查找对应的服务器更新包
     const arch = process.arch; // 'arm64' for Apple Silicon, 'x64' for Intel
@@ -108,20 +125,27 @@ async function checkAndNotifyUpdates(targetGroup, connectionId) {
       );
     }
     
-    // 统一更新判断：仅比较 latestVersion 与 VERSION.txt
+    // 统一更新判断：仅比较 latestVersion 与 VERSION.txt（并提供 seq 给前端做单一序号判断）
     if (serverAsset) {
       const serverNeedsUpdate = !currentServerVersion || compareVersions(latestVersion, currentServerVersion) > 0;
       
       if (serverNeedsUpdate) {
-        sendToFigma(targetGroup, {
-          type: 'server-update-info',
+        const payload = {
           latestVersion: latestVersion,
           currentVersion: currentServerVersion || '未知',
+          latestSeq,
+          currentSeq,
           updateUrl: releaseInfo.html_url,
           releaseNotes: releaseInfo.body || '',
           hasUpdate: true,
-          downloadUrl: serverAsset.browser_download_url
-        });
+          downloadUrl: serverAsset.browser_download_url,
+          connectionId: connectionId || null
+        };
+
+        // 新协议：统一 update-info（单一序号）
+        sendToFigma(targetGroup, { type: 'update-info', ...payload });
+        // 旧协议兼容：仍发送 server-update-info
+        sendToFigma(targetGroup, { type: 'server-update-info', ...payload });
       }
     }
     
@@ -134,13 +158,12 @@ async function checkAndNotifyUpdates(targetGroup, connectionId) {
   }
 }
 
-// 获取当前服务器版本
+// 获取当前应用版本（服务器与插件共用，唯一来源：VERSION.txt 中的「版本」字段）
 function getCurrentServerVersion() {
   try {
     const versionFile = path.join(__dirname, 'VERSION.txt');
     if (fs.existsSync(versionFile)) {
       const content = fs.readFileSync(versionFile, 'utf8');
-      // 兼容中文/英文版本字段（历史包中可能是 Version:）
       const match = content.match(/(?:版本|Version)\s*:\s*([^\n]+)/i);
       return match ? match[1].trim() : null;
     }
