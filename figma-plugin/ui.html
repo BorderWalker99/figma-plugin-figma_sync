@@ -5513,6 +5513,10 @@
           pendingStates.savedGif.active = true;
           pendingStates.savedGif.count = gifBackupCount;
           currentButtonState = 'gif-backup';
+          finishRealtimeConversionUI('local-gif-saved', {
+            filename: data.filename || '',
+            trace: false
+          });
           updateStatus('connected', '');
         } else if (data.type === 'file-skipped') {
           // ✅ 标记同步已开始（收到了服务器响应）
@@ -5564,6 +5568,10 @@
           }
           
           // ✅ 触发状态更新，显示video状态pill
+          finishRealtimeConversionUI('file-skipped', {
+            filename: data.filename || '',
+            trace: false
+          });
           updateStatus('connected', '');
         } else if (data.type === 'conversion-progress') {
           // 手动同步期间不显示实时转换进度环（由 manual-sync-progress 统一显示）
@@ -6143,6 +6151,7 @@
 
     const _gifImportTimedOutFilenames = new Set();
     const GIF_IMPORT_TIMEOUT_TRACK_MAX = 300;
+    let lastRealtimeProgressTraceKey = '';
 
     function trackGifImportTimeout(filename) {
       if (!filename) return false;
@@ -6156,6 +6165,49 @@
       return true;
     }
 
+    function traceRealtimeSync(message, level = 'log', mirrorToLog = false) {
+      const text = `[实时同步追踪] ${message}`;
+      try {
+        if (level === 'error') console.error(text);
+        else if (level === 'warn') console.warn(text);
+        else console.log(text);
+      } catch (_) {}
+      if (mirrorToLog) {
+        try { log(text); } catch (_) {}
+      }
+    }
+
+    function resetRealtimeProgressTracking() {
+      lastRealtimeProgressTraceKey = '';
+    }
+
+    function finishRealtimeConversionUI(reason, options = {}) {
+      const subtitle = document.getElementById('realtimeConversionSubtitle');
+      const hadVisibleSubtitle = !!(subtitle && subtitle.style.display !== 'none' && subtitle.textContent !== '');
+      const filename = options.filename || '';
+      const level = options.level || 'log';
+
+      if (convHideTimer) {
+        clearTimeout(convHideTimer);
+        convHideTimer = null;
+      }
+
+      hideRealtimeConversionSubtitle();
+      resetRealtimeProgressTracking();
+
+      currentFileId = null;
+      currentFileIdType = null;
+      currentFileBackedUp = false;
+
+      if (options.trace !== false && (hadVisibleSubtitle || options.forceTrace)) {
+        traceRealtimeSync(
+          `${reason}${filename ? `: ${filename}` : ''}`,
+          level,
+          options.mirrorToLog === true
+        );
+      }
+    }
+
     function handleScreenshot(data) {
       log(`📸 ${data.filename || '截图'}`);
       
@@ -6167,9 +6219,17 @@
       const isGifFile = fnLower.endsWith('.gif');
       const hasGifUrl = typeof data.gifUrl === 'string' && data.gifUrl.length > 0;
       const isGifPayload = !!data.isGif || isGifFile || hasGifUrl;
+      const shouldTraceRealtime = !!(data.taskId || data.syncSource === 'realtime');
 
       // GIF 不再自动放入 Figma：仅保留本地保存计数提示（connection pill）。
       if (isGifPayload) {
+        if (shouldTraceRealtime) {
+          traceRealtimeSync(
+            `收到 GIF payload: ${data.filename || '未命名文件'} (${hasGifUrl ? 'gifUrl' : 'bytes'}${data.taskId ? `, task=${data.taskId}` : ''})`,
+            'log',
+            true
+          );
+        }
         if (ws && ws.readyState === WebSocket.OPEN) {
           const driveFileId = data.driveFileId || (currentFileIdType === 'drive' ? currentFileId : null);
           const ossFileId = data.ossFileId || (currentFileIdType === 'oss' ? currentFileId : null);
@@ -6184,14 +6244,22 @@
               if (ossFileId) confirmMessage.ossFileId = ossFileId;
               if (driveFileId) confirmMessage.driveFileId = driveFileId;
               ws.send(JSON.stringify(confirmMessage));
+              if (shouldTraceRealtime) {
+                traceRealtimeSync(
+                  `已发送 GIF ACK: ${data.filename || '未命名文件'}${data.taskId ? ` (${data.taskId})` : ''}`,
+                  'log',
+                  true
+                );
+              }
             } catch (error) {
               console.error('❌ GIF 确认发送失败:', error);
             }
           }
         }
-        currentFileId = null;
-        currentFileIdType = null;
-        currentFileBackedUp = false;
+        finishRealtimeConversionUI('gif-payload-acked', {
+          filename: data.filename || '',
+          trace: false
+        });
         return;
       }
 
@@ -9047,12 +9115,17 @@
         if (trackGifImportTimeout(timeoutFilename)) {
           const timeoutMs = Number(msg.timeoutMs) || 8000;
           log(`⚠️  GIF 放入画板超时 (${Math.round(timeoutMs / 1000)}秒)，请从本地备份拖入: ${timeoutFilename}`);
+          traceRealtimeSync(`插件导入超时: ${timeoutFilename} (${Math.round(timeoutMs / 1000)}s)`, 'warn', true);
           showToast(currentLang === 'zh' ? 'GIF过大，请从本地拖入' : 'GIF too large, auto-import timed out. Please drag from local backup.', 'warning');
 
           if (msg.gifCacheId) {
             wsSend('force-save-gif', { gifCacheId: msg.gifCacheId, filename: timeoutFilename });
           }
         }
+        finishRealtimeConversionUI('plugin-import-timeout', {
+          filename: timeoutFilename,
+          trace: false
+        });
       } else if (msg.type === 'screenshot-added') {
         const addedFilename = msg.filename || '';
         const wasTimedOut = _gifImportTimedOutFilenames.has(addedFilename);
@@ -9130,6 +9203,10 @@
             }
           }
         }
+        finishRealtimeConversionUI(msg.success ? 'plugin-import-success' : 'plugin-import-failed', {
+          filename: addedFilename,
+          trace: false
+        });
       } else if (msg.type === 'file-needs-manual-drag') {
         manualDragCount++;
         // Don't reset state - let currentButtonState handle locking
@@ -9162,6 +9239,11 @@
             console.error('发送失败消息失败:', error);
           }
         }
+        traceRealtimeSync(`需手动拖入: ${msg.filename || '未命名文件'}${msg.taskId ? ` (${msg.taskId})` : ''}`, 'warn', true);
+        finishRealtimeConversionUI('manual-drag-required', {
+          filename: msg.filename || '',
+          trace: false
+        });
         updateStatus('connected', '');
       } else if (msg.type === 'size-settings-loaded') {
         if (msg.width) imageWidthInput.value = msg.width;
@@ -9711,6 +9793,7 @@
       if (!subtitle) return;
       subtitle.style.display = 'none';
       subtitle.textContent = '';
+      resetRealtimeProgressTracking();
     }
     
     function handleConversionProgress(data) {
@@ -9724,12 +9807,27 @@
       
       const percent = getLinearizedStagePercent(data, data.percent);
       const prefix = currentLang === 'zh' ? '正在转换 GIF' : 'Converting GIF';
+      const traceKey = `${data.taskId || ''}|${data.filename || ''}|${data.stage || ''}|${data.isVideo ? 'video' : 'image'}`;
+
+      if (traceKey !== lastRealtimeProgressTraceKey) {
+        lastRealtimeProgressTraceKey = traceKey;
+        traceRealtimeSync(
+          `进度阶段: ${data.filename || '未命名文件'} -> ${data.stage || 'unknown'} ${percent}%${data.taskId ? ` (${data.taskId})` : ''}`,
+          'log',
+          data.stage === 'importing'
+        );
+      }
       
       if (data.stage === 'done') {
         subtitle.style.display = '';
         subtitle.textContent = `${prefix} 100%`;
         if (convHideTimer) clearTimeout(convHideTimer);
-        convHideTimer = setTimeout(() => { hideRealtimeConversionSubtitle(); }, 1200);
+        convHideTimer = setTimeout(() => {
+          finishRealtimeConversionUI('conversion-done', {
+            filename: data.filename || '',
+            trace: false
+          });
+        }, 1200);
         return;
       }
       

@@ -1600,6 +1600,7 @@ async function handleDriveFile(file, deleteAfterSync = false, progressCb = null,
     };
 
     throwIfAborted();
+    console.log(`   📤 [Drive同步] 已发送到 Figma: ${file.name} (${gifUrl ? 'gifUrl' : 'bytes'}${looksLikeVideo ? ', video-flow' : ''})`);
     if (deleteAfterSync && file && file.id) {
       pendingDeletes.set(file.id, {
         filename: file.name,
@@ -2388,6 +2389,7 @@ function connectWebSocket() {
       if (message.type === 'screenshot-received') {
         const filename = message.filename;
         const driveFileId = message.driveFileId || message.fileId;
+        console.log(`   🧭 [Drive确认] 已收到 Figma 确认: ${filename}${driveFileId ? ` (${driveFileId})` : ''}`);
         
         // 检查文件是否已经被标记为保留（通过 screenshot-failed 消息）
         // 如果文件不在 pendingDeletes 中，说明已经被标记为保留，不应该删除

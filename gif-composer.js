@@ -1159,8 +1159,11 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
     const hasTimelineEdits = timelineData && Object.keys(timelineData).length > 0 &&
                              Object.values(timelineData).some(range => range.start > 0 || range.end < 100);
 
-    // 仅基于“参与导出的图层 + 真正被编辑的区间”计算时间线覆盖范围，
-    // 避免 timelineData 中默认 0-100 图层把裁剪范围拉回全长，导致无图层段黑屏。
+    // 基于“所有参与导出的图层实际覆盖区间”计算时间线裁剪范围。
+    // 关键点：
+    // 1. 未编辑的图层默认视为 0-100 持续可见，不能因为某个标记层被缩短，
+    //    就把整条 GIF 误裁成前几帧。
+    // 2. 只有当所有参与导出的图层共同指向更窄的覆盖范围时，才收窄导出区间。
     const getEffectiveTimelineTrimPercent = () => {
       if (!hasTimelineEdits || !timelineData) {
         return { start: 0, end: 100, hasEditedCoverage: false };
@@ -1177,32 +1180,45 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
         annotationLayerPaths.forEach(l => { if (l && l.layerId) exportLayerIds.add(l.layerId); });
       }
 
-      const editedRanges = [];
-      for (const [layerId, rawRange] of Object.entries(timelineData)) {
-        if (!rawRange) continue;
-        if (exportLayerIds.size > 0 && !exportLayerIds.has(layerId)) continue;
+      const coverageRanges = [];
+      let hasAnyEditedLayer = false;
 
-        const startNum = Number(rawRange.start);
-        const endNum = Number(rawRange.end);
-        if (!Number.isFinite(startNum) || !Number.isFinite(endNum)) continue;
-
-        const start = Math.max(0, Math.min(100, startNum));
-        const end = Math.max(0, Math.min(100, endNum));
-        if (end <= start) continue;
-
-        // 只看实际编辑过的区间，默认 0-100 不参与裁剪覆盖计算
-        if (start > 0 || end < 100) {
-          editedRanges.push({ start, end });
-        }
+      if (exportLayerIds.size === 0) {
+        return { start: 0, end: 100, hasEditedCoverage: false };
       }
 
-      if (editedRanges.length === 0) {
+      for (const layerId of exportLayerIds) {
+        const rawRange = timelineData[layerId];
+        let start = 0;
+        let end = 100;
+
+        if (rawRange) {
+          const startNum = Number(rawRange.start);
+          const endNum = Number(rawRange.end);
+          if (Number.isFinite(startNum) && Number.isFinite(endNum)) {
+            start = Math.max(0, Math.min(100, startNum));
+            end = Math.max(0, Math.min(100, endNum));
+          }
+        }
+
+        if (end <= start) continue;
+        if (start > 0 || end < 100) hasAnyEditedLayer = true;
+        coverageRanges.push({ start, end });
+      }
+
+      if (coverageRanges.length === 0 || !hasAnyEditedLayer) {
+        return { start: 0, end: 100, hasEditedCoverage: false };
+      }
+
+      const coverageStart = Math.min(...coverageRanges.map(r => r.start));
+      const coverageEnd = Math.max(...coverageRanges.map(r => r.end));
+      if (!(coverageEnd > coverageStart) || (coverageStart <= 0 && coverageEnd >= 100)) {
         return { start: 0, end: 100, hasEditedCoverage: false };
       }
 
       return {
-        start: Math.min(...editedRanges.map(r => r.start)),
-        end: Math.max(...editedRanges.map(r => r.end)),
+        start: coverageStart,
+        end: coverageEnd,
         hasEditedCoverage: true
       };
     };
@@ -1304,12 +1320,18 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
         const pipeOrigH = pipeMeta.height;
         let pipeTotalFrames = pipeMeta.frameCount || 1;
         let pipeOutputFps = pipeMeta.exactFps || 20;
+        const pipeSourceDurationSec = Math.max(
+          0.01,
+          Number(pipeMeta.totalDuration) || (pipeTotalFrames / Math.max(0.1, pipeMeta.exactFps || 20)) || 0.01
+        );
         
         reportProgress(15, '正在构建 FFmpeg 合成管道...');
 
         // 基于有效时间线覆盖裁掉头尾无图层段，避免导出黑屏
         let pipeTrimStartFrame = 0;
         let pipeTrimEndFrame = Math.max(0, (pipeTotalFrames || 1) - 1);
+        let pipeTrimStartSec = 0;
+        let pipeTrimEndSec = pipeSourceDurationSec;
         let applyPipeTrim = false;
         if (pipeTotalFrames > 1) {
           const effectiveTrim = getEffectiveTimelineTrimPercent();
@@ -1322,11 +1344,13 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
             if (ef >= sf) {
               pipeTrimStartFrame = sf;
               pipeTrimEndFrame = ef;
+              pipeTrimStartSec = Math.max(0, pipeSourceDurationSec * (effectiveTrim.start / 100));
+              pipeTrimEndSec = Math.min(pipeSourceDurationSec, pipeSourceDurationSec * (effectiveTrim.end / 100));
               applyPipeTrim = true;
             }
           }
         }
-        const pipeOutputFrames = applyPipeTrim
+        const pipeSourceFramesAfterTrim = applyPipeTrim
           ? (pipeTrimEndFrame - pipeTrimStartFrame + 1)
           : pipeTotalFrames;
 
@@ -1334,10 +1358,15 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
         const adaptivePipeMode = getAdaptiveProfile({
           preSizeMB: pipeSourceStats ? (pipeSourceStats.size / (1024 * 1024)) : 0,
           decisionSizeMB: Number.isFinite(gifInfo.sourceSizeMB) ? gifInfo.sourceSizeMB : null,
-          frameCount: pipeOutputFrames || pipeTotalFrames || 0,
+          frameCount: pipeSourceFramesAfterTrim || pipeTotalFrames || 0,
           hasVideoLayers: hasVideo
         });
         pipeOutputFps = Math.max(1, Math.min(pipeOutputFps, adaptivePipeMode.videoFpsCap));
+        const pipeTrimmedDurationSec = Math.max(
+          1 / Math.max(1, pipeOutputFps),
+          applyPipeTrim ? Math.max(0.001, pipeTrimEndSec - pipeTrimStartSec) : pipeSourceDurationSec
+        );
+        const pipeOutputFrames = Math.max(1, Math.ceil(pipeTrimmedDurationSec * pipeOutputFps));
         
         // ── 构建 FFmpeg 滤镜图 ──────────────────────────────────────
         const ffInputs = [];
@@ -1494,12 +1523,11 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
         if (hasTimelineEdits && timelineData && timelineData[gifInfo.layerId] && pipeTotalFrames > 1) {
           const gifRange = timelineData[gifInfo.layerId];
           if (gifRange.start > 0 || gifRange.end < 100) {
-            const pipeDen = Math.max(1, pipeTotalFrames - 1);
-            const gsf = Math.max(0, Math.ceil((gifRange.start / 100) * pipeDen));
-            const gef = Math.min(pipeTotalFrames - 1, Math.floor((gifRange.end / 100) * pipeDen));
+            const gsfSec = Math.max(0, pipeSourceDurationSec * (gifRange.start / 100));
+            const gefSec = Math.min(pipeSourceDurationSec, pipeSourceDurationSec * (gifRange.end / 100));
             // 预计算帧区间，避免每帧做除法表达式导致性能下降
-            gifEnableExpr = gef >= gsf
-              ? `:enable='between(n\\,${gsf}\\,${gef})'`
+            gifEnableExpr = gefSec > gsfSec
+              ? `:enable='between(t\\,${gsfSec.toFixed(6)}\\,${gefSec.toFixed(6)})'`
               : `:enable='0'`;
           }
         }
@@ -1568,11 +1596,10 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
           const tlIdx = inputIdx++;
           
           const tlRange = timelineData[tlLayer.layerId];
-          const pipeDen = Math.max(1, pipeTotalFrames - 1);
-          const sf = Math.max(0, Math.ceil((tlRange.start / 100) * pipeDen));
-          const ef = Math.min(pipeTotalFrames - 1, Math.floor((tlRange.end / 100) * pipeDen));
-          const enableExpr = ef >= sf
-            ? `:enable='between(n\\,${sf}\\,${ef})'`
+          const sfSec = Math.max(0, pipeSourceDurationSec * (tlRange.start / 100));
+          const efSec = Math.min(pipeSourceDurationSec, pipeSourceDurationSec * (tlRange.end / 100));
+          const enableExpr = efSec > sfSec
+            ? `:enable='between(t\\,${sfSec.toFixed(6)}\\,${efSec.toFixed(6)})'`
             : `:enable='0'`;
           
           const next = `tl${tli}`;
@@ -1582,10 +1609,11 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
         }
         
         if (applyPipeTrim) {
-          const trimEndExclusive = pipeTrimEndFrame + 1;
-          filterParts.push(`[${prevStream}]trim=start_frame=${pipeTrimStartFrame}:end_frame=${trimEndExclusive},setpts=PTS-STARTPTS[trimmed]`);
+          filterParts.push(`[${prevStream}]trim=start=${pipeTrimStartSec.toFixed(6)}:end=${pipeTrimEndSec.toFixed(6)},setpts=PTS-STARTPTS[trimmed]`);
           prevStream = 'trimmed';
         }
+        filterParts.push(`[${prevStream}]fps=${pipeOutputFps}[timed]`);
+        prevStream = 'timed';
 
         // 🚀 三步走：消除 split 内存瓶颈
         // 旧方案: split 缓冲全部帧到内存（178帧×860×1864×4×2 ≈ 2.3GB），导致超慢
@@ -1614,7 +1642,7 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
           const attemptProfile = getAdaptiveProfile({
             preSizeMB: pipeSourceStats ? (pipeSourceStats.size / (1024 * 1024)) : 0,
             decisionSizeMB: Number.isFinite(gifInfo.sourceSizeMB) ? gifInfo.sourceSizeMB : null,
-            frameCount: pipeOutputFrames || pipeTotalFrames || 0,
+            frameCount: pipeOutputFrames || pipeSourceFramesAfterTrim || pipeTotalFrames || 0,
             hasVideoLayers: hasVideo
           }, attemptIndex);
           const effectiveDither = attemptProfile.effectiveDither || ditherMode;
@@ -1652,7 +1680,7 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
           const adaptivePipe = getAdaptiveProfile({
             preSizeMB: pipePreStats.size / (1024 * 1024),
             decisionSizeMB: Number.isFinite(gifInfo.sourceSizeMB) ? gifInfo.sourceSizeMB : null,
-            frameCount: pipeOutputFrames || 0,
+            frameCount: pipeOutputFrames || pipeSourceFramesAfterTrim || 0,
             hasVideoLayers: hasVideo
           });
           const gifsicleTimeout = Math.max(60000, Math.ceil(pipePreStats.size / (1024 * 1024)) * Math.min(adaptivePipe.gifsicleTimeoutPerMbMs, optimizedPipeProfile.gifsicleTimeoutPerMbMs));
@@ -2227,15 +2255,10 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
       // 找到最长的 GIF 时长（这将是输出GIF的总时长）
       const maxDuration = Math.max(...gifInfoArray.map(g => g.totalDuration));
       
-      // 使用最高精确 fps 对应的延迟（确保能捕捉最快 GIF 的所有帧）
+      // 使用最高精确 fps 作为“源时间轴”参考；输出 fps 允许降档，但不能改变总时长。
       const maxExactFps = Math.max(...gifInfoArray.map(g => g.exactFps));
-      const outputDelay = Math.max(2, Math.round(100 / maxExactFps));
       
-      // 计算需要生成的总帧数（基于最长时长和输出延迟）
-      const totalSourceFrames = Math.ceil((maxDuration * 100) / outputDelay);
-      
-      // 🎬 时间线裁剪：只导出所有图层覆盖范围内的帧
-      // 找到所有图层中最早的 start 和最晚的 end
+      // 🎬 时间线裁剪：只导出所有图层覆盖范围内的时间段
       let trimStartPercent = 0;
       let trimEndPercent = 100;
       
@@ -2247,25 +2270,36 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
         }
       }
       
-      // 将百分比转换为帧索引
-      // 与图层 enable 逻辑保持一致，避免尾帧越界导致黑屏
-      const trimStartFrame = Math.ceil((trimStartPercent / 100) * (totalSourceFrames - 1));
-      const trimEndFrame = Math.floor((trimEndPercent / 100) * (totalSourceFrames - 1));
-      const totalOutputFrames = Math.max(1, trimEndFrame - trimStartFrame + 1);
+      const trimStartTime = Math.max(0, maxDuration * (trimStartPercent / 100));
+      const trimEndTime = Math.min(maxDuration, maxDuration * (trimEndPercent / 100));
+      const trimmedDuration = Math.max(0.001, trimEndTime - trimStartTime);
+      const estimatedSourceFrames = Math.max(1, Math.ceil(trimmedDuration * maxExactFps));
       
       const exportSourceTotalBytes = gifPaths.reduce((acc, info) => acc + ((Number(info.sourceSizeMB) || 0) * 1024 * 1024), 0);
       const exportAdaptiveProfile = getAdaptiveProfile({
         preSizeMB: exportSourceTotalBytes / (1024 * 1024),
         decisionSizeMB: exportSourceTotalBytes / (1024 * 1024),
-        frameCount: totalOutputFrames,
+        frameCount: estimatedSourceFrames,
         hasVideoLayers: hasVideo
       });
       const exportOutputFps = Math.max(1, Math.min(maxExactFps, exportAdaptiveProfile.videoFpsCap));
-
-      // 裁剪后的实际时长
-      const trimmedDuration = (totalOutputFrames * outputDelay) / 100;
+      const totalOutputFrames = Math.max(1, Math.ceil(trimmedDuration * exportOutputFps));
+      const getTimelineOutputFrameWindow = (range) => {
+        if (!range) return null;
+        const startSec = maxDuration * (Math.max(0, Math.min(100, Number(range.start) || 0)) / 100);
+        const endSec = maxDuration * (Math.max(0, Math.min(100, Number(range.end) || 0)) / 100);
+        const relativeStartSec = startSec - trimStartTime;
+        const relativeEndSec = endSec - trimStartTime;
+        if (!(relativeEndSec > 0) || !(relativeStartSec < trimmedDuration)) return null;
+        const sf = Math.max(0, Math.ceil(Math.max(0, relativeStartSec) * exportOutputFps));
+        const ef = Math.min(
+          totalOutputFrames - 1,
+          Math.floor(Math.min(trimmedDuration, relativeEndSec) * exportOutputFps)
+        );
+        return ef >= sf ? { sf, ef } : null;
+      };
       
-      console.log(`   输出: ${totalOutputFrames} 帧, 延迟=${outputDelay}/100s, 时长=${trimmedDuration.toFixed(2)}s, 目标FPS=${exportOutputFps}${trimStartPercent > 0 || trimEndPercent < 100 ? ` (裁剪 ${trimStartPercent.toFixed(0)}-${trimEndPercent.toFixed(0)}%)` : ''}`);
+      console.log(`   输出: ${totalOutputFrames} 帧, 时长=${trimmedDuration.toFixed(2)}s, 源FPS=${maxExactFps.toFixed(2)}, 目标FPS=${exportOutputFps}${trimStartPercent > 0 || trimEndPercent < 100 ? ` (裁剪 ${trimStartPercent.toFixed(0)}-${trimEndPercent.toFixed(0)}%)` : ''}`);
       
       // 第二步：为每个 GIF 提取帧到单独的文件夹
       endStep('Step 1 分析GIF');
@@ -2717,19 +2751,14 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
             const gIdx = inputIdx++;
             
             // fps 转换 + 定位到画布 (pad)
-            filterParts.push(`[${gIdx}:v]fps=${outputFps},pad=${frameW}:${frameH}:${gifInfo.finalOffsetX}:${gifInfo.finalOffsetY}:color=black@0.0[g${gIdx}]`);
+            filterParts.push(`[${gIdx}:v]trim=start=${trimStartTime.toFixed(6)}:end=${trimEndTime.toFixed(6)},setpts=PTS-STARTPTS,fps=${outputFps},pad=${frameW}:${frameH}:${gifInfo.finalOffsetX}:${gifInfo.finalOffsetY}:color=black@0.0[g${gIdx}]`);
             
             // Overlay + 可选的时间线 enable
             let enableExpr = '';
             if (hasTimelineOnLayer(layer.layerId)) {
-              const range = timelineData[layer.layerId];
-              const den = Math.max(1, totalSourceFrames - 1);
-              const sfRaw = Math.ceil((range.start / 100) * den);
-              const efRaw = Math.floor((range.end / 100) * den);
-              const sf = Math.max(0, sfRaw - trimStartFrame);
-              const ef = Math.min(totalOutputFrames - 1, efRaw - trimStartFrame);
-              enableExpr = ef >= sf
-                ? `:enable='between(n\\,${sf}\\,${ef})'`
+              const window = getTimelineOutputFrameWindow(timelineData[layer.layerId]);
+              enableExpr = window
+                ? `:enable='between(n\\,${window.sf}\\,${window.ef})'`
                 : `:enable='0'`;
             }
             
@@ -2744,14 +2773,9 @@ async function composeAnnotatedGif({ frameName, bottomLayerBytes, staticLayers, 
             
             let enableExpr = '';
             if (hasTimelineOnLayer(layer.layerId)) {
-              const range = timelineData[layer.layerId];
-              const den = Math.max(1, totalSourceFrames - 1);
-              const sfRaw = Math.ceil((range.start / 100) * den);
-              const efRaw = Math.floor((range.end / 100) * den);
-              const sf = Math.max(0, sfRaw - trimStartFrame);
-              const ef = Math.min(totalOutputFrames - 1, efRaw - trimStartFrame);
-              enableExpr = ef >= sf
-                ? `:enable='between(n\\,${sf}\\,${ef})'`
+              const window = getTimelineOutputFrameWindow(timelineData[layer.layerId]);
+              enableExpr = window
+                ? `:enable='between(n\\,${window.sf}\\,${window.ef})'`
                 : `:enable='0'`;
             }
             

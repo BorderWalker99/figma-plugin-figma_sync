@@ -362,11 +362,12 @@ function registerRealtimeInflightAck(task, filePath, subfolder, filename, handle
   if (existing && existing.timer) {
     try { clearTimeout(existing.timer); } catch (_) {}
   }
+  console.log(`   🧭 [实时ACK] 等待 Figma 确认: ${filename} (taskId=${task.taskId}, timeout=${REALTIME_ACK_TIMEOUT_MS}ms)`);
   const timer = setTimeout(() => {
     const current = realtimeInflightAcks.get(task.taskId);
     if (!current) return;
     realtimeInflightAcks.delete(task.taskId);
-    console.warn(`⏱️  [实时模式] ACK 超时，重试: ${filename}`);
+    console.warn(`⏱️  [实时ACK] 超时，重试: ${filename} (taskId=${task.taskId})`);
     scheduleRealtimeRetry(task, 'ACK_TIMEOUT');
   }, REALTIME_ACK_TIMEOUT_MS);
   realtimeInflightAcks.set(task.taskId, {
@@ -557,6 +558,7 @@ async function processRealtimeSyncTask(task) {
         if (!sendOk) {
           throw new Error(`SEND_FAILED:${displayFilename}`);
         }
+        console.log(`   📤 [实时GIF] 已发送到 Figma: ${result.gifFilename} (${gifUrl ? 'gifUrl' : 'bytes'}, taskId=${task.taskId})`);
 
         registerRealtimeInflightAck(task, finalPath, gifSubfolder, result.gifFilename, {
           onAck: () => {
@@ -1181,6 +1183,7 @@ function connectWebSocket() {
         if (taskId) {
           const inflight = consumeRealtimeInflightAck(taskId);
           if (inflight) {
+            console.log(`   🧭 [实时ACK] 已收到 Figma 确认: ${inflight.filename} (taskId=${taskId})`);
             if (inflight.onAck) {
               try { inflight.onAck(message); } catch (_) {}
             } else {
