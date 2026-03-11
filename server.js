@@ -2131,6 +2131,28 @@ if (googleDriveEnabled && uploadBuffer) {
 
   const uploadProxySessions = new Map();
   const PROXY_SESSION_TIMEOUT_MS = 30 * 60 * 1000;
+  const SCREENSYNC_TRACE_SYNC = String(process.env.SCREENSYNC_TRACE_SYNC || '').trim() === '1';
+
+  function shouldTraceSync(fields = {}) {
+    if (SCREENSYNC_TRACE_SYNC) return true;
+    const mime = String(fields.mimeType || '').toLowerCase();
+    const name = String(fields.filename || '').toLowerCase();
+    return mime.startsWith('video/') || name.endsWith('.mp4') || name.endsWith('.mov');
+  }
+
+  function syncTrace(event, fields = {}) {
+    try {
+      if (!shouldTraceSync(fields)) return;
+      const payload = {
+        tag: 'SyncTrace',
+        event,
+        ts: new Date().toISOString(),
+        ...fields
+      };
+      console.log(`📡 [SyncTrace] ${JSON.stringify(payload)}`);
+    } catch (_) {}
+  }
+
   const _proxySessionSweepTimer = setInterval(() => {
     const now = Date.now();
     for (const [id, s] of uploadProxySessions) {
@@ -2203,6 +2225,13 @@ if (googleDriveEnabled && uploadBuffer) {
 
   async function backgroundProxyUpload(tempPath, tempDir, userId, filename, mimeType, folderId = null, session = null) {
     try {
+      const traceStart = Date.now();
+      syncTrace('background-upload-start', {
+        userId,
+        sessionId: session ? session.sessionId || null : null,
+        filename,
+        mimeType
+      });
       if (session) {
         session.status = 'background-uploading';
         session.finalizing = true;
@@ -2233,6 +2262,7 @@ if (googleDriveEnabled && uploadBuffer) {
 
         console.log(`   🎥 [后台压缩] ${origSizeMB}MB, preset=${preset}, CRF=${crf}`);
         try {
+          const compStart = Date.now();
           await execAsync(
             `ffmpeg -an -i "${tempPath}" -vf "${scaleFilter}" -c:v libx264 -preset ${preset} -crf ${crf} -movflags +faststart -y "${tempOut}"`,
             { timeout: 600000, maxBuffer: 10 * 1024 * 1024 }
@@ -2242,12 +2272,27 @@ if (googleDriveEnabled && uploadBuffer) {
             const ratio = ((1 - compSize / origSizeBytes) * 100).toFixed(1);
             console.log(`   ✅ [后台压缩] ${origSizeMB}MB → ${(compSize / 1024 / 1024).toFixed(1)}MB (节省 ${ratio}%)`);
             uploadPath = tempOut;
+            syncTrace('background-upload-compressed', {
+              userId,
+              filename,
+              mimeType,
+              origBytes: origSizeBytes,
+              compBytes: compSize,
+              elapsedMs: Date.now() - compStart
+            });
           }
         } catch (compErr) {
           console.warn(`   ⚠️  [后台压缩] 失败，使用原始文件: ${compErr.message}`);
+          syncTrace('background-upload-compress-failed', {
+            userId,
+            filename,
+            mimeType,
+            error: compErr && compErr.message ? compErr.message : String(compErr)
+          });
         }
       }
 
+      const uploadStart = Date.now();
       const uploadResult = await uploadDriveFileDirect({
         userId,
         filename,
@@ -2264,6 +2309,14 @@ if (googleDriveEnabled && uploadBuffer) {
         session.createdAt = Date.now();
       }
       console.log(`📤 [后台上传] ${filename} 已完成 Google Drive 直传`);
+      syncTrace('background-upload-completed', {
+        userId,
+        filename,
+        mimeType,
+        uploadedFileId: uploadResult && uploadResult.id ? uploadResult.id : null,
+        uploadElapsedMs: Date.now() - uploadStart,
+        totalElapsedMs: Date.now() - traceStart
+      });
     } catch (error) {
       if (session) {
         session.status = 'failed';
@@ -2271,6 +2324,12 @@ if (googleDriveEnabled && uploadBuffer) {
         session.error = error && error.message ? error.message : String(error);
         session.createdAt = Date.now();
       }
+      syncTrace('background-upload-failed', {
+        userId,
+        filename,
+        mimeType,
+        error: error && error.message ? error.message : String(error)
+      });
       throw error;
     } finally {
       try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch (_) {}
@@ -2397,6 +2456,13 @@ if (googleDriveEnabled && uploadBuffer) {
       const receiveStart = Date.now();
 
       console.log(`🚀 [极速上传] 开始接收+转发: ${filename} (${fileSizeMB}MB)`);
+      syncTrace('upload-proxy-start', {
+        userId,
+        sessionId,
+        filename,
+        mimeType,
+        totalBytes: contentLength || 0
+      });
 
       const tempDir = path.join(os.tmpdir(), `screensync-proxy-${sessionId}`);
       fs.mkdirSync(tempDir, { recursive: true });
@@ -2405,9 +2471,17 @@ if (googleDriveEnabled && uploadBuffer) {
       const diskStream = fs.createWriteStream(tempPath);
 
       let totalReceived = 0;
+      let lastProgressLoggedAtBytes = 0;
+      let lastProgressLoggedAtTime = receiveStart;
 
       try {
         const driveSessionUrl = await getResumableUploadUrl({ filename, mimeType, folderId });
+        syncTrace('upload-proxy-drive-session-created', {
+          userId,
+          sessionId,
+          filename,
+          mimeType
+        });
 
         session.status = 'receiving';
         session.finalizing = false;
@@ -2560,6 +2634,23 @@ if (googleDriveEnabled && uploadBuffer) {
           }
 
           pushPendingChunk(chunk);
+          const total = contentLength || 0;
+          const shouldLogByBytes = (totalReceived - lastProgressLoggedAtBytes) >= (32 * 1024 * 1024);
+          const shouldLogByTime = (Date.now() - lastProgressLoggedAtTime) >= 15000;
+          if (shouldLogByBytes || shouldLogByTime) {
+            lastProgressLoggedAtBytes = totalReceived;
+            lastProgressLoggedAtTime = Date.now();
+            const percent = total > 0 ? Math.round((totalReceived / total) * 100) : null;
+            syncTrace('upload-proxy-receiving', {
+              userId,
+              sessionId,
+              filename,
+              mimeType,
+              receivedBytes: totalReceived,
+              totalBytes: total,
+              percent
+            });
+          }
           while (pendingBytes >= DRIVE_CHUNK_SIZE) {
             const toSend = takePendingBytes(DRIVE_CHUNK_SIZE);
             session.status = 'streaming';
@@ -2586,6 +2677,16 @@ if (googleDriveEnabled && uploadBuffer) {
         const elapsed = elapsedSeconds.toFixed(1);
         const speed = totalReceived > 0 ? ((totalReceived / 1024 / 1024) / Math.max(elapsedSeconds, 0.001)).toFixed(1) : '?';
         console.log(`✅ [极速上传] ${filename} (${(totalReceived / 1024 / 1024).toFixed(1)}MB) 已直传 Google Drive (${elapsed}s, ${speed}MB/s)`);
+        syncTrace('upload-proxy-completed', {
+          userId,
+          sessionId,
+          filename,
+          mimeType,
+          receivedBytes: totalReceived,
+          totalBytes: contentLength || 0,
+          elapsedMs: Date.now() - receiveStart,
+          uploadedFileId: session.uploadedFileId || null
+        });
 
         res.json({
           success: true,
@@ -2609,6 +2710,16 @@ if (googleDriveEnabled && uploadBuffer) {
         session.receivedBytes = totalReceived;
         session.createdAt = Date.now();
         console.warn(`⚠️  [极速上传] 流式转发失败: ${err.message}，回退后台上传`);
+        syncTrace('upload-proxy-stream-failed-fallback', {
+          userId,
+          sessionId,
+          filename,
+          mimeType,
+          receivedBytes: totalReceived,
+          totalBytes: contentLength || 0,
+          elapsedMs: Date.now() - receiveStart,
+          error: err && err.message ? err.message : String(err)
+        });
         diskStream.end();
 
         if (!req.complete) {
@@ -2665,6 +2776,12 @@ if (googleDriveEnabled && uploadBuffer) {
 
       let totalReceived = 0;
       const receiveStart = Date.now();
+      syncTrace('upload-put-start', {
+        userId,
+        filename,
+        mimeType,
+        totalBytes: parseInt(req.headers['content-length'], 10) || 0
+      });
 
       try {
         const ws = fs.createWriteStream(tempPath);
@@ -2680,6 +2797,13 @@ if (googleDriveEnabled && uploadBuffer) {
         const sizeMB = (totalReceived / 1024 / 1024).toFixed(1);
         const elapsed = ((Date.now() - receiveStart) / 1000).toFixed(1);
         console.log(`📦 [直传上传] 已接收: ${filename} (${sizeMB}MB, ${elapsed}s)`);
+        syncTrace('upload-put-received', {
+          userId,
+          filename,
+          mimeType,
+          receivedBytes: totalReceived,
+          elapsedMs: Date.now() - receiveStart
+        });
 
         res.json({
           success: true,

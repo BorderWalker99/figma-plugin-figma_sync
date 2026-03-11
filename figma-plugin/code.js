@@ -1,6 +1,6 @@
 // code.js - 智能布局版本
 
-const PLUGIN_VERSION = '1.0.1'; // 插件版本号
+const PLUGIN_VERSION = '1.0.2'; // 插件版本号
 
 
 // 🛡️ 全局错误处理，防止切换文件时崩溃
@@ -600,14 +600,45 @@ function ensureFrame(options = {}) {
 const LOOSE_FIRST_NODE_ID_KEY = 'screensyncLooseFirstNodeId';
 const LOOSE_FIRST_NODE_ORIGIN_X_KEY = 'screensyncLooseFirstOriginX';
 const LOOSE_FIRST_NODE_ORIGIN_Y_KEY = 'screensyncLooseFirstOriginY';
+const LOOSE_FIRST_NODE_ORIGIN_ABS_X_KEY = 'screensyncLooseFirstOriginAbsX';
+const LOOSE_FIRST_NODE_ORIGIN_ABS_Y_KEY = 'screensyncLooseFirstOriginAbsY';
+const LOOSE_FIRST_NODE_PARENT_ID_KEY = 'screensyncLooseFirstParentId';
+
+function getNodeAbsolutePosition(node) {
+  try {
+    if (!node || !Array.isArray(node.absoluteTransform)) return null;
+    const transform = node.absoluteTransform;
+    const firstRow = Array.isArray(transform[0]) ? transform[0] : null;
+    const secondRow = Array.isArray(transform[1]) ? transform[1] : null;
+    const x = Number(firstRow ? firstRow[2] : NaN);
+    const y = Number(secondRow ? secondRow[2] : NaN);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      return null;
+    }
+    return { x, y };
+  } catch (_) {
+    return null;
+  }
+}
+
+function isLooseFirstScreenshotMarked(node) {
+  try {
+    return !!(node && node.getPluginData && node.getPluginData('screensyncLooseFirst') === '1');
+  } catch (_) {
+    return false;
+  }
+}
 
 function findLooseFirstScreenshotNode() {
   try {
     const trackedId = figma.currentPage.getPluginData(LOOSE_FIRST_NODE_ID_KEY);
     if (trackedId) {
       const trackedNode = figma.getNodeById(trackedId);
-      if (trackedNode && trackedNode.getPluginData && trackedNode.getPluginData('screensyncLooseFirst') === '1') {
+      if (trackedNode && isLooseFirstScreenshotMarked(trackedNode) && !hasLooseFirstScreenshotNodeMoved(trackedNode)) {
         return trackedNode;
+      }
+      if (trackedNode && isLooseFirstScreenshotMarked(trackedNode)) {
+        clearLooseFirstScreenshotMark(trackedNode);
       }
       // 清理失效引用（例如用户删除了首图层）
       figma.currentPage.setPluginData(LOOSE_FIRST_NODE_ID_KEY, '');
@@ -620,7 +651,11 @@ function findLooseFirstScreenshotNode() {
     for (const node of nodes || []) {
       try {
         if (!node || !node.getPluginData) continue;
-        if (node.getPluginData('screensyncLooseFirst') === '1') {
+        if (isLooseFirstScreenshotMarked(node)) {
+          if (hasLooseFirstScreenshotNodeMoved(node)) {
+            clearLooseFirstScreenshotMark(node);
+            continue;
+          }
           const ts = Number(node.getPluginData('screensyncLooseFirstAt') || '0');
           if (latestNode === null || ts > latestTs) {
             latestNode = node;
@@ -651,6 +686,10 @@ function rememberLooseFirstScreenshotPosition(node) {
     if (typeof node.x !== 'number' || typeof node.y !== 'number') return;
     node.setPluginData(LOOSE_FIRST_NODE_ORIGIN_X_KEY, String(node.x));
     node.setPluginData(LOOSE_FIRST_NODE_ORIGIN_Y_KEY, String(node.y));
+    node.setPluginData(LOOSE_FIRST_NODE_PARENT_ID_KEY, node.parent ? String(node.parent.id) : '');
+    const absolutePosition = getNodeAbsolutePosition(node);
+    node.setPluginData(LOOSE_FIRST_NODE_ORIGIN_ABS_X_KEY, absolutePosition ? String(absolutePosition.x) : '');
+    node.setPluginData(LOOSE_FIRST_NODE_ORIGIN_ABS_Y_KEY, absolutePosition ? String(absolutePosition.y) : '');
   } catch (_) {}
 }
 
@@ -659,12 +698,29 @@ function hasLooseFirstScreenshotNodeMoved(node) {
     if (!node || typeof node.x !== 'number' || typeof node.y !== 'number' || !node.getPluginData) {
       return firstLooseNodeMovedByUser;
     }
+    if (!figma.currentPage || node.parent !== figma.currentPage) {
+      return true;
+    }
+    const originParentId = node.getPluginData(LOOSE_FIRST_NODE_PARENT_ID_KEY);
+    if (originParentId && (!node.parent || node.parent.id !== originParentId)) {
+      return true;
+    }
     const originX = Number(node.getPluginData(LOOSE_FIRST_NODE_ORIGIN_X_KEY));
     const originY = Number(node.getPluginData(LOOSE_FIRST_NODE_ORIGIN_Y_KEY));
-    if (!Number.isFinite(originX) || !Number.isFinite(originY)) {
+    const movedByLocalPosition =
+      Number.isFinite(originX) &&
+      Number.isFinite(originY) &&
+      (Math.abs(node.x - originX) > 0.01 || Math.abs(node.y - originY) > 0.01);
+    if (movedByLocalPosition) {
+      return true;
+    }
+    const originAbsX = Number(node.getPluginData(LOOSE_FIRST_NODE_ORIGIN_ABS_X_KEY));
+    const originAbsY = Number(node.getPluginData(LOOSE_FIRST_NODE_ORIGIN_ABS_Y_KEY));
+    const absolutePosition = getNodeAbsolutePosition(node);
+    if (!absolutePosition || !Number.isFinite(originAbsX) || !Number.isFinite(originAbsY)) {
       return firstLooseNodeMovedByUser;
     }
-    return Math.abs(node.x - originX) > 0.01 || Math.abs(node.y - originY) > 0.01;
+    return Math.abs(absolutePosition.x - originAbsX) > 0.01 || Math.abs(absolutePosition.y - originAbsY) > 0.01;
   } catch (_) {
     return firstLooseNodeMovedByUser;
   }
@@ -678,6 +734,7 @@ function refreshLooseFirstScreenshotMoveState(node) {
     return false;
   }
   if (hasLooseFirstScreenshotNodeMoved(node)) {
+    clearLooseFirstScreenshotMark(node);
     firstLooseNodeMovedByUser = true;
     waitingSecondScreenshotDecision = false;
     return true;
@@ -717,6 +774,9 @@ function clearLooseFirstScreenshotMark(node) {
     node.setPluginData('screensyncLooseFirstAt', '');
     node.setPluginData(LOOSE_FIRST_NODE_ORIGIN_X_KEY, '');
     node.setPluginData(LOOSE_FIRST_NODE_ORIGIN_Y_KEY, '');
+    node.setPluginData(LOOSE_FIRST_NODE_ORIGIN_ABS_X_KEY, '');
+    node.setPluginData(LOOSE_FIRST_NODE_ORIGIN_ABS_Y_KEY, '');
+    node.setPluginData(LOOSE_FIRST_NODE_PARENT_ID_KEY, '');
     clearLooseFirstScreenshotRef(node.id);
   } catch (_) {}
 }
@@ -3049,13 +3109,11 @@ figma.on('documentchange', (event) => {
       pendingFirstLooseNodeId &&
       !suppressLooseNodeMoveTracking
     ) {
-      const pairingPropertyChanges = event.documentChanges.filter(change => change.type === 'PROPERTY_CHANGE');
-      for (const change of pairingPropertyChanges) {
-        if (change.id !== pendingFirstLooseNodeId) continue;
-        const pendingNode = figma.getNodeById(pendingFirstLooseNodeId);
-        if (pendingNode && refreshLooseFirstScreenshotMoveState(pendingNode)) {
-          break;
-        }
+      const pendingNode = figma.getNodeById(pendingFirstLooseNodeId);
+      if (!pendingNode) {
+        clearLooseFirstScreenshotRef(pendingFirstLooseNodeId);
+      } else {
+        refreshLooseFirstScreenshotMoveState(pendingNode);
       }
     }
 

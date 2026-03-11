@@ -5146,7 +5146,8 @@
     // ========== WebSocket连接 ==========
     // 重新连接功能（包含自动修复）
     let reconnectAttempts = 0;
-    const MAX_RECONNECT_ATTEMPTS = 3; // 🚀 减少重试次数，快速失败
+    // 更新/重启后本地服务启动可能需要更久；这里不要过早“放弃”，否则用户只能反复重启碰运气
+    const MAX_RECONNECT_ATTEMPTS = 12;
     let isExplicitlyDisconnected = false; // 用户是否手动断开（暂未用到，但预留）
     let isFirstConnection = true; // 🚀 标记是否是首次连接
     let backgroundReconnectTimer = null;
@@ -5154,6 +5155,7 @@
     let isWsConnecting = false;
     let _wsConnectTimeoutId = null;
     let initialConnectFallbackTimer = null; // 首次打开 5 秒兜底：仍未连上则显示帮助态
+    let expectingServerRestartUntil = 0;
 
     function isBrowserOffline() {
       return typeof navigator !== 'undefined' && navigator.onLine === false;
@@ -5177,7 +5179,7 @@
     function scheduleBackgroundReconnect() {
       if (isForceClosingPlugin) return;
       if (backgroundReconnectTimer) return;
-      backgroundReconnectTimer = setInterval(() => {
+      const loop = () => {
         if (isForceClosingPlugin) {
           clearInterval(backgroundReconnectTimer);
           backgroundReconnectTimer = null;
@@ -5189,9 +5191,12 @@
           backgroundReconnectTimer = null;
           return;
         }
-        // 达到上限后进入“低频保活重连”，避免插件永远停在空白/断开状态
+        // 达到上限后进入“保活重连”：更新/重启窗口内更高频，平时低频，避免用户需要多次重启才能连上
         connect();
-      }, 15000);
+      };
+      const inRestartWindow = Date.now() < expectingServerRestartUntil;
+      const interval = inRestartWindow ? 2000 : 15000;
+      backgroundReconnectTimer = setInterval(loop, interval);
     }
     
     function attemptReconnect() {
@@ -5392,6 +5397,7 @@
         clearTimeout(_wsConnectTimeoutId);
         if (reconnectAttemptTimer) { clearTimeout(reconnectAttemptTimer); reconnectAttemptTimer = null; }
         reconnectAttempts = 0;
+        expectingServerRestartUntil = 0;
         if (initialConnectFallbackTimer) {
           clearTimeout(initialConnectFallbackTimer);
           initialConnectFallbackTimer = null;
@@ -6130,8 +6136,9 @@
           updateStatus('offline', getOfflineStatusText());
         } else if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
           reconnectAttempts++;
-          // 🚀 优化：固定 500ms 延迟，不再递增（原来是 1s, 2s, 3s...）
-          const delay = 500;
+          // 更新/重启窗口内：更高频重试；平时保持温和避免刷屏
+          const inRestartWindow = Date.now() < expectingServerRestartUntil;
+          const delay = inRestartWindow ? 250 : 500;
           log(`⏳ 正在重试 (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`);
           
           updateStatus('waiting', t('status_connecting'));
@@ -8272,6 +8279,9 @@
           }
         }
 
+        // 更新会触发本地服务重启/短暂断开：提前打开更激进的重连窗口，避免用户需要反复重启
+        expectingServerRestartUntil = Date.now() + 2 * 60 * 1000;
+
         if (!wsSend('update-full')) {
           showToast(t('toast_server_offline'), 'error');
           updateBannerNowBtn.disabled = false;
@@ -9733,6 +9743,46 @@
 
     // ── Realtime conversion progress (subtitle under realtime button) ──
     let convHideTimer = null;
+    let realtime95WatchdogTimer = null;
+    let realtime95WatchdogState = null;
+
+    function clearRealtime95Watchdog() {
+      if (realtime95WatchdogTimer) {
+        clearTimeout(realtime95WatchdogTimer);
+        realtime95WatchdogTimer = null;
+      }
+      realtime95WatchdogState = null;
+    }
+
+    function armRealtime95Watchdog(data, percent) {
+      try {
+        const p = Number(percent || 0);
+        if (!Number.isFinite(p) || p < 95) return;
+        const taskId = data && data.taskId ? String(data.taskId) : '';
+        const filename = data && data.filename ? String(data.filename) : '';
+        const stage = data && data.stage ? String(data.stage) : '';
+        realtime95WatchdogState = {
+          taskId,
+          filename,
+          stage,
+          percent: p,
+          isVideo: isVideoProgressData(data),
+          ts: Date.now()
+        };
+        if (realtime95WatchdogTimer) clearTimeout(realtime95WatchdogTimer);
+        realtime95WatchdogTimer = setTimeout(() => {
+          try {
+            if (!isRealtimeActive) return;
+            const s = realtime95WatchdogState || {};
+            traceRealtimeSync(
+              `⚠️  95%+ 卡住疑似发生：${s.filename || '未命名文件'} -> ${s.stage || 'unknown'} ${Math.round(Number(s.percent || 0))}%${s.taskId ? ` (${s.taskId})` : ''}，请对照 Cloud Run 的 [SyncTrace] 日志`,
+              'warn',
+              true
+            );
+          } catch (_) {}
+        }, 20000);
+      } catch (_) {}
+    }
 
     function clampProgressPercent(value) {
       const num = Number(value || 0);
@@ -9793,6 +9843,7 @@
       if (!subtitle) return;
       subtitle.style.display = 'none';
       subtitle.textContent = '';
+      clearRealtime95Watchdog();
       resetRealtimeProgressTracking();
     }
     
@@ -9821,6 +9872,7 @@
       if (data.stage === 'done') {
         subtitle.style.display = '';
         subtitle.textContent = `${prefix} 100%`;
+        clearRealtime95Watchdog();
         if (convHideTimer) clearTimeout(convHideTimer);
         convHideTimer = setTimeout(() => {
           finishRealtimeConversionUI('conversion-done', {
@@ -9834,6 +9886,7 @@
       if (convHideTimer) { clearTimeout(convHideTimer); convHideTimer = null; }
       subtitle.style.display = '';
       subtitle.textContent = `${prefix} ${percent}%`;
+      armRealtime95Watchdog(data, percent);
     }
     
     // ── Manual sync progress (ring on button border + subtitle text) ──
