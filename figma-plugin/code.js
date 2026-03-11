@@ -55,7 +55,7 @@ let cancelGifExport = false; // GIF导出取消标志
 let serverCheckTimer = null; // Server 缓存检查超时计时器
 let focusNodeTimer = null;
 let pendingFocusNode = null;
-const GIF_IMPORT_TIMEOUT_MS = 8000;
+const GIF_IMPORT_TIMEOUT_MS = 30000;
 const timelineThumbnailRetryTimers = new Map(); // Map<frameId, number[]>
 
 // 时间线编辑器状态
@@ -812,6 +812,17 @@ async function createImageFromUrlWithTimeout(url, timeoutMs) {
   } finally {
     if (timeoutId) clearTimeout(timeoutId);
   }
+}
+
+function postRealtimeImportDebug(event, fields = {}) {
+  try {
+    figma.ui.postMessage({
+      type: 'realtime-import-debug',
+      event,
+      ts: Date.now(),
+      ...fields
+    });
+  } catch (_) {}
 }
 
 function clearTimelineThumbnailRetryTimers(frameId) {
@@ -2225,8 +2236,36 @@ figma.ui.onmessage = async (msg) => {
         throw new Error('Figma 插件 API 不支持视频文件。请通过 Figma 界面直接拖放视频文件，或使用 GIF 格式。');
       } else {
         if (gifUrl) {
-          // 8s 超时从“真正调用 Figma API 导入 URL”这一刻开始计时
-          image = await createImageFromUrlWithTimeout(gifUrl, GIF_IMPORT_TIMEOUT_MS);
+          const importStartedAt = Date.now();
+          postRealtimeImportDebug('gif-import-start', {
+            filename: filename || '未命名文件',
+            taskId: taskId || null,
+            timeoutMs: GIF_IMPORT_TIMEOUT_MS,
+            hasGifUrl: true
+          });
+          try {
+            // 超时从“真正调用 Figma API 导入 URL”这一刻开始计时
+            image = await createImageFromUrlWithTimeout(gifUrl, GIF_IMPORT_TIMEOUT_MS);
+            postRealtimeImportDebug('gif-import-success', {
+              filename: filename || '未命名文件',
+              taskId: taskId || null,
+              timeoutMs: GIF_IMPORT_TIMEOUT_MS,
+              elapsedMs: Date.now() - importStartedAt
+            });
+          } catch (importError) {
+            const errorMessage = (importError && importError.message) ? importError.message : String(importError || '未知错误');
+            postRealtimeImportDebug(
+              importError && importError.code === 'GIF_IMPORT_TIMEOUT' ? 'gif-import-timeout' : 'gif-import-failed',
+              {
+                filename: filename || '未命名文件',
+                taskId: taskId || null,
+                timeoutMs: GIF_IMPORT_TIMEOUT_MS,
+                elapsedMs: Date.now() - importStartedAt,
+                error: errorMessage
+              }
+            );
+            throw importError;
+          }
         } else {
           image = figma.createImage(uint8Array);
         }

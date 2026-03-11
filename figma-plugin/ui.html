@@ -4526,6 +4526,8 @@
         status_running: '正在同步',
         status_mode_selection: '已连接',
         status_disconnected: '未连接',
+        status_realtime_import_timeout: '导入超时',
+        status_realtime_import_failed: '导入失败',
         status_exported_gif: '已导出 {0} 段 GIF',
         status_saved_video: '已保存 {0} 段视频',
         status_saved_gif: '已保存 {0} 段 GIF',
@@ -4752,6 +4754,8 @@
         status_running: 'Syncing',
         status_mode_selection: 'Connected',
         status_disconnected: 'Not Connected',
+        status_realtime_import_timeout: 'Import timed out',
+        status_realtime_import_failed: 'Import failed',
         status_exported_gif: 'Exported {0} GIFs',
         status_exported_gif_one: 'Exported 1 GIF',
         status_exported_gif_other: 'Exported {0} GIFs',
@@ -6187,6 +6191,45 @@
       } catch (_) {}
       if (mirrorToLog) {
         try { log(text); } catch (_) {}
+      }
+    }
+
+    function handleRealtimeImportDebug(msg) {
+      if (!msg || !msg.event) return;
+      const filename = msg.filename || '未命名文件';
+      const elapsedMs = Number(msg.elapsedMs || 0);
+      const elapsedText = elapsedMs > 0 ? `${(elapsedMs / 1000).toFixed(1)}s` : '';
+      const timeoutText = msg.timeoutMs ? `${Math.round(Number(msg.timeoutMs) / 1000)}s` : '';
+      if (msg.event === 'gif-import-start') {
+        traceRealtimeSync(
+          `插件开始导入 GIF: ${filename}${timeoutText ? ` (timeout=${timeoutText})` : ''}${msg.taskId ? ` (${msg.taskId})` : ''}`,
+          'log',
+          true
+        );
+        return;
+      }
+      if (msg.event === 'gif-import-success') {
+        traceRealtimeSync(
+          `插件导入完成: ${filename}${elapsedText ? ` (${elapsedText})` : ''}${msg.taskId ? ` (${msg.taskId})` : ''}`,
+          'log',
+          true
+        );
+        return;
+      }
+      if (msg.event === 'gif-import-timeout') {
+        traceRealtimeSync(
+          `插件导入超时: ${filename}${elapsedText ? ` (${elapsedText})` : ''}${timeoutText ? `, timeout=${timeoutText}` : ''}${msg.taskId ? ` (${msg.taskId})` : ''}${msg.error ? `, error=${msg.error}` : ''}`,
+          'warn',
+          true
+        );
+        return;
+      }
+      if (msg.event === 'gif-import-failed') {
+        traceRealtimeSync(
+          `插件导入失败: ${filename}${elapsedText ? ` (${elapsedText})` : ''}${msg.taskId ? ` (${msg.taskId})` : ''}${msg.error ? `, error=${msg.error}` : ''}`,
+          'error',
+          true
+        );
       }
     }
 
@@ -9117,10 +9160,12 @@
       } else if (msg.type === 'frame-located') {
         if (msg.success) log('📍 ' + msg.message);
         else log('❌ ' + msg.message);
+      } else if (msg.type === 'realtime-import-debug') {
+        handleRealtimeImportDebug(msg);
       } else if (msg.type === 'screenshot-import-timeout') {
         const timeoutFilename = msg.filename || '未命名文件';
         if (trackGifImportTimeout(timeoutFilename)) {
-          const timeoutMs = Number(msg.timeoutMs) || 8000;
+          const timeoutMs = Number(msg.timeoutMs) || 30000;
           log(`⚠️  GIF 放入画板超时 (${Math.round(timeoutMs / 1000)}秒)，请从本地备份拖入: ${timeoutFilename}`);
           traceRealtimeSync(`插件导入超时: ${timeoutFilename} (${Math.round(timeoutMs / 1000)}s)`, 'warn', true);
           showToast(currentLang === 'zh' ? 'GIF过大，请从本地拖入' : 'GIF too large, auto-import timed out. Please drag from local backup.', 'warning');
@@ -9133,6 +9178,7 @@
           filename: timeoutFilename,
           trace: false
         });
+        updateStatus('connected', t('status_realtime_import_timeout'));
       } else if (msg.type === 'screenshot-added') {
         const addedFilename = msg.filename || '';
         const wasTimedOut = _gifImportTimedOutFilenames.has(addedFilename);
@@ -9214,6 +9260,9 @@
           filename: addedFilename,
           trace: false
         });
+        if (!msg.success) {
+          updateStatus('connected', t('status_realtime_import_failed'));
+        }
       } else if (msg.type === 'file-needs-manual-drag') {
         manualDragCount++;
         // Don't reset state - let currentButtonState handle locking
@@ -9251,7 +9300,7 @@
           filename: msg.filename || '',
           trace: false
         });
-        updateStatus('connected', '');
+        updateStatus('connected', t('status_realtime_import_failed'));
       } else if (msg.type === 'size-settings-loaded') {
         if (msg.width) imageWidthInput.value = msg.width;
         if (msg.height) imageHeightInput.value = msg.height;
