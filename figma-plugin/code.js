@@ -814,14 +814,21 @@ async function createImageFromUrlWithTimeout(url, timeoutMs) {
   }
 }
 
-function postRealtimeImportDebug(event, fields = {}) {
+function postRealtimeImportDebug(event, fields) {
   try {
-    figma.ui.postMessage({
+    const payload = {
       type: 'realtime-import-debug',
-      event,
-      ts: Date.now(),
-      ...fields
-    });
+      event: event,
+      ts: Date.now()
+    };
+    if (fields && typeof fields === 'object') {
+      for (var k in fields) {
+        if (Object.prototype.hasOwnProperty.call(fields, k)) {
+          payload[k] = fields[k];
+        }
+      }
+    }
+    figma.ui.postMessage(payload);
   } catch (_) {}
 }
 
