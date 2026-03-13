@@ -81,6 +81,13 @@ function ensureLocalDownloadFolder() {
   }
 }
 
+function buildGifTempUrlOrThrow(cacheId, filename, contextLabel) {
+  if (!cacheId) {
+    throw new Error(`[${contextLabel}] gifCacheId 缺失，已禁止回退到 Base64: ${filename}`);
+  }
+  return `http://localhost:8888/gif-temp/${encodeURIComponent(cacheId)}?filename=${encodeURIComponent(filename)}`;
+}
+
 /**
  * 保存文件名到 cacheId 的映射（带容量限制，防止无限增长）
  * @param {string} fileName - 文件名
@@ -1577,16 +1584,15 @@ async function handleDriveFile(file, deleteAfterSync = false, progressCb = null,
     throwIfAborted();
     
     const gifDims = isGif ? parseGifDimensions(processedBuffer) : null;
-    const useGifUrl = !!(isGif && gifCacheId);
-    const gifUrl = useGifUrl
-      ? `http://localhost:8888/gif-temp/${encodeURIComponent(gifCacheId)}?filename=${encodeURIComponent(file.name)}`
+    const gifUrl = isGif
+      ? buildGifTempUrlOrThrow(gifCacheId, file.name, looksLikeVideo ? 'drive-video-gif' : 'drive-gif')
       : null;
-    const base64String = useGifUrl ? null : processedBuffer.toString('base64');
+    const base64String = isGif ? null : processedBuffer.toString('base64');
     processedBuffer = null;
 
     const payload = {
       type: 'screenshot',
-      bytes: base64String,
+      bytes: isGif ? null : base64String,
       timestamp: Date.now(),
       filename: file.name,
       driveFileId: file.id,
@@ -1600,7 +1606,7 @@ async function handleDriveFile(file, deleteAfterSync = false, progressCb = null,
     };
 
     throwIfAborted();
-    console.log(`   📤 [Drive同步] 已发送到 Figma: ${file.name} (${gifUrl ? 'gifUrl' : 'bytes'}${looksLikeVideo ? ', video-flow' : ''})`);
+    console.log(`   📤 [Drive同步] 已发送到 Figma: ${file.name} (${isGif ? 'gifUrl' : 'bytes'}${looksLikeVideo ? ', video-flow' : ''})`);
     if (deleteAfterSync && file && file.id) {
       pendingDeletes.set(file.id, {
         filename: file.name,

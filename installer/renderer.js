@@ -1166,7 +1166,7 @@ window.finishInstallation = async function() {
     }
     
     // 步骤 2：安装最后一步，前置处理运行时权限并验证自启动。
-    const finalizeResult = await ipcRenderer.invoke('finalize-installation', installPath, { skipWarmup: true });
+    const finalizeResult = await ipcRenderer.invoke('finalize-installation', installPath);
     
     if (finalizeResult.success) {
       // 配置成功：显示成功图标和确认按钮，等待用户确认关闭

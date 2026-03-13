@@ -536,14 +536,10 @@ async function processRealtimeSyncTask(task) {
         emitProgress('importing', 90, { isVideo: true });
 
         const gifDims = parseGifDimensions(result.gifBuffer);
-        const useGifUrl = !!result.gifCacheId;
-        const gifUrl = useGifUrl
-          ? `http://localhost:8888/gif-temp/${encodeURIComponent(result.gifCacheId)}?filename=${encodeURIComponent(result.gifFilename)}`
-          : null;
-        const base64String = useGifUrl ? null : result.gifBuffer.toString('base64');
+        const gifUrl = buildGifTempUrlOrThrow(result.gifCacheId, result.gifFilename, 'realtime-video-gif');
         const sendOk = safeSend({
           type: 'screenshot',
-          bytes: base64String,
+          bytes: null,
           gifUrl,
           timestamp: Date.now(),
           filename: result.gifFilename,
@@ -558,7 +554,7 @@ async function processRealtimeSyncTask(task) {
         if (!sendOk) {
           throw new Error(`SEND_FAILED:${displayFilename}`);
         }
-        console.log(`   📤 [实时GIF] 已发送到 Figma: ${result.gifFilename} (${gifUrl ? 'gifUrl' : 'bytes'}, taskId=${task.taskId})`);
+        console.log(`   📤 [实时GIF] 已发送到 Figma: ${result.gifFilename} (gifUrl, taskId=${task.taskId})`);
 
         registerRealtimeInflightAck(task, finalPath, gifSubfolder, result.gifFilename, {
           onAck: () => {
@@ -707,6 +703,13 @@ function saveCacheMapping(fileName, cacheId) {
     }
     fs.writeFileSync(mappingFile, JSON.stringify(mapping, null, 2));
   } catch (_) {}
+}
+
+function buildGifTempUrlOrThrow(cacheId, filename, contextLabel) {
+  if (!cacheId) {
+    throw new Error(`[${contextLabel}] gifCacheId 缺失，已禁止回退到 Base64: ${filename}`);
+  }
+  return `http://localhost:8888/gif-temp/${encodeURIComponent(cacheId)}?filename=${encodeURIComponent(filename)}`;
 }
 
 /**
@@ -1929,14 +1932,10 @@ async function performManualSync() {
             const keepGif = !shouldCleanupFile(gifSub);
             fileProgressCb('importing', 90);
             const gifDims = parseGifDimensions(result.gifBuffer);
-            const useGifUrl = !!result.gifCacheId;
-            const gifUrl = useGifUrl
-              ? `http://localhost:8888/gif-temp/${encodeURIComponent(result.gifCacheId)}?filename=${encodeURIComponent(result.gifFilename)}`
-              : null;
-            const base64String = useGifUrl ? null : result.gifBuffer.toString('base64');
-            safeSend({
+            const gifUrl = buildGifTempUrlOrThrow(result.gifCacheId, result.gifFilename, 'manual-video-gif');
+            const sendOk = safeSend({
               type: 'screenshot',
-              bytes: base64String,
+              bytes: null,
               gifUrl,
               timestamp: Date.now(),
               filename: result.gifFilename,
@@ -1947,6 +1946,9 @@ async function performManualSync() {
               keptInIcloud: keepGif,
               syncSource: 'manual'
             });
+            if (!sendOk) {
+              throw new Error(`SEND_FAILED:${result.gifFilename}`);
+            }
             markFileAsProcessed(filePath);
             runPostVideoOps(result, keepGif, file, 'manual');
             return { success: true, isGif: true, isVideo: true, file, filePath, fileOrder };
@@ -2210,11 +2212,10 @@ async function syncScreenshot(filePath, deleteAfterSync = false, subfolder = nul
     }
 
     const gifDims = fileIsGif ? parseGifDimensions(imageBuffer) : null;
-    const useGifUrl = !!(fileIsGif && gifCacheId);
-    const gifUrl = useGifUrl
-      ? `http://localhost:8888/gif-temp/${encodeURIComponent(gifCacheId)}?filename=${encodeURIComponent(filename)}`
+    const gifUrl = fileIsGif
+      ? buildGifTempUrlOrThrow(gifCacheId, filename, 'gif-sync')
       : null;
-    const base64String = useGifUrl ? null : imageBuffer.toString('base64');
+    const base64String = fileIsGif ? null : imageBuffer.toString('base64');
     imageBuffer = null;
     
     // 如果没有提供 subfolder，自动检测
@@ -2224,7 +2225,7 @@ async function syncScreenshot(filePath, deleteAfterSync = false, subfolder = nul
     
     const payload = {
       type: 'screenshot',
-      bytes: base64String,
+      bytes: fileIsGif ? null : base64String,
       gifUrl,
       timestamp: Date.now(),
       filename: filename,

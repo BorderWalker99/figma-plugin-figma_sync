@@ -6169,6 +6169,9 @@
     const _gifImportTimedOutFilenames = new Set();
     const GIF_IMPORT_TIMEOUT_TRACK_MAX = 300;
     let lastRealtimeProgressTraceKey = '';
+    let convHideTimer = null;
+    let realtime95WatchdogTimer = null;
+    let realtime95WatchdogState = null;
 
     function trackGifImportTimeout(filename) {
       if (!filename) return false;
@@ -6279,6 +6282,13 @@
 
       // GIF 不再自动放入 Figma：仅保留本地保存计数提示（connection pill）。
       if (isGifPayload) {
+        if (!hasGifUrl) {
+          traceRealtimeSync(
+            `⚠️  收到 GIF bytes payload（legacy fallback）: ${data.filename || '未命名文件'}${data.taskId ? ` (${data.taskId})` : ''}`,
+            'warn',
+            true
+          );
+        }
         if (shouldTraceRealtime) {
           traceRealtimeSync(
             `收到 GIF payload: ${data.filename || '未命名文件'} (${hasGifUrl ? 'gifUrl' : 'bytes'}${data.taskId ? `, task=${data.taskId}` : ''})`,
@@ -9788,10 +9798,6 @@
     }
 
     // ── Realtime conversion progress (subtitle under realtime button) ──
-    let convHideTimer = null;
-    let realtime95WatchdogTimer = null;
-    let realtime95WatchdogState = null;
-
     function clearRealtime95Watchdog() {
       if (realtime95WatchdogTimer) {
         clearTimeout(realtime95WatchdogTimer);

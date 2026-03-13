@@ -1,0 +1,32 @@
+---
+description: Figma 插件（ScreenSync）与 Figma MCP 使用说明
+globs: figma-plugin/**/*, **/figma*
+alwaysApply: false
+---
+
+# Figma 插件（ScreenSync）
+
+本项目在 `figma-plugin/` 内包含一个 Figma 插件，用于将 iPhone 截图、录屏与 GIF 更快地同步到 Figma。
+
+## 插件目录结构
+
+- **manifest.json** – 插件清单（name: ScreenSync, id: iphone-screenshot-sync）。
+- **code.js** – Figma 沙箱侧逻辑：UI 消息通信、clientStorage、节点操作、图片导入、GIF 导出。
+- **ui.html** – 插件 UI 与 WebSocket 客户端；连接本地 ScreenSync 服务。
+
+## 在这里开发/修改时
+
+- 保持插件契约不变：`code.js` ↔ `ui.html` 的消息类型与 payload 需要保持一致。
+- 服务端集成：`server.js` 与 `update-handlers.js` 使用 `sendToFigma`，并期望存在 `targetGroup.figma` WebSocket。
+- 打包约束：`package-for-update.sh` 与 `package-for-icloud.sh` 依赖 `figma-plugin/manifest.json`、`code.js`、`ui.html`。
+
+## Cursor 中的 Figma MCP
+
+用于设计稿转代码、按 Figma 实现 UI、或进行 Code Connect 映射时：
+
+- 当用户提供 Figma 链接或要求实现设计时，使用 **Figma MCP**（plugin-figma-figma）。
+- 需要 1:1 视觉还原实现时，使用 **implement-design** 技能。
+- 需要将 Figma 组件连接到代码组件时，使用 **code-connect-components** 技能。
+- 需要生成/沉淀设计系统规则时，使用 **create-design-system-rules** 技能。
+
+请确保在 Cursor 中已启用并完成 Figma MCP 的认证（Settings → Tools & MCP），否则上述工具不可用。

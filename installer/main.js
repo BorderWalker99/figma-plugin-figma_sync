@@ -1,6 +1,6 @@
 const { app, BrowserWindow, ipcMain, dialog, clipboard } = require('electron');
 const path = require('path');
-const { exec, spawn, execFile } = require('child_process');
+const { exec, spawn, execFile, spawnSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 
@@ -250,8 +250,49 @@ function collectBundledRuntimePermissionTargets(installPath) {
   for (const executablePath of [status.node, status.ffmpeg, status.ffprobe, status.gifsicle, status.magick, status.convert]) {
     if (executablePath) targets.add(executablePath);
   }
+  for (const addonPath of collectNativeNodeAddonPaths(installPath)) {
+    targets.add(path.dirname(addonPath));
+    targets.add(addonPath);
+  }
 
   return Array.from(targets).filter(Boolean);
+}
+
+function collectNativeNodeAddonPaths(installPath) {
+  const packageRoot = resolvePackageRootFromInstallPath(installPath || currentInstallPath);
+  if (!packageRoot) return [];
+
+  const nodeModulesRoot = path.join(packageRoot, 'node_modules');
+  if (!fs.existsSync(nodeModulesRoot)) return [];
+
+  const results = [];
+  const seen = new Set();
+  const stack = [nodeModulesRoot];
+
+  while (stack.length > 0) {
+    const currentDir = stack.pop();
+    let entries = [];
+    try {
+      entries = fs.readdirSync(currentDir, { withFileTypes: true });
+    } catch (_) {
+      continue;
+    }
+
+    for (const entry of entries) {
+      if (!entry || entry.name === '.bin') continue;
+      const fullPath = path.join(currentDir, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(fullPath);
+        continue;
+      }
+      if (!entry.isFile() || !entry.name.endsWith('.node')) continue;
+      if (seen.has(fullPath)) continue;
+      seen.add(fullPath);
+      results.push(fullPath);
+    }
+  }
+
+  return results;
 }
 
 function isLikelyGatekeeperBlock(text) {
@@ -313,6 +354,19 @@ function buildPermissionBatchGuidance(failures = []) {
   }
 
   return lines.join('\n');
+}
+
+function hasQuarantineAttribute(targetPath) {
+  if (process.platform !== 'darwin' || !targetPath || !fs.existsSync(targetPath)) return false;
+  try {
+    const result = spawnSync('xattr', ['-p', 'com.apple.quarantine', targetPath], {
+      encoding: 'utf8',
+      timeout: 5000
+    });
+    return result.status === 0 && String(result.stdout || '').trim().length > 0;
+  } catch (_) {
+    return false;
+  }
 }
 
 async function clearBundledRuntimeQuarantine(installPath, sendLog = () => {}) {
@@ -1022,6 +1076,39 @@ async function warmupBundledRuntimeExecutables(installPath, sendLog = () => {}, 
       }
     }
   ];
+  const nativeAddonPaths = collectNativeNodeAddonPaths(currentInstallPath);
+  const nodeBinary = runtimeStatus.node || resolveNodeBinary(currentInstallPath);
+
+  for (const addonPath of nativeAddonPaths) {
+    toolChecks.push({
+      key: `native:${path.basename(addonPath)}`,
+      label: `原生模块 ${path.basename(addonPath)}`,
+      path: addonPath,
+      gatekeeperOnly: true,
+      run: async () => {
+        if (!nodeBinary) {
+          throw new Error('未找到 Node.js，无法预热原生模块');
+        }
+        await execFilePromise(nodeBinary, [
+          '-e',
+          [
+            'const addonPath = process.argv[1];',
+            'try {',
+            '  require(addonPath);',
+            '} catch (error) {',
+            '  const detail = error && (error.stack || error.message) ? (error.stack || error.message) : String(error);',
+            '  process.stderr.write(detail);',
+            '  process.exit(1);',
+            '}'
+          ].join('\n'),
+          addonPath
+        ], {
+          cwd: currentInstallPath,
+          timeout: 10000
+        });
+      }
+    });
+  }
 
   sendLog('🧪 正在预热并验证内置运行时...');
   const failures = [];
@@ -1053,6 +1140,11 @@ async function warmupBundledRuntimeExecutables(installPath, sendLog = () => {}, 
       verifiedTools.push(check.key);
     } catch (error) {
       const detail = String(error?.stderr || error?.stdout || error?.message || error || '');
+      const looksLikeGatekeeper = hasQuarantineAttribute(check.path) || isLikelyGatekeeperBlock(detail);
+      if (check.gatekeeperOnly && !looksLikeGatekeeper) {
+        sendLog(`   ⚠️ ${check.label} 预热失败，但不像系统安全拦截，已跳过`);
+        continue;
+      }
       const failure = {
         key: check.key,
         label: check.label,
