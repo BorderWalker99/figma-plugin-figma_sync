@@ -2835,7 +2835,7 @@ function checkPort(port) {
   });
 }
 
-ipcMain.handle('start-server', async (event, installPath) => {
+function startServerInternal(installPath, emit = null) {
   return new Promise(async (resolve) => {
     currentInstallPath = installPath || currentInstallPath;
     applyBundledRuntimeEnv(currentInstallPath);
@@ -2899,12 +2899,16 @@ ipcMain.handle('start-server', async (event, installPath) => {
     
     child.stdout.on('data', (data) => {
       output += data.toString();
-      event.sender.send('server-output', { data: data.toString() });
+      if (typeof emit === 'function') {
+        try { emit('server-output', { data: data.toString() }); } catch (_) {}
+      }
     });
     
     child.stderr.on('data', (data) => {
       output += data.toString();
-      event.sender.send('server-output', { data: data.toString() });
+      if (typeof emit === 'function') {
+        try { emit('server-output', { data: data.toString() }); } catch (_) {}
+      }
     });
 
     child.on('exit', (code, signal) => {
@@ -2970,6 +2974,12 @@ ipcMain.handle('start-server', async (event, installPath) => {
       finish({ success: false, error: error.message });
     });
   });
+}
+
+ipcMain.handle('start-server', async (event, installPath) => {
+  return startServerInternal(installPath, (channel, payload) => {
+    event.sender.send(channel, payload);
+  });
 });
 
 ipcMain.handle('copy-to-clipboard', async (event, text) => {
@@ -3012,16 +3022,19 @@ function setupAutostartInternal(installPath) {
           return;
         }
 
-        const detail = (parsed && (parsed.error || parsed.message))
+        const summary = (parsed && (parsed.error || parsed.message))
           || (stderr || stdout || (error && error.message) || '未知错误');
+        const detail = (parsed && parsed.detail)
+          || (stderr || stdout || summary || '未知错误');
         resolve({
           success: false,
-          error: `配置自动启动失败\n${detail}`
+          error: `配置自动启动失败\n${summary}`,
+          detail
         });
       });
       
     } catch (error) {
-      resolve({ success: false, error: error.message });
+      resolve({ success: false, error: error.message, detail: error.message });
     }
   });
 }
@@ -3078,7 +3091,23 @@ ipcMain.handle('finalize-installation', async (event, installPath, options = {})
       sendLog('⏭️ 已完成权限验证，跳过重复预热。');
     }
 
-    sendLog('🚀 正在配置开机自启动并验证服务器启动...');
+    sendLog('🚀 正在启动本地服务并验证 8888 端口...');
+    const startResult = await startServerInternal(currentInstallPath, (channel, payload) => {
+      if (channel === 'server-output' && payload && typeof payload.data === 'string') {
+        sendLog(payload.data);
+      }
+    });
+    if (!startResult.success) {
+      appendDetail(startResult.error);
+      return {
+        success: false,
+        error: startResult.error,
+        failedTool: 'server',
+        detail: logs.join('\n')
+      };
+    }
+
+    sendLog('🚀 正在配置开机自启动...');
     const autostartResult = await setupAutostartInternal(currentInstallPath);
     if (!autostartResult.success) {
       appendDetail(autostartResult.error);

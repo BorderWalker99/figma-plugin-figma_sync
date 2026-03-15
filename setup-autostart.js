@@ -143,6 +143,91 @@ function output(result) {
   process.stdout.write(`${JSON.stringify(result)}\n`);
 }
 
+function readFileTail(filePath, maxChars = 4000) {
+  try {
+    if (!filePath || !fs.existsSync(filePath)) return '';
+    const text = fs.readFileSync(filePath, 'utf8');
+    if (!text) return '';
+    return text.slice(-maxChars).trim();
+  } catch (_) {
+    return '';
+  }
+}
+
+function buildAutostartDiagnostics({
+  installPath,
+  label,
+  uidRes,
+  nodePath,
+  startScript,
+  plistPath,
+  loadRes,
+  bootstrapRes
+}) {
+  const lines = [];
+  const domain = uidRes && uidRes.ok && uidRes.out ? `gui/${uidRes.out}` : '';
+  const launchctlTarget = domain ? `${domain}/${label}` : label;
+  const launchctlPrint = run(`launchctl print ${shQuote(launchctlTarget)} 2>/dev/null`);
+  const portInfo = run('lsof -nP -iTCP:8888 -sTCP:LISTEN 2>/dev/null');
+  const startLockPath = path.join(
+    os.tmpdir(),
+    'screensync-locks',
+    `start-${crypto.createHash('md5').update(installPath).digest('hex')}.lock`
+  );
+  const projectStdout = readFileTail(path.join(installPath, 'server.log'));
+  const projectStderr = readFileTail(path.join(installPath, 'server-error.log'));
+  const tmpStdout = readFileTail('/tmp/screensync-server.log');
+  const tmpStderr = readFileTail('/tmp/screensync-server-error.log');
+
+  lines.push(`installPath: ${installPath}`);
+  lines.push(`nodePath: ${nodePath || '(empty)'}`);
+  lines.push(`startScriptExists: ${fs.existsSync(startScript)}`);
+  lines.push(`plistPath: ${plistPath}`);
+  lines.push(`plistExists: ${fs.existsSync(plistPath)}`);
+  lines.push(`nodeModulesExists: ${fs.existsSync(path.join(installPath, 'node_modules'))}`);
+  lines.push(`port8888Listening: ${portReady()}`);
+  lines.push(`startLockExists: ${fs.existsSync(startLockPath)}`);
+
+  if (loadRes) {
+    lines.push(`launchctl load: ${loadRes.ok ? 'ok' : 'failed'}${loadRes.out ? ` | ${loadRes.out}` : ''}`);
+  }
+  if (bootstrapRes) {
+    lines.push(`launchctl bootstrap: ${bootstrapRes.ok ? 'ok' : 'failed'}${bootstrapRes.out ? ` | ${bootstrapRes.out}` : ''}`);
+  }
+  if (launchctlPrint.out) {
+    lines.push('');
+    lines.push('[launchctl print]');
+    lines.push(launchctlPrint.out);
+  }
+  if (portInfo.out) {
+    lines.push('');
+    lines.push('[port 8888]');
+    lines.push(portInfo.out);
+  }
+  if (projectStdout) {
+    lines.push('');
+    lines.push('[server.log tail]');
+    lines.push(projectStdout);
+  }
+  if (projectStderr) {
+    lines.push('');
+    lines.push('[server-error.log tail]');
+    lines.push(projectStderr);
+  }
+  if (tmpStdout) {
+    lines.push('');
+    lines.push('[/tmp/screensync-server.log tail]');
+    lines.push(tmpStdout);
+  }
+  if (tmpStderr) {
+    lines.push('');
+    lines.push('[/tmp/screensync-server-error.log tail]');
+    lines.push(tmpStderr);
+  }
+
+  return lines.join('\n').trim();
+}
+
 /**
  * Resolve the Node path that the user would use when running `npm start` manually.
  * Prefer the login shell's `which node` so we match nvm/homebrew in ~/.zshrc.
@@ -270,6 +355,8 @@ function main() {
   const label = 'com.screensync.server';
   const uidRes = run('id -u');
   let loaded = false;
+  let loadRes = null;
+  let bootstrapRes = null;
 
   if (uidRes.ok && uidRes.out) {
     const domain = `gui/${uidRes.out}`;
@@ -279,7 +366,7 @@ function main() {
   // ── Phase 1: Load plist into launchd (configure autostart for reboot) ──
   run(`launchctl unload ${shQuote(plistPath)} 2>/dev/null`);
   sleepSec(1);
-  const loadRes = run(`launchctl load ${shQuote(plistPath)}`);
+  loadRes = run(`launchctl load ${shQuote(plistPath)}`);
   if (loadRes.ok || (loadRes.out && loadRes.out.includes('already loaded'))) {
     loaded = true;
   }
@@ -288,14 +375,27 @@ function main() {
     const domain = `gui/${uidRes.out}`;
     run(`launchctl bootout ${domain}/${label} 2>/dev/null`);
     sleepSec(1);
-    const bootstrap = run(`launchctl bootstrap ${domain} ${shQuote(plistPath)}`);
-    if (bootstrap.ok) {
+    bootstrapRes = run(`launchctl bootstrap ${domain} ${shQuote(plistPath)}`);
+    if (bootstrapRes.ok) {
       loaded = true;
     }
   }
 
   if (!loaded) {
-    output({ success: false, error: 'LaunchAgent 加载失败（load/bootstrap 均失败）' });
+    output({
+      success: false,
+      error: 'LaunchAgent 加载失败（load/bootstrap 均失败）',
+      detail: buildAutostartDiagnostics({
+        installPath,
+        label,
+        uidRes,
+        nodePath,
+        startScript,
+        plistPath,
+        loadRes,
+        bootstrapRes
+      })
+    });
     process.exit(1);
   }
 
@@ -334,7 +434,20 @@ function main() {
 
   // ── Phase 4: LaunchAgent failed to bring up the server ────────────────────
   if (strictInstallerMode) {
-    output({ success: false, error: '自启动配置已写入，但 LaunchAgent 未能成功启动服务器并监听 8888 端口' });
+    output({
+      success: false,
+      error: '自启动配置已写入，但 LaunchAgent 未能成功启动服务器并监听 8888 端口',
+      detail: buildAutostartDiagnostics({
+        installPath,
+        label,
+        uidRes,
+        nodePath,
+        startScript,
+        plistPath,
+        loadRes,
+        bootstrapRes
+      })
+    });
     process.exit(1);
   }
 
@@ -348,7 +461,20 @@ function main() {
     process.exit(0);
   }
 
-  output({ success: false, error: '自启动已配置，但服务器未成功监听 8888 端口（请查看 /tmp/screensync-server-error.log）' });
+  output({
+    success: false,
+    error: '自启动已配置，但服务器未成功监听 8888 端口（请查看 /tmp/screensync-server-error.log）',
+    detail: buildAutostartDiagnostics({
+      installPath,
+      label,
+      uidRes,
+      nodePath,
+      startScript,
+      plistPath,
+      loadRes,
+      bootstrapRes
+    })
+  });
   process.exit(1);
 }
 
