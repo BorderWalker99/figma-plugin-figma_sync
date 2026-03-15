@@ -5375,6 +5375,7 @@
     let _wsConnectTimeoutId = null;
     let initialConnectFallbackTimer = null; // 首次打开 5 秒兜底：仍未连上则显示帮助态
     let expectingServerRestartUntil = 0;
+    let serverHelpOverlayEl = null;
 
     function isBrowserOffline() {
       return typeof navigator !== 'undefined' && navigator.onLine === false;
@@ -5474,13 +5475,14 @@
       fetch('http://localhost:8888/health', { mode: 'no-cors' })
         .then(() => {
           log('🔄 服务器可达，正在重新连接 WebSocket...');
+          hideServerStartHelp();
           scheduleReconnectAttempt(0);
           setTimeout(() => {
             if (!ws || ws.readyState !== WebSocket.OPEN) {
               log('❌ WebSocket 连接失败，显示帮助');
               updateStatus('disconnected', t('status_reconnect'));
               reconnectAttempts = 0;
-              showServerStartHelp();
+              showServerStartHelp({ isUpdateFlow: Date.now() < expectingServerRestartUntil });
             } else {
               reconnectAttempts = 0;
               log('✅ 服务器已连接成功');
@@ -5492,56 +5494,87 @@
           log('❌ 服务器不可达，请先启动 ScreenSync 主应用');
           updateStatus('disconnected', t('status_reconnect'));
           reconnectAttempts = 0;
-          showServerStartHelp();
+          showServerStartHelp({ isUpdateFlow: Date.now() < expectingServerRestartUntil });
         });
     }
     
+    function hideServerStartHelp() {
+      if (serverHelpOverlayEl && serverHelpOverlayEl.parentNode) {
+        serverHelpOverlayEl.parentNode.removeChild(serverHelpOverlayEl);
+      }
+      serverHelpOverlayEl = null;
+    }
+
     // 显示服务器启动帮助
-    function showServerStartHelp() {
-      const restartBtnText = currentLang === 'zh' ? '重启插件' : 'Restart Plugin';
-      const helpHtml = `
-        <div style="height: 100%; display: flex; align-items: center; justify-content: center;">
-          <div style="display: flex; flex-direction: column; align-items: center; text-align: center; padding: 0; max-width: 300px;">
-            <svg width="38" height="41" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom: 20px;">
-              <line x1="12" y1="3.2" x2="12" y2="15.4"></line>
-              <line x1="12" y1="22.8" x2="12.01" y2="22.8"></line>
-            </svg>
+    function showServerStartHelp(options = {}) {
+      const isUpdateFlow = options.isUpdateFlow === true;
+      const title = options.title || (currentLang === 'zh'
+        ? (isUpdateFlow ? '更新后服务器未恢复连接' : '服务器未连接')
+        : (isUpdateFlow ? 'Server did not reconnect after update' : 'Server Disconnected'));
+      const bodyHtml = options.bodyHtml || (currentLang === 'zh'
+        ? (isUpdateFlow
+          ? '更新包已下载完成，但本地服务还没有恢复连接。<br/>你可以先点击“重新连接服务器”，如果仍然失败，再关闭插件后重新打开。'
+          : '请先尝试重新连接服务器；如果仍失败，再前往“系统设置 - 通用 - 登录项与扩展”，找到“node”，关闭后重新打开，然后关闭并重新打开插件。')
+        : (isUpdateFlow
+          ? 'The update finished downloading, but the local server did not come back online.<br/>Try reconnecting first. If it still fails, close and reopen the plugin.'
+          : 'Try reconnecting to the server first. If it still fails, go to System Settings > General > Login Items, find "node", toggle it off and on, then close and reopen the plugin.'));
+      const retryBtnText = currentLang === 'zh' ? '重新连接服务器' : 'Reconnect Server';
+      const closeBtnText = currentLang === 'zh' ? '关闭插件' : 'Close Plugin';
 
-            <div style="font-size: 16px; font-weight: 600; color: var(--text-primary); margin-bottom: 12px;">
-              ${currentLang === 'zh' ? '服务器未连接' : 'Server Disconnected'}
-            </div>
+      hideServerStartHelp();
 
-            <div style="font-size: 12px; color: var(--text-secondary); line-height: 1.65; margin-bottom: 16px;">
-              ${currentLang === 'zh'
-                ? '请尝试如下解决方案：<br/>前往\u201C系统设置 - 通用 - 登录项与扩展\u201D，<br/>找到\u201Cnode\u201D，关闭后重新打开，最后重启插件。'
-                : 'Try this:<br/>Go to System Settings &gt; General &gt; Login Items,<br/>find "node" in background items,<br/>toggle it off then on,<br/>then restart the plugin.'}
-            </div>
-
-            <button id="serverHelpRestartBtn" class="btn btn-primary" style="width: 200px;">
-              ${restartBtnText}
-            </button>
-
-            <div style="margin-top: 32px; font-size: 12px; color: var(--text-tertiary); line-height: 1.5;">
-              ${currentLang === 'zh' ? '如仍未解决，请联系开发者' : 'If unresolved, contact developer'}
-              <br/>borderwalker99@gmail.com
-            </div>
+      const overlay = document.createElement('div');
+      overlay.id = 'serverHelpOverlay';
+      overlay.style.cssText = [
+        'position:fixed',
+        'inset:0',
+        'z-index:10001',
+        'display:flex',
+        'align-items:center',
+        'justify-content:center',
+        'padding:20px',
+        'background:rgba(11,13,18,0.72)',
+        'backdrop-filter:blur(8px)'
+      ].join(';');
+      overlay.innerHTML = `
+        <div style="width:min(320px, 100%); border-radius:20px; padding:24px 20px; background:var(--bg-primary); border:1px solid var(--border-color); box-shadow:0 24px 64px rgba(0,0,0,0.28); text-align:center;">
+          <svg width="38" height="41" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom:18px;">
+            <line x1="12" y1="3.2" x2="12" y2="15.4"></line>
+            <line x1="12" y1="22.8" x2="12.01" y2="22.8"></line>
+          </svg>
+          <div style="font-size:16px; font-weight:600; color:var(--text-primary); margin-bottom:10px;">${title}</div>
+          <div style="font-size:12px; color:var(--text-secondary); line-height:1.7; margin-bottom:18px;">${bodyHtml}</div>
+          <div style="display:flex; flex-direction:column; gap:10px;">
+            <button id="serverHelpRetryBtn" class="btn btn-primary" style="width:100%;">${retryBtnText}</button>
+            <button id="serverHelpCloseBtn" class="btn" style="width:100%; background:var(--bg-secondary); color:var(--text-primary);">${closeBtnText}</button>
+          </div>
+          <div style="margin-top:18px; font-size:11px; color:var(--text-tertiary); line-height:1.5;">
+            ${currentLang === 'zh' ? '如仍未解决，请联系开发者' : 'If unresolved, contact developer'}
+            <br/>borderwalker99@gmail.com
           </div>
         </div>
       `;
-      
-      const container = document.querySelector('.app') || document.body;
-      container.innerHTML = helpHtml;
-      container.style.overflow = 'hidden';
-      container.style.height = '100vh';
-      document.body.style.overflow = 'hidden';
-      document.documentElement.style.overflow = 'hidden';
-      
+
+      document.body.appendChild(overlay);
+      serverHelpOverlayEl = overlay;
+
       window.retryStartServer = function() {
-        parent.postMessage({ pluginMessage: { type: 'restart-plugin' } }, '*');
+        reconnectAttempts = 0;
+        expectingServerRestartUntil = Date.now() + 60 * 1000;
+        hideServerStartHelp();
+        updateStatus('waiting', t('status_connecting'));
+        repairServerConnection();
       };
 
-      const restartBtn = document.getElementById('serverHelpRestartBtn');
-      if (restartBtn) restartBtn.onclick = window.retryStartServer;
+      const retryBtn = overlay.querySelector('#serverHelpRetryBtn');
+      const closeBtn = overlay.querySelector('#serverHelpCloseBtn');
+      if (retryBtn) retryBtn.onclick = window.retryStartServer;
+      if (closeBtn) {
+        closeBtn.onclick = function() {
+          hideServerStartHelp();
+          parent.postMessage({ pluginMessage: { type: 'close-plugin' } }, '*');
+        };
+      }
     }
 
     function connect() {
@@ -5583,13 +5616,14 @@
       try {
         isWsConnecting = true;
         ws = new WebSocket(SERVER_URL + '?id=' + connectionId + '&type=figma');
+        const connectTimeoutMs = Date.now() < expectingServerRestartUntil ? 3000 : 10000;
         
         clearTimeout(_wsConnectTimeoutId);
         _wsConnectTimeoutId = setTimeout(() => {
           if (ws && ws.readyState === WebSocket.CONNECTING) {
             ws.close();
           }
-        }, 10000);
+        }, connectTimeoutMs);
         
       } catch (error) {
         isWsConnecting = false;
@@ -5617,6 +5651,7 @@
         if (reconnectAttemptTimer) { clearTimeout(reconnectAttemptTimer); reconnectAttemptTimer = null; }
         reconnectAttempts = 0;
         expectingServerRestartUntil = 0;
+        hideServerStartHelp();
         if (initialConnectFallbackTimer) {
           clearTimeout(initialConnectFallbackTimer);
           initialConnectFallbackTimer = null;
@@ -6398,6 +6433,7 @@
           // ❌ 重试次数耗尽，显示手动重连按钮
           log('❌ 自动重连失败，请手动点击重连');
           updateStatus('disconnected', t('status_reconnect'));
+          showServerStartHelp({ isUpdateFlow: Date.now() < expectingServerRestartUntil });
           scheduleBackgroundReconnect();
         }
       };
@@ -8157,6 +8193,11 @@
           setTimeout(() => {
             showToast(t('toast_update_done_restart'), 'success');
           }, 3000);
+        }
+
+        if (Date.now() < expectingServerRestartUntil) {
+          updateStatus('waiting', currentLang === 'zh' ? '服务器重启中...' : 'Server restarting...');
+          scheduleReconnectAttempt(2200);
         }
         
       } else if (data.status === 'error') {
