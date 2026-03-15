@@ -208,6 +208,7 @@ create_package() {
     cp setup-autostart.js "$TEMP_DIR/项目文件/"
     cp update-manager.js "$TEMP_DIR/项目文件/"
     cp update-handlers.js "$TEMP_DIR/项目文件/"
+    cp recording-task-store.js "$TEMP_DIR/项目文件/" 2>/dev/null || true
     cp gif-composer.js "$TEMP_DIR/项目文件/"
 cp video-gif-pipeline.js "$TEMP_DIR/项目文件/"
     cp image-processor.js "$TEMP_DIR/项目文件/"

@@ -1372,6 +1372,7 @@ REQUIRED_FILES=(
   "server.js"
   "start.js"
   "setup-autostart.js"
+  "recording-task-store.js"
   "drive-watcher.js"
   "icloud-watcher.js"
   "gif-composer.js"

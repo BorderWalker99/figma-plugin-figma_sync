@@ -1445,6 +1445,7 @@ async function handleFullUpdate(targetGroup, connectionId) {
         'aliyunOSS.js',
         'aliyun-watcher.js',
         'icloud-watcher.js',
+        'recording-task-store.js',
         'userConfig.js',
         'setup-autostart.js',
         'update-manager.js',
