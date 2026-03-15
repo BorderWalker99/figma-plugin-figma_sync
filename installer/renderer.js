@@ -391,7 +391,7 @@ let permissionNeedsApproval = false;
 let permissionFocusRetryTimer = null;
 let permissionSettingsAutoOpened = false;
 
-function setPermissionButtonsState({ checking = false, canContinue = false } = {}) {
+function setPermissionButtonsState({ checking = false, canContinue = false, showSecurityAction = true } = {}) {
   const openBtn = document.getElementById('step5OpenSecurity');
   const retryBtn = document.getElementById('step5Retry');
   const nextBtn = document.getElementById('step5Next');
@@ -409,7 +409,7 @@ function setPermissionButtonsState({ checking = false, canContinue = false } = {
     spacer.style.display = canContinue ? 'flex' : 'none';
   }
   if (openBtn) {
-    openBtn.style.display = canContinue ? 'none' : 'inline-flex';
+    openBtn.style.display = !canContinue && showSecurityAction ? 'inline-flex' : 'none';
   }
   if (retryBtn) {
     retryBtn.style.display = canContinue ? 'none' : 'inline-flex';
@@ -489,28 +489,39 @@ async function runPermissionWarmupCheck({ triggeredByFocus = false } = {}) {
       return;
     }
 
-    permissionNeedsApproval = true;
+    const blockingFailures = result && Array.isArray(result.blockingFailures) ? result.blockingFailures : [];
+    if (result && result.requiresManualApproval) {
+      permissionNeedsApproval = true;
+      renderPermissionStatus({
+        state: 'pending',
+        detail: t('step5_pending_detail'),
+        pendingTools: Array.isArray(result.pendingTools) ? result.pendingTools : []
+      });
+      setPermissionButtonsState({ checking: false, canContinue: false, showSecurityAction: true });
+      if (!permissionSettingsAutoOpened && !triggeredByFocus) {
+        permissionSettingsAutoOpened = true;
+        window.openSecuritySettings({ silent: true });
+      }
+      return;
+    }
+
+    permissionNeedsApproval = false;
     renderPermissionStatus({
       state: 'pending',
-      detail: t('step5_pending_detail'),
-      pendingTools: result && Array.isArray(result.pendingTools) ? result.pendingTools : []
+      detail: (result && result.error) || '检测到运行时错误，请修复后重试。',
+      pendingTools: blockingFailures.map(item => item.label)
     });
-    setPermissionButtonsState({ checking: false, canContinue: false });
-    if (!permissionSettingsAutoOpened && !triggeredByFocus) {
-      permissionSettingsAutoOpened = true;
-      window.openSecuritySettings({ silent: true });
+    setPermissionButtonsState({ checking: false, canContinue: false, showSecurityAction: false });
+    if (!triggeredByFocus && result && (result.detail || result.error)) {
+      showErrorDetailModal(result.detail || result.error, t('install_failed'));
     }
   } catch (error) {
-    permissionNeedsApproval = true;
+    permissionNeedsApproval = false;
     renderPermissionStatus({
       state: 'pending',
       detail: error && error.message ? error.message : t('install_failed')
     });
-    setPermissionButtonsState({ checking: false, canContinue: false });
-    if (!permissionSettingsAutoOpened && !triggeredByFocus) {
-      permissionSettingsAutoOpened = true;
-      window.openSecuritySettings({ silent: true });
-    }
+    setPermissionButtonsState({ checking: false, canContinue: false, showSecurityAction: false });
   } finally {
     permissionCheckInFlight = false;
   }

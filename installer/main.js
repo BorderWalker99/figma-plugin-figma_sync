@@ -259,6 +259,10 @@ function collectBundledRuntimePermissionTargets(installPath) {
 }
 
 function collectNativeNodeAddonPaths(installPath) {
+  return collectNativeNodeAddonDescriptors(installPath).map((item) => item.addonPath);
+}
+
+function collectNativeNodeAddonDescriptors(installPath) {
   const packageRoot = resolvePackageRootFromInstallPath(installPath || currentInstallPath);
   if (!packageRoot) return [];
 
@@ -288,11 +292,51 @@ function collectNativeNodeAddonPaths(installPath) {
       if (!entry.isFile() || !entry.name.endsWith('.node')) continue;
       if (seen.has(fullPath)) continue;
       seen.add(fullPath);
-      results.push(fullPath);
+      const owner = describeNativeAddonOwner(fullPath, nodeModulesRoot);
+      results.push({
+        addonPath: fullPath,
+        packageRoot: owner.packageRoot,
+        packageName: owner.packageName,
+        label: owner.packageName
+          ? `原生模块 ${owner.packageName}`
+          : `原生模块 ${path.basename(fullPath)}`
+      });
     }
   }
 
   return results;
+}
+
+function describeNativeAddonOwner(addonPath, nodeModulesRoot) {
+  let currentDir = path.dirname(addonPath);
+  const normalizedRoot = path.resolve(nodeModulesRoot);
+
+  while (currentDir && currentDir.startsWith(normalizedRoot)) {
+    const pkgPath = path.join(currentDir, 'package.json');
+    if (fs.existsSync(pkgPath)) {
+      try {
+        const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+        return {
+          packageRoot: currentDir,
+          packageName: pkg && pkg.name ? String(pkg.name) : ''
+        };
+      } catch (_) {
+        return {
+          packageRoot: currentDir,
+          packageName: ''
+        };
+      }
+    }
+    if (currentDir === normalizedRoot) break;
+    const parentDir = path.dirname(currentDir);
+    if (!parentDir || parentDir === currentDir) break;
+    currentDir = parentDir;
+  }
+
+  return {
+    packageRoot: '',
+    packageName: ''
+  };
 }
 
 function isLikelyGatekeeperBlock(text) {
@@ -303,6 +347,10 @@ function isLikelyGatekeeperBlock(text) {
     'cannot be opened because the developer cannot be verified',
     'is damaged and can\'t be opened',
     'is damaged and can’t be opened',
+    'library load disallowed by system policy',
+    'code signature invalid',
+    'mapped file has no cdhash',
+    'not valid for use in process',
     'operation not permitted',
     'spawn eperm',
     'killed: 9'
@@ -310,15 +358,20 @@ function isLikelyGatekeeperBlock(text) {
 }
 
 function buildPermissionRetryGuidance(displayName, executablePath, details) {
-  const gatekeeperHint = isLikelyGatekeeperBlock(details)
+  const failureClass = classifyRuntimeProbeFailure(executablePath, details);
+  const gatekeeperHint = failureClass.needsApproval
     ? `macOS 拦截了 ${displayName} 的首次执行。`
     : `${displayName} 在安装阶段执行失败。`;
 
   return [
     `${gatekeeperHint}`,
     '',
-    '请前往“系统设置 -> 隐私与安全性”，点击对应项目后的“仍要打开”，然后回到安装器重新检测。',
-    '安装器会在安装阶段重新验证这些运行时工具，避免把权限问题拖到首次 GIF 导出或首次同步时才暴露。',
+    failureClass.needsApproval
+      ? '请前往“系统设置 -> 隐私与安全性”，点击对应项目后的“仍要打开”，然后回到安装器重新检测。'
+      : '这不是“仍要打开”授权问题，请先修复该组件或安装包内容，再重新检测。',
+    failureClass.needsApproval
+      ? '安装器会在安装阶段重新验证这些运行时工具，避免把权限问题拖到首次 GIF 导出或首次同步时才暴露。'
+      : '安装器不会把这类运行时错误误判为已授权通过。',
     '',
     `可执行文件: ${executablePath}`,
     details ? `原始信息:\n${details}` : ''
@@ -327,24 +380,42 @@ function buildPermissionRetryGuidance(displayName, executablePath, details) {
 
 function buildPermissionBatchGuidance(failures = []) {
   const pending = failures.filter(Boolean);
+  const approvalPending = pending.filter(item => item && item.needsApproval);
+  const blocking = pending.filter(item => item && !item.needsApproval);
   const lines = [
-    '请前往“系统设置 -> 隐私与安全性”，找到“安全性”分区，并依次点击下面这些项目对应的“仍要打开”。',
-    '完成后回到安装器，点击“重新检测”；只有当下面所有项目都通过预热验证后，才可以继续后续安装流程。',
+    approvalPending.length > 0
+      ? '请前往“系统设置 -> 隐私与安全性”，找到“安全性”分区，并依次点击下面这些项目对应的“仍要打开”。'
+      : '安装器在预热运行时组件时检测到错误。',
+    approvalPending.length > 0
+      ? '完成后回到安装器，点击“重新检测”；只有当下面所有项目都通过预热验证后，才可以继续后续安装流程。'
+      : '这些错误不是“仍要打开”授权问题，仅打开系统设置无法解决，需要先修复对应组件。',
     ''
   ];
 
-  if (pending.length > 0) {
+  if (approvalPending.length > 0) {
     lines.push('待完成授权的运行时工具:');
-    for (const item of pending) {
+    for (const item of approvalPending) {
       lines.push(`- ${item.label}`);
       if (item.path) {
         lines.push(`  路径: ${item.path}`);
       }
     }
     lines.push('');
+    lines.push('如果“隐私与安全性”页面里暂时没有出现对应按钮，请先回到安装器重新检测一次，让 macOS 记录这些被拦截的工具。');
   }
 
-  lines.push('如果“隐私与安全性”页面里暂时没有出现对应按钮，请先回到安装器重新检测一次，让 macOS 记录这些被拦截的工具。');
+  if (blocking.length > 0) {
+    lines.push('以下项目存在非授权类错误:');
+    for (const item of blocking) {
+      lines.push(`- ${item.label}`);
+      if (item.path) {
+        lines.push(`  路径: ${item.path}`);
+      }
+      if (item.detail) {
+        lines.push(`  详情: ${item.detail.split('\n')[0]}`);
+      }
+    }
+  }
 
   const firstFailure = pending.find(item => item && item.detail);
   if (firstFailure) {
@@ -367,6 +438,16 @@ function hasQuarantineAttribute(targetPath) {
   } catch (_) {
     return false;
   }
+}
+
+function classifyRuntimeProbeFailure(targetPath, detail) {
+  const hasQuarantine = hasQuarantineAttribute(targetPath);
+  const looksLikeGatekeeper = isLikelyGatekeeperBlock(detail);
+  return {
+    hasQuarantine,
+    looksLikeGatekeeper,
+    needsApproval: hasQuarantine || looksLikeGatekeeper
+  };
 }
 
 async function clearBundledRuntimeQuarantine(installPath, sendLog = () => {}) {
@@ -1076,15 +1157,14 @@ async function warmupBundledRuntimeExecutables(installPath, sendLog = () => {}, 
       }
     }
   ];
-  const nativeAddonPaths = collectNativeNodeAddonPaths(currentInstallPath);
+  const nativeAddons = collectNativeNodeAddonDescriptors(currentInstallPath);
   const nodeBinary = runtimeStatus.node || resolveNodeBinary(currentInstallPath);
 
-  for (const addonPath of nativeAddonPaths) {
+  for (const addon of nativeAddons) {
     toolChecks.push({
-      key: `native:${path.basename(addonPath)}`,
-      label: `原生模块 ${path.basename(addonPath)}`,
-      path: addonPath,
-      gatekeeperOnly: true,
+      key: `native:${addon.packageName || path.basename(addon.addonPath)}`,
+      label: addon.label,
+      path: addon.addonPath,
       run: async () => {
         if (!nodeBinary) {
           throw new Error('未找到 Node.js，无法预热原生模块');
@@ -1092,16 +1172,18 @@ async function warmupBundledRuntimeExecutables(installPath, sendLog = () => {}, 
         await execFilePromise(nodeBinary, [
           '-e',
           [
-            'const addonPath = process.argv[1];',
+            'const requireTarget = process.argv[1];',
+            'const addonPath = process.argv[2];',
             'try {',
-            '  require(addonPath);',
+            '  require(requireTarget || addonPath);',
             '} catch (error) {',
             '  const detail = error && (error.stack || error.message) ? (error.stack || error.message) : String(error);',
             '  process.stderr.write(detail);',
             '  process.exit(1);',
             '}'
           ].join('\n'),
-          addonPath
+          addon.packageRoot || addon.addonPath,
+          addon.addonPath
         ], {
           cwd: currentInstallPath,
           timeout: 10000
@@ -1140,16 +1222,13 @@ async function warmupBundledRuntimeExecutables(installPath, sendLog = () => {}, 
       verifiedTools.push(check.key);
     } catch (error) {
       const detail = String(error?.stderr || error?.stdout || error?.message || error || '');
-      const looksLikeGatekeeper = hasQuarantineAttribute(check.path) || isLikelyGatekeeperBlock(detail);
-      if (check.gatekeeperOnly && !looksLikeGatekeeper) {
-        sendLog(`   ⚠️ ${check.label} 预热失败，但不像系统安全拦截，已跳过`);
-        continue;
-      }
+      const failureClass = classifyRuntimeProbeFailure(check.path, detail);
       const failure = {
         key: check.key,
         label: check.label,
         path: check.path,
-        detail
+        detail,
+        needsApproval: failureClass.needsApproval
       };
       failures.push(failure);
       sendLog(`   ❌ ${check.label} 验证失败`);
@@ -1282,11 +1361,13 @@ ipcMain.handle('warmup-runtime-permissions', async (event, installPath = null) =
   if (INSTALLER_MOCK) {
     await sleep(260);
     if (mockInstallerState.permissionApproved) {
-      return { success: true, verifiedTools: ['Node.js', 'FFmpeg', 'Gifsicle', 'ImageMagick'] };
+      return { success: true, verifiedTools: ['Node.js', 'FFmpeg', 'Gifsicle', 'ImageMagick'], requiresManualApproval: false, blockingFailures: [] };
     }
     return {
       success: false,
       pendingTools: ['Node.js', 'FFmpeg', 'Gifsicle', 'ImageMagick'],
+      requiresManualApproval: true,
+      blockingFailures: [],
       guidance: 'mock pending'
     };
   }
@@ -1301,11 +1382,15 @@ ipcMain.handle('warmup-runtime-permissions', async (event, installPath = null) =
     if (text) logs.push(text);
   };
 
-  await clearBundledRuntimeQuarantine(targetPath, sendLog);
   const result = await warmupBundledRuntimeExecutables(targetPath, sendLog, { collectAllFailures: true });
+  const failures = Array.isArray(result.failures) ? result.failures : [];
+  const approvalFailures = failures.filter(item => item && item.needsApproval);
+  const blockingFailures = failures.filter(item => item && !item.needsApproval);
   return {
     ...result,
-    pendingTools: Array.isArray(result.failures) ? result.failures.map(item => item.label) : [],
+    pendingTools: approvalFailures.map(item => item.label),
+    requiresManualApproval: approvalFailures.length > 0,
+    blockingFailures,
     detail: logs.join('\n')
   };
 });
@@ -2979,8 +3064,6 @@ ipcMain.handle('finalize-installation', async (event, installPath, options = {})
 
   try {
     if (!options.skipWarmup) {
-      await clearBundledRuntimeQuarantine(currentInstallPath, sendLog);
-
       const warmupResult = await warmupBundledRuntimeExecutables(currentInstallPath, sendLog);
       if (!warmupResult.success) {
         appendDetail(warmupResult.error);
