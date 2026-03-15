@@ -485,6 +485,7 @@ function startICloudMaintenance() {
 
 // 安全地加载 userConfig（Cloud Run 环境中可能不需要）
 let userConfig;
+const recordingTaskStore = require('./recording-task-store');
 try {
   userConfig = require('./userConfig');
 } catch (error) {
@@ -498,6 +499,51 @@ try {
     getLocalDownloadFolder: () => null,
     getGifFromCache: () => null
   };
+}
+
+function buildLocalGifTempUrl(cacheId, filename) {
+  const port = Number(process.env.PORT || 8888) || 8888;
+  return `http://localhost:${port}/gif-temp/${encodeURIComponent(cacheId)}?filename=${encodeURIComponent(filename || '')}`;
+}
+
+function serializeRecordingTask(task) {
+  if (!task) return null;
+  return {
+    taskId: task.taskId,
+    kind: task.kind || 'recording',
+    stage: task.stage,
+    filename: task.filename || task.originalFilename || '',
+    originalFilename: task.originalFilename || task.filename || '',
+    syncSource: task.syncSource || null,
+    source: task.source || null,
+    progress: Number.isFinite(task.progress) ? task.progress : null,
+    gifCacheId: task.gifCacheId || null,
+    imageWidth: task.imageWidth || null,
+    imageHeight: task.imageHeight || null,
+    keptInIcloud: task.keptInIcloud === true,
+    backedUpLocally: task.backedUpLocally === true,
+    importAttempts: Number(task.importAttempts || 0) || 0,
+    lastError: task.lastError || null,
+    updatedAt: task.updatedAt || null,
+    createdAt: task.createdAt || null
+  };
+}
+
+function sendRecordingTaskSnapshot(group, options = {}) {
+  const tasks = recordingTaskStore.listTasks({ limit: Number(options.limit || 50) || 50 });
+  return sendToFigma(group, {
+    type: 'recording-task-snapshot',
+    tasks: tasks.map(serializeRecordingTask)
+  });
+}
+
+function sendRecordingTaskUpdate(group, taskId) {
+  const task = recordingTaskStore.readTask(taskId);
+  if (!task) return false;
+  return sendToFigma(group, {
+    type: 'recording-task-update',
+    task: serializeRecordingTask(task)
+  });
 }
 
 // 辅助函数：清理文件名
@@ -3464,6 +3510,65 @@ wss.on('connection', (ws, req) => {
       return;
     }
     if (!targetGroup) {
+      return;
+    }
+
+    if (data.type === 'get-recording-tasks' && clientType === 'figma') {
+      sendRecordingTaskSnapshot(targetGroup, { limit: data.limit || 50 });
+      return;
+    }
+
+    if (data.type === 'recording-task-update' && clientType === 'mac') {
+      if (data.taskId) {
+        sendRecordingTaskUpdate(targetGroup, data.taskId);
+      }
+      return;
+    }
+
+    if (data.type === 'request-recording-import' && clientType === 'figma') {
+      const task = recordingTaskStore.readTask(data.taskId);
+      if (!task) {
+        sendToFigma(targetGroup, {
+          type: 'recording-task-update',
+          task: {
+            taskId: data.taskId || null,
+            stage: 'failed',
+            lastError: 'recording task not found'
+          }
+        });
+        return;
+      }
+      if (!task.gifCacheId || !task.filename) {
+        recordingTaskStore.markImportFailed(task.taskId, 'missing recording artifact');
+        sendRecordingTaskUpdate(targetGroup, task.taskId);
+        return;
+      }
+      const requested = recordingTaskStore.markImportRequested(task.taskId, {
+        filename: task.filename
+      });
+      sendRecordingTaskUpdate(targetGroup, requested.taskId);
+      sendToFigma(targetGroup, {
+        type: 'recording-import-request',
+        taskId: requested.taskId,
+        filename: requested.filename,
+        gifCacheId: requested.gifCacheId,
+        gifUrl: buildLocalGifTempUrl(requested.gifCacheId, requested.filename),
+        imageWidth: requested.imageWidth || null,
+        imageHeight: requested.imageHeight || null
+      });
+      return;
+    }
+
+    if (data.type === 'recording-import-result' && clientType === 'figma') {
+      if (!data.taskId) return;
+      if (data.success) {
+        recordingTaskStore.markImportSucceeded(data.taskId, {
+          importedAt: new Date().toISOString()
+        });
+      } else {
+        recordingTaskStore.markImportFailed(data.taskId, data.error || 'recording import failed');
+      }
+      sendRecordingTaskUpdate(targetGroup, data.taskId);
       return;
     }
     

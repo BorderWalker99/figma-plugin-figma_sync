@@ -2345,6 +2345,88 @@
         flex: 0 0 auto;
     }
 
+    .recording-task-panel {
+        border-radius: var(--radius-s);
+        background: var(--bg-card);
+        display: none;
+        flex-direction: column;
+        overflow: hidden;
+        margin-bottom: 12px;
+    }
+
+    .recording-task-panel.visible {
+        display: flex;
+    }
+
+    .recording-task-header {
+        padding: 6px 12px;
+        background: rgba(0,0,0,0.02);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        height: 28px;
+    }
+
+    .recording-task-list {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 10px 12px;
+        max-height: 148px;
+        overflow-y: auto;
+    }
+
+    .recording-task-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 8px 10px;
+        border-radius: 10px;
+        background: rgba(0,0,0,0.03);
+    }
+
+    .recording-task-main {
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+    }
+
+    .recording-task-name {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text-primary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .recording-task-meta {
+        font-size: 11px;
+        color: var(--text-tertiary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .recording-task-action {
+        border: none;
+        border-radius: 999px;
+        padding: 6px 10px;
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--accent);
+        background: rgba(0, 122, 255, 0.10);
+        cursor: pointer;
+        flex-shrink: 0;
+    }
+
+    .recording-task-action:disabled {
+        opacity: 0.5;
+        cursor: default;
+    }
+
     /* Info Box */
     .info-box {
       background: var(--accent-soft);
@@ -3962,6 +4044,13 @@
         <div class="info-box" id="infoBox" style="display:none;"></div>
         <div class="count-display" id="count" style="display:none;">0</div>
         <div id="modeSubtitle" style="display:none;"></div>
+        <div class="recording-task-panel" id="recordingTaskPanel">
+          <div class="recording-task-header">
+            <span class="log-title">RECORDINGS</span>
+            <span id="recordingTaskHint" style="font-size:11px; color:var(--text-tertiary);"></span>
+          </div>
+          <div class="recording-task-list" id="recordingTaskList"></div>
+        </div>
         <div class="log-wrapper" id="logContainer" style="display: none;">
           <div class="log-header" id="logHeader">
                 <span class="log-title" data-i18n="log_title">系统日志</span>
@@ -5040,6 +5129,9 @@
     postToPlugin('get-gif-algorithm');
     
     let ws = null;
+    const recordingTasks = new Map();
+    const pendingRecordingImportRequests = new Set();
+    const recordingTaskStageTrace = new Map();
     let isForceClosingPlugin = false;
     let forceCloseTimer = null;
     let screenshotCount = 0;
@@ -5071,6 +5163,121 @@
     let latestPluginVersion = null; // 最新版本（兼容旧协议；更新提示不再依赖它）
     let pluginUpdateUrl = null; // 更新下载地址（兼容旧协议）
     let pendingPluginUpdateInfo = null; // 暂存的插件更新信息（等待版本信息到达后再做展示用途）
+
+    function requestRecordingTaskSnapshot() {
+      wsSend('get-recording-tasks', { limit: 50 });
+    }
+
+    function getRecordingStageText(stage) {
+      const zh = {
+        queued: '已排队',
+        downloading: '下载中',
+        downloaded: '已下载',
+        converting: '转换中',
+        'gif-ready': '待导入',
+        'import-requested': '请求导入中',
+        'import-started': '导入中',
+        'import-succeeded': '已导入',
+        'import-failed': '导入失败',
+        failed: '任务失败',
+        done: '已完成'
+      };
+      const en = {
+        queued: 'Queued',
+        downloading: 'Downloading',
+        downloaded: 'Downloaded',
+        converting: 'Converting',
+        'gif-ready': 'Ready to import',
+        'import-requested': 'Import requested',
+        'import-started': 'Importing',
+        'import-succeeded': 'Imported',
+        'import-failed': 'Import failed',
+        failed: 'Failed',
+        done: 'Done'
+      };
+      const dict = currentLang === 'zh' ? zh : en;
+      return dict[stage] || stage || '';
+    }
+
+    function renderRecordingTasks() {
+      const panel = document.getElementById('recordingTaskPanel');
+      const listEl = document.getElementById('recordingTaskList');
+      const hintEl = document.getElementById('recordingTaskHint');
+      if (!panel || !listEl) return;
+
+      const tasks = Array.from(recordingTasks.values())
+        .sort((a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime())
+        .slice(0, 6);
+
+      if (tasks.length === 0) {
+        panel.classList.remove('visible');
+        listEl.innerHTML = '';
+        if (hintEl) hintEl.textContent = '';
+        return;
+      }
+
+      panel.classList.add('visible');
+      if (hintEl) {
+        hintEl.textContent = currentLang === 'zh' ? `最近 ${tasks.length} 条` : `${tasks.length} recent`;
+      }
+
+      listEl.innerHTML = tasks.map((task) => {
+        const canRetry = task.stage === 'gif-ready' || task.stage === 'import-failed';
+        const actionText = task.stage === 'gif-ready'
+          ? (currentLang === 'zh' ? '导入' : 'Import')
+          : (currentLang === 'zh' ? '重试' : 'Retry');
+        const metaText = [getRecordingStageText(task.stage), task.lastError].filter(Boolean).join(' · ');
+        return `
+          <div class="recording-task-item">
+            <div class="recording-task-main">
+              <div class="recording-task-name">${escapeHtml(task.filename || task.originalFilename || task.taskId)}</div>
+              <div class="recording-task-meta">${escapeHtml(metaText || (currentLang === 'zh' ? '无状态' : 'No status'))}</div>
+            </div>
+            ${canRetry
+              ? `<button class="recording-task-action" data-recording-task-retry="${task.taskId}">${actionText}</button>`
+              : ''
+            }
+          </div>
+        `;
+      }).join('');
+    }
+
+    function maybeRequestRecordingImport(task) {
+      if (!task || !task.taskId) return;
+      const retryableStage =
+        task.stage === 'gif-ready' ||
+        task.stage === 'import-requested' ||
+        (task.stage === 'import-failed' && Number(task.importAttempts || 0) < 2);
+      if (!retryableStage) {
+        pendingRecordingImportRequests.delete(task.taskId);
+        return;
+      }
+      if (pendingRecordingImportRequests.has(task.taskId)) return;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      pendingRecordingImportRequests.add(task.taskId);
+      wsSend('request-recording-import', { taskId: task.taskId });
+    }
+
+    function upsertRecordingTask(task) {
+      if (!task || !task.taskId) return;
+      const traceKey = `${task.taskId}:${task.stage}`;
+      if (recordingTaskStageTrace.get(task.taskId) !== traceKey) {
+        recordingTaskStageTrace.set(task.taskId, traceKey);
+        if (task.stage === 'gif-ready') {
+          log(`🗂️  录屏已转好，准备导入: ${task.filename || task.originalFilename || task.taskId}`);
+        } else if (task.stage === 'import-succeeded') {
+          log(`✅ 录屏已导入画板: ${task.filename || task.originalFilename || task.taskId}`);
+        } else if (task.stage === 'import-failed' || task.stage === 'failed') {
+          log(`❌ 录屏任务失败: ${task.filename || task.originalFilename || task.taskId}${task.lastError ? ' - ' + task.lastError : ''}`);
+        }
+      }
+      recordingTasks.set(task.taskId, task);
+      if (task.stage === 'import-succeeded' || task.stage === 'done' || task.stage === 'failed' || task.stage === 'import-failed') {
+        pendingRecordingImportRequests.delete(task.taskId);
+      }
+      renderRecordingTasks();
+      maybeRequestRecordingImport(task);
+    }
 
     // ✅ 统一版本序号：只用一个 sequence 管理更新提示/忽略/已安装，避免“服务器/插件两套状态”错位
     let installedAppVersionSeq = 0;
@@ -5127,6 +5334,15 @@
       } catch (error) {
         // 静默处理日志错误，避免递归
       }
+    }
+
+    function escapeHtml(value) {
+      return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
     }
 
     function traceGifExport(message, level = 'log') {
@@ -5420,6 +5636,7 @@
           wsSend('get-sync-mode');
           wsSend('get-server-info');
           wsSend('get-backup-screenshot-setting');
+          requestRecordingTaskSnapshot();
           // 自动检测更新（不需要打开设置）
           wsSend('check-update');
         }
@@ -5515,6 +5732,30 @@
             currentPluginVersion = String(data.version).replace(/^v/, '');
             postToPlugin('set-app-version', { version: currentPluginVersion });
           }
+        } else if (data.type === 'recording-task-snapshot') {
+          const tasks = Array.isArray(data.tasks) ? data.tasks : [];
+          tasks.forEach(upsertRecordingTask);
+        } else if (data.type === 'recording-task-update') {
+          if (data.task) {
+            upsertRecordingTask(data.task);
+          } else if (data.taskId) {
+            requestRecordingTaskSnapshot();
+          }
+        } else if (data.type === 'recording-import-request') {
+          parent.postMessage({
+            pluginMessage: {
+              type: 'add-screenshot',
+              bytes: null,
+              gifUrl: data.gifUrl || null,
+              imageWidth: data.imageWidth || null,
+              imageHeight: data.imageHeight || null,
+              timestamp: Date.now(),
+              filename: data.filename || '未命名文件',
+              taskId: data.taskId || null,
+              gifCacheId: data.gifCacheId || null,
+              recordingImportTask: true
+            }
+          }, '*');
         } else if (data.type === 'screenshot') {
           // ✅ 标记同步已开始（收到了服务器响应）
           if (isManualSyncing) {
@@ -9184,6 +9425,14 @@
             wsSend('force-save-gif', { gifCacheId: msg.gifCacheId, filename: timeoutFilename });
           }
         }
+        if (msg.recordingImportTask && msg.taskId) {
+          pendingRecordingImportRequests.delete(msg.taskId);
+          wsSend('recording-import-result', {
+            taskId: msg.taskId,
+            success: false,
+            error: `GIF import timeout (${Math.round((Number(msg.timeoutMs) || 30000) / 1000)}s)`
+          });
+        }
         finishRealtimeConversionUI('plugin-import-timeout', {
           filename: timeoutFilename,
           trace: false
@@ -9201,7 +9450,13 @@
           screenshotCount++;
           document.getElementById('count').textContent = screenshotCount;
           
-          if (ws && ws.readyState === WebSocket.OPEN) {
+          if (msg.recordingImportTask && msg.taskId) {
+            pendingRecordingImportRequests.delete(msg.taskId);
+            wsSend('recording-import-result', {
+              taskId: msg.taskId,
+              success: true
+            });
+          } else if (ws && ws.readyState === WebSocket.OPEN) {
             const driveFileId = msg.driveFileId || (currentFileIdType === 'drive' ? currentFileId : null);
             const ossFileId = msg.ossFileId || (currentFileIdType === 'oss' ? currentFileId : null);
             
@@ -9229,9 +9484,17 @@
           }
         } else {
           log('❌ 添加失败: ' + (msg.error || '未知错误'));
+          if (msg.recordingImportTask && msg.taskId) {
+            pendingRecordingImportRequests.delete(msg.taskId);
+            wsSend('recording-import-result', {
+              taskId: msg.taskId,
+              success: false,
+              error: msg.error || 'unknown import error'
+            });
+          }
           
           // 如果添加失败，但已经备份到本地，也发送确认以删除云端文件
-          if (currentFileBackedUp) {
+          if (!msg.recordingImportTask && currentFileBackedUp) {
             log('⚠️  导入 Figma 失败，但文件已备份到本地，确认删除云端文件');
             showToast(t('toast_import_fail_local'), 'warning');
             
@@ -9278,8 +9541,16 @@
         // Don't reset state - let currentButtonState handle locking
         const reasonText = msg.reason === 'undefined-error' ? t('toast_import_fail') : t('reason_unknown');
         log(`⚠️  ${msg.filename} 需手动导入`);
+        if (msg.recordingImportTask && msg.taskId) {
+          pendingRecordingImportRequests.delete(msg.taskId);
+          wsSend('recording-import-result', {
+            taskId: msg.taskId,
+            success: false,
+            error: msg.error || 'manual drag required'
+          });
+        }
         
-        if (ws && ws.readyState === WebSocket.OPEN) {
+        if (!msg.recordingImportTask && ws && ws.readyState === WebSocket.OPEN) {
           try {
             const failMessage = {
               type: 'screenshot-failed',
@@ -12092,6 +12363,17 @@
         if (msg && msg.type === 'timeline-layers-refresh') {
             refreshTimelineWithNewLayers(msg.layers, msg.frameWidth, msg.frameHeight);
         }
+    });
+
+    document.addEventListener('click', (event) => {
+      const retryBtn = event.target && event.target.closest
+        ? event.target.closest('[data-recording-task-retry]')
+        : null;
+      if (!retryBtn) return;
+      const taskId = retryBtn.getAttribute('data-recording-task-retry');
+      if (!taskId) return;
+      pendingRecordingImportRequests.delete(taskId);
+      wsSend('request-recording-import', { taskId });
     });
     
     // 更新预览区图层位置（实时响应 Figma 画板中的移动）

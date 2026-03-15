@@ -384,6 +384,19 @@ function generateCacheId(filename, driveFileId, timestamp) {
   return crypto.createHash('md5').update(data).digest('hex');
 }
 
+function writeGifCacheMetadata(cachePath, cacheId, originalFilename, driveFileId, size, ext) {
+  const metaPath = path.join(cachePath, `${cacheId}.meta.json`);
+  const metadata = {
+    cacheId,
+    originalFilename,
+    driveFileId,
+    timestamp: Date.now(),
+    size,
+    ext
+  };
+  fs.writeFileSync(metaPath, JSON.stringify(metadata, null, 2));
+}
+
 /**
  * 保存 GIF 到缓存目录
  * @param {Buffer} buffer - 文件 buffer
@@ -404,17 +417,7 @@ function saveGifToCache(buffer, originalFilename, driveFileId) {
     // 保存文件
     fs.writeFileSync(cacheFilePath, buffer);
     
-    // 保存元数据（用于查找和清理）
-    const metaPath = path.join(cachePath, `${cacheId}.meta.json`);
-    const metadata = {
-      cacheId,
-      originalFilename,
-      driveFileId,
-      timestamp: Date.now(),
-      size: buffer.length,
-      ext
-    };
-    fs.writeFileSync(metaPath, JSON.stringify(metadata, null, 2));
+    writeGifCacheMetadata(cachePath, cacheId, originalFilename, driveFileId, buffer.length, ext);
     
     console.log(`✅ [GIF Cache] 已缓存: ${originalFilename} → ${cacheId}${ext} (${(buffer.length / 1024 / 1024).toFixed(2)} MB)`);
     
@@ -425,6 +428,41 @@ function saveGifToCache(buffer, originalFilename, driveFileId) {
     };
   } catch (error) {
     console.error(`❌ [GIF Cache] 保存失败:`, error.message);
+    return null;
+  }
+}
+
+/**
+ * 直接从现有文件复制到缓存目录，避免先整文件读入 Buffer。
+ * @param {string} sourcePath - 源文件路径
+ * @param {string} originalFilename - 原始文件名
+ * @param {string} driveFileId - Drive 文件 ID
+ * @returns {object|null} - { cacheId, cachePath, originalFilename }
+ */
+function saveGifFileToCache(sourcePath, originalFilename, driveFileId) {
+  try {
+    if (!sourcePath || !fs.existsSync(sourcePath)) {
+      throw new Error('源文件不存在');
+    }
+    const cachePath = ensureGifCacheDir();
+    if (!cachePath) return null;
+
+    const cacheId = generateCacheId(originalFilename, driveFileId, Date.now());
+    const ext = path.extname(originalFilename) || path.extname(sourcePath) || '.gif';
+    const cacheFilename = `${cacheId}${ext}`;
+    const cacheFilePath = path.join(cachePath, cacheFilename);
+    fs.copyFileSync(sourcePath, cacheFilePath);
+    const size = fs.statSync(cacheFilePath).size;
+    writeGifCacheMetadata(cachePath, cacheId, originalFilename, driveFileId, size, ext);
+
+    console.log(`✅ [GIF Cache] 已按文件缓存: ${originalFilename} → ${cacheId}${ext} (${(size / 1024 / 1024).toFixed(2)} MB)`);
+    return {
+      cacheId,
+      cachePath: cacheFilePath,
+      originalFilename
+    };
+  } catch (error) {
+    console.error(`❌ [GIF Cache] 文件缓存失败:`, error.message);
     return null;
   }
 }
@@ -658,6 +696,7 @@ module.exports = {
   // GIF 缓存管理
   getGifCachePath,
   saveGifToCache,
+  saveGifFileToCache,
   getGifFromCache,
   cleanOldGifCache,
   getGifCacheStats

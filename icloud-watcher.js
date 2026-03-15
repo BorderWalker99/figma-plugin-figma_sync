@@ -9,6 +9,7 @@ const { promisify } = require('util');
 const _execAsync = promisify(exec);
 const os = require('os');
 const { detectImageFormat, normalizeStillImageToJpeg } = require('./image-processor');
+const recordingTaskStore = require('./recording-task-store');
 
 // 追踪所有活跃子进程，插件关闭时统一 kill
 const activeChildProcesses = new Set();
@@ -237,6 +238,24 @@ function parseGifDimensions(buffer) {
   }
 }
 
+function parseGifDimensionsFromFile(filePath) {
+  if (!filePath || !fs.existsSync(filePath)) return null;
+  let fd = null;
+  try {
+    fd = fs.openSync(filePath, 'r');
+    const header = Buffer.alloc(10);
+    const bytesRead = fs.readSync(fd, header, 0, 10, 0);
+    if (bytesRead < 10) return null;
+    return parseGifDimensions(header);
+  } catch (_) {
+    return null;
+  } finally {
+    if (fd !== null) {
+      try { fs.closeSync(fd); } catch (_) {}
+    }
+  }
+}
+
 function cleanupOriginalVideo(videoPath, gifPath, displayFilename) {
   try {
     if (videoPath && fs.existsSync(videoPath) && videoPath !== gifPath) {
@@ -253,12 +272,16 @@ function runPostVideoOps(result, keepGif, displayFilename, syncSource = 'realtim
     if (keepGif) {
       try {
         const wasExisting = fs.existsSync(result.gifPath);
-        fs.writeFileSync(result.gifPath, result.gifBuffer);
+        if (!wasExisting && result.gifBuffer) {
+          fs.writeFileSync(result.gifPath, result.gifBuffer);
+        }
         if (!wasExisting) notifyLocalGifSaved(result.gifFilename, syncSource);
       } catch (_) {}
       console.log(`   📌 根据备份设置，保留 GIF: ${result.gifFilename}`);
     }
-    cleanupOriginalVideo(result.sourceVideoPath, result.gifPath, displayFilename);
+    if (!result || result.deferSourceCleanup !== true) {
+      cleanupOriginalVideo(result.sourceVideoPath, result.gifPath, displayFilename);
+    }
   } catch (_) {}
 }
 
@@ -288,6 +311,15 @@ function requestManualSyncCancel() {
 function safeSend(message) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return false;
   try { ws.send(JSON.stringify(message)); return true; } catch (_) { return false; }
+}
+
+function notifyRecordingTaskUpdate(taskId, extra = {}) {
+  if (!taskId) return false;
+  return safeSend({
+    type: 'recording-task-update',
+    taskId,
+    ...extra
+  });
 }
 
 function notifyLocalGifSaved(filename, syncSource = 'realtime') {
@@ -518,6 +550,16 @@ async function processRealtimeSyncTask(task) {
     // 处理视频文件 → 自动转换为 GIF
     if (isVideo) {
       console.log(`\n🎬 [实时模式] 视频文件: ${displayFilename}，开始转换 GIF...`);
+      const recordingTaskId = recordingTaskStore.createTask({
+        taskId: task.taskId || null,
+        source: 'icloud',
+        syncSource: 'realtime',
+        stage: 'queued',
+        filename: displayFilename,
+        originalFilename: displayFilename,
+        sourcePath: finalPath,
+        autoImport: true
+      }).taskId;
 
       try {
         const emitProgress = (stage, percent, extra = {}) => {
@@ -527,55 +569,45 @@ async function processRealtimeSyncTask(task) {
         };
 
         emitProgress('converting', 10, { isVideo: true });
+        recordingTaskStore.updateStage(recordingTaskId, 'converting', {
+          progress: 10,
+          sourcePath: finalPath
+        });
+        notifyRecordingTaskUpdate(recordingTaskId, { stage: 'converting' });
 
         const result = await processVideoFile(finalPath, displayFilename, subfolder, emitProgress);
 
         const gifSubfolder = subfolder || CONFIG.subfolders.gif;
         const keepGif = !shouldCleanupFile(gifSubfolder);
 
-        emitProgress('importing', 90, { isVideo: true });
-
-        const gifDims = parseGifDimensions(result.gifBuffer);
-        const gifUrl = buildGifTempUrlOrThrow(result.gifCacheId, result.gifFilename, 'realtime-video-gif');
-        const sendOk = safeSend({
-          type: 'screenshot',
-          bytes: null,
-          gifUrl,
-          timestamp: Date.now(),
+        const gifDims = parseGifDimensionsFromFile(result.gifPath);
+        recordingTaskStore.updateStage(recordingTaskId, 'gif-ready', {
+          progress: 100,
           filename: result.gifFilename,
-          isGif: true,
           gifCacheId: result.gifCacheId || null,
           imageWidth: gifDims ? gifDims.width : null,
           imageHeight: gifDims ? gifDims.height : null,
           keptInIcloud: keepGif,
-          syncSource: 'realtime',
-          taskId: task.taskId
+          sourcePath: finalPath
         });
-        if (!sendOk) {
-          throw new Error(`SEND_FAILED:${displayFilename}`);
-        }
-        console.log(`   📤 [实时GIF] 已发送到 Figma: ${result.gifFilename} (gifUrl, taskId=${task.taskId})`);
-
-        registerRealtimeInflightAck(task, finalPath, gifSubfolder, result.gifFilename, {
-          onAck: () => {
-            markFileAsProcessed(finalPath);
-            syncCount++;
-            emitProgress('done', 100, { isVideo: true });
-            schedulePostVideoOps(result, keepGif, displayFilename, 'realtime');
-            console.log(`   ✅ 收到Figma确认: ${result.gifFilename}`);
-            console.log(`   📊 已同步: ${syncCount} 张`);
-            console.log(`   ✅ 视频转 GIF 完成并已同步到 Figma`);
-          },
-          onFail: ({ keepFile }) => {
-            if (!keepFile) {
-              console.warn(`   ⚠️  [实时模式] 视频 ACK 失败，准备重试: ${displayFilename}`);
-              scheduleRealtimeRetry(task, 'FIGMA_FAILED');
-            } else {
-              console.warn(`   ⚠️  [实时模式] Figma 要求保留源文件，停止自动重试: ${displayFilename}`);
-            }
-          }
+        notifyRecordingTaskUpdate(recordingTaskId, {
+          stage: 'gif-ready',
+          filename: result.gifFilename,
+          gifCacheId: result.gifCacheId || null
         });
+        result.deferSourceCleanup = true;
+        markFileAsProcessed(finalPath);
+        syncCount++;
+        emitProgress('done', 100, { isVideo: true, stageDetail: 'gif-ready-for-import' });
+        schedulePostVideoOps(result, keepGif, displayFilename, 'realtime');
+        console.log(`   🗂️ [实时GIF] 已生成后台导入任务: ${result.gifFilename} (taskId=${recordingTaskId})`);
+        console.log(`   📊 已完成转换: ${syncCount} 张`);
       } catch (convErr) {
+        recordingTaskStore.updateStage(recordingTaskId, 'failed', {
+          progress: 100,
+          lastError: convErr && convErr.message ? convErr.message : String(convErr)
+        });
+        notifyRecordingTaskUpdate(recordingTaskId, { stage: 'failed' });
         console.error(`   ❌ [Video→GIF] 转换失败: ${convErr.message}`);
         try {
           const fileBuffer = fs.readFileSync(finalPath);
@@ -795,21 +827,25 @@ async function convertVideoToGif(videoPath, displayFilename, progressCb) {
 
     if (progressCb) progressCb('converting', 88, { estimatedSec, isVideo: true, stageDetail: 'shared-gif-ready' });
 
-    const gifBuffer = fs.readFileSync(tempGifOut);
-    const gifSizeMB = (gifBuffer.length / 1024 / 1024).toFixed(1);
+    const gifSizeBytes = fs.statSync(tempGifOut).size;
+    const gifSizeMB = (gifSizeBytes / 1024 / 1024).toFixed(1);
     const convTime = ((Date.now() - convStartTime) / 1000).toFixed(1);
     console.log(`   ✅ [Video→GIF] 共享链路完成 ${videoSizeMB}MB → ${gifSizeMB}MB (${convTime}秒)`);
 
-    return gifBuffer;
+    return {
+      tempDir,
+      outputPath: tempGifOut,
+      sizeBytes: gifSizeBytes
+    };
   } finally {
-    try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch (_) {}
+    // 调用方负责在复制/缓存完成后清理 tempDir，避免再次读入大 Buffer。
   }
 }
 
 /**
  * 处理视频文件：转换为 GIF 并写入缓存，尽快返回用于同步到 Figma。
  * 注意：磁盘持久化/源视频删除由调用方按备份策略处理，减少 80→100 阶段阻塞。
- * @returns {{ gifBuffer, gifPath, gifFilename, gifCacheId, sourceVideoPath }} 或 null（失败时）
+ * @returns {{ gifPath, gifFilename, gifCacheId, sourceVideoPath, gifSizeBytes }} 或 null（失败时）
  */
 async function processVideoFile(videoPath, displayFilename, subfolder, progressCb) {
   let waitProgressTimer = null;
@@ -835,15 +871,18 @@ async function processVideoFile(videoPath, displayFilename, subfolder, progressC
     console.log(`   ⚠️  视频可能未完全下载，尝试继续转换...`);
   }
 
-  const gifBuffer = await convertVideoToGif(videoPath, displayFilename, progressCb);
+  const gifOutput = await convertVideoToGif(videoPath, displayFilename, progressCb);
 
   const gifFilename = displayFilename.replace(/\.(mp4|mov)$/i, '.gif');
   const gifPath = path.join(path.dirname(videoPath), gifFilename);
+  try {
+    fs.copyFileSync(gifOutput.outputPath, gifPath);
+  } catch (_) {}
 
   // 保存到 GIF 缓存
   let gifCacheId = null;
   try {
-    const cacheResult = userConfig.saveGifToCache(gifBuffer, gifFilename, null);
+    const cacheResult = userConfig.saveGifFileToCache(gifPath, gifFilename, null);
     if (cacheResult && cacheResult.cacheId) {
       gifCacheId = cacheResult.cacheId;
       saveCacheMapping(gifFilename, gifCacheId);
@@ -852,8 +891,19 @@ async function processVideoFile(videoPath, displayFilename, subfolder, progressC
   } catch (cacheErr) {
     console.error(`   ⚠️  [GIF Cache] 缓存失败:`, cacheErr.message);
   }
+  try {
+    if (gifOutput && gifOutput.tempDir) {
+      fs.rmSync(gifOutput.tempDir, { recursive: true, force: true });
+    }
+  } catch (_) {}
 
-  return { gifBuffer, gifPath, gifFilename, gifCacheId, sourceVideoPath: videoPath };
+  return {
+    gifPath,
+    gifFilename,
+    gifCacheId,
+    sourceVideoPath: videoPath,
+    gifSizeBytes: gifOutput && Number.isFinite(gifOutput.sizeBytes) ? gifOutput.sizeBytes : (fs.existsSync(gifPath) ? fs.statSync(gifPath).size : 0)
+  };
 }
 
 // ============= 子文件夹管理 =============
@@ -1924,35 +1974,52 @@ async function performManualSync() {
 
         if (isVideo) {
           console.log(`   🎬 [手动同步] 视频文件: ${file}，开始转换 GIF...`);
+          const recordingTaskId = recordingTaskStore.createTask({
+            source: 'icloud',
+            syncSource: 'manual',
+            stage: 'queued',
+            filename: file,
+            originalFilename: file,
+            sourcePath: filePath,
+            autoImport: true
+          }).taskId;
 
           try {
+            recordingTaskStore.updateStage(recordingTaskId, 'converting', {
+              progress: 10,
+              sourcePath: filePath
+            });
+            notifyRecordingTaskUpdate(recordingTaskId, { stage: 'converting' });
             const result = await processVideoFile(filePath, file, subfolder, fileProgressCb);
 
             const gifSub = subfolder || CONFIG.subfolders.gif;
             const keepGif = !shouldCleanupFile(gifSub);
-            fileProgressCb('importing', 90);
-            const gifDims = parseGifDimensions(result.gifBuffer);
-            const gifUrl = buildGifTempUrlOrThrow(result.gifCacheId, result.gifFilename, 'manual-video-gif');
-            const sendOk = safeSend({
-              type: 'screenshot',
-              bytes: null,
-              gifUrl,
-              timestamp: Date.now(),
+            const gifDims = parseGifDimensionsFromFile(result.gifPath);
+            recordingTaskStore.updateStage(recordingTaskId, 'gif-ready', {
+              progress: 100,
               filename: result.gifFilename,
-              isGif: true,
               gifCacheId: result.gifCacheId || null,
               imageWidth: gifDims ? gifDims.width : null,
               imageHeight: gifDims ? gifDims.height : null,
               keptInIcloud: keepGif,
-              syncSource: 'manual'
+              sourcePath: filePath
             });
-            if (!sendOk) {
-              throw new Error(`SEND_FAILED:${result.gifFilename}`);
-            }
+            notifyRecordingTaskUpdate(recordingTaskId, {
+              stage: 'gif-ready',
+              filename: result.gifFilename,
+              gifCacheId: result.gifCacheId || null
+            });
+            result.deferSourceCleanup = true;
             markFileAsProcessed(filePath);
             runPostVideoOps(result, keepGif, file, 'manual');
+            fileProgressCb('done', 100, { isVideo: true, stageDetail: 'gif-ready-for-import' });
             return { success: true, isGif: true, isVideo: true, file, filePath, fileOrder };
           } catch (convErr) {
+            recordingTaskStore.updateStage(recordingTaskId, 'failed', {
+              progress: 100,
+              lastError: convErr && convErr.message ? convErr.message : String(convErr)
+            });
+            notifyRecordingTaskUpdate(recordingTaskId, { stage: 'failed' });
             if (isManualSyncCancelledError(convErr) || (convErr && convErr.code === 'CONVERSION_ABORTED')) {
               return { cancelled: true, file, filePath, fileOrder };
             }

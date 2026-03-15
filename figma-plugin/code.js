@@ -2180,7 +2180,7 @@ figma.ui.onmessage = async (msg) => {
   
   if (msg.type === 'add-screenshot') {
     try {
-      const { bytes, gifUrl, imageWidth, imageHeight, timestamp, filename, driveFileId, ossFileId, gifCacheId, taskId } = msg;
+      const { bytes, gifUrl, imageWidth, imageHeight, timestamp, filename, driveFileId, ossFileId, gifCacheId, taskId, recordingImportTask } = msg;
       
       // ✅ 缓存文件信息（即使后续创建失败，也要保留信息以便手动拖入后关联）
       if (filename) {
@@ -2497,6 +2497,7 @@ figma.ui.onmessage = async (msg) => {
         count: screenshotCount,
         filename: filename || '未命名文件',
         taskId: taskId || null,
+        recordingImportTask: recordingImportTask === true,
         driveFileId: driveFileId,
         ossFileId: ossFileId
       });
@@ -2519,6 +2520,7 @@ figma.ui.onmessage = async (msg) => {
           type: 'screenshot-import-timeout',
           filename: msg.filename || '未命名文件',
           taskId: msg.taskId || null,
+          recordingImportTask: recordingImportTask === true,
           gifCacheId: msg.gifCacheId || null,
           driveFileId: msg.driveFileId,
           ossFileId: msg.ossFileId,
@@ -2534,6 +2536,7 @@ figma.ui.onmessage = async (msg) => {
           type: 'file-needs-manual-drag',
           filename: msg.filename || '未命名文件',
           taskId: msg.taskId || null,
+          recordingImportTask: recordingImportTask === true,
           reason: 'undefined-error',
           error: errorText,
           driveFileId: msg.driveFileId,
@@ -2545,6 +2548,7 @@ figma.ui.onmessage = async (msg) => {
           type: 'screenshot-added',
           success: false,
           taskId: msg.taskId || null,
+          recordingImportTask: recordingImportTask === true,
           error: errorMessage,
           driveFileId: msg.driveFileId,
           ossFileId: msg.ossFileId

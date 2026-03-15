@@ -47,6 +47,7 @@ const {
 } = require('./googleDrive');
 
 const userConfig = require('./userConfig');
+const recordingTaskStore = require('./recording-task-store');
 const mediaTuning = require('./media-processing-tuning');
 const {
   getSystemPressure,
@@ -430,6 +431,24 @@ function parseGifDimensions(buffer) {
   }
 }
 
+function parseGifDimensionsFromFile(filePath) {
+  if (!filePath || !fs.existsSync(filePath)) return null;
+  let fd = null;
+  try {
+    fd = fs.openSync(filePath, 'r');
+    const header = Buffer.alloc(10);
+    const bytesRead = fs.readSync(fd, header, 0, 10, 0);
+    if (bytesRead < 10) return null;
+    return parseGifDimensions(header);
+  } catch (_) {
+    return null;
+  } finally {
+    if (fd !== null) {
+      try { fs.closeSync(fd); } catch (_) {}
+    }
+  }
+}
+
 /**
  * 初始化用户文件夹
  * 如果用户文件夹不存在，则创建
@@ -675,6 +694,15 @@ function safeSend(message) {
     console.error('❌ 发送 WebSocket 消息失败:', error.message);
     return false;
   }
+}
+
+function notifyRecordingTaskUpdate(taskId, extra = {}) {
+  if (!taskId) return false;
+  return safeSend({
+    type: 'recording-task-update',
+    taskId,
+    ...extra
+  });
 }
 
 function notifyLocalGifSaved(filename, syncSource = 'realtime') {
@@ -1173,8 +1201,26 @@ async function handleDriveFile(file, deleteAfterSync = false, progressCb = null,
     const fileNameLower = (file.name || '').toLowerCase();
     const fileMimeLower = (file.mimeType || '').toLowerCase();
     const looksLikeVideo = fileNameLower.endsWith('.mp4') || fileNameLower.endsWith('.mov') || fileMimeLower.startsWith('video/');
+    const originalFilename = file.name;
+    const recordingTaskId = looksLikeVideo
+      ? recordingTaskStore.createTask({
+          source: 'drive',
+          syncSource,
+          stage: 'queued',
+          filename: originalFilename,
+          originalFilename,
+          driveFileId: file.id,
+          mimeType: file.mimeType || null,
+          progress: 0,
+          autoImport: true
+        }).taskId
+      : null;
     
     emitProgress('downloading', 5, looksLikeVideo ? { isVideo: true } : {});
+    if (recordingTaskId) {
+      recordingTaskStore.updateStage(recordingTaskId, 'downloading', { progress: 5 });
+      notifyRecordingTaskUpdate(recordingTaskId, { stage: 'downloading' });
+    }
     let downloadProgressTimer = null;
     let lastDownloadPct = 5;
     const expectedDownloadBytes = Math.max(0, Number(file.size || 0));
@@ -1239,6 +1285,14 @@ async function handleDriveFile(file, deleteAfterSync = false, progressCb = null,
       : (originalBuffer ? originalBuffer.length : 0);
     const downloadedSizeKB = (downloadedSizeBytes / 1024).toFixed(2);
     emitProgress('downloading', looksLikeVideo ? 27 : 20, { sizeKB: parseFloat(downloadedSizeKB), ...(looksLikeVideo ? { isVideo: true } : {}) });
+    if (recordingTaskId) {
+      recordingTaskStore.updateStage(recordingTaskId, 'downloaded', {
+        progress: 27,
+        downloadedSizeBytes,
+        sourcePath: downloadedVideoPath || null
+      });
+      notifyRecordingTaskUpdate(recordingTaskId, { stage: 'downloaded' });
+    }
     
     let processedBuffer = originalBuffer;
     let backupImageFilename = null;
@@ -1320,6 +1374,15 @@ async function handleDriveFile(file, deleteAfterSync = false, progressCb = null,
 
       console.log(`   🎬 [Video→GIF] 开始共享转码 ${file.name} (${videoSizeMB}MB, pixels=${sourcePixels}, frames=${sourceFrames || '?'})...`);
       emitProgress('converting', 25, { estimatedSec, isVideo: true, stageDetail: 'shared-gif-pipeline' });
+      if (recordingTaskId) {
+        recordingTaskStore.updateStage(recordingTaskId, 'converting', {
+          progress: 25,
+          estimatedSec,
+          sourceVideoPath: tempVideoPath,
+          sourceVideoSizeBytes: videoSizeBytes
+        });
+        notifyRecordingTaskUpdate(recordingTaskId, { stage: 'converting' });
+      }
 
       try {
         throwIfAborted();
@@ -1353,13 +1416,12 @@ async function handleDriveFile(file, deleteAfterSync = false, progressCb = null,
         });
           throwIfAborted();
         
-        const gifBuffer = fs.readFileSync(tempGifOut);
-        const gifSizeMB = (gifBuffer.length / 1024 / 1024).toFixed(1);
+        const gifSizeBytes = fs.statSync(tempGifOut).size;
+        const gifSizeMB = (gifSizeBytes / 1024 / 1024).toFixed(1);
         const convTime = ((Date.now() - convStartTime) / 1000).toFixed(1);
         emitProgress('converting', 88, { estimatedSec, isVideo: true, stageDetail: 'shared-gif-ready' });
         console.log(`   ✅ [Video→GIF] 共享链路完成 ${videoSizeMB}MB → ${gifSizeMB}MB (${convTime}秒)`);
-        
-        processedBuffer = gifBuffer;
+
         file.name = file.name.replace(/\.(mov|mp4)$/i, '.gif');
         file.mimeType = 'image/gif';
         isVideo = false;
@@ -1367,17 +1429,29 @@ async function handleDriveFile(file, deleteAfterSync = false, progressCb = null,
         conversionOk = true;
         
         try {
-          const gifCacheResult = userConfig.saveGifToCache(processedBuffer, file.name, file.id);
+          const gifCacheResult = userConfig.saveGifFileToCache(tempGifOut, file.name, file.id);
           if (gifCacheResult) gifCacheId = gifCacheResult.cacheId;
         } catch (_) {}
+        const gifDims = parseGifDimensionsFromFile(tempGifOut);
+        if (recordingTaskId) {
+          recordingTaskStore.updateStage(recordingTaskId, 'gif-ready', {
+            progress: 100,
+            filename: file.name,
+            gifCacheId: gifCacheId || null,
+            imageWidth: gifDims ? gifDims.width : null,
+            imageHeight: gifDims ? gifDims.height : null,
+            backedUpLocally: backedUpLocally || false,
+            sourceVideoFilename: originalFilename
+          });
+        }
         
         const backupMode = userConfig.getBackupMode();
         if (backupMode === 'gif_only' || backupMode === 'all') {
-          if (processedBuffer.length > LARGE_GIF_URL_THRESHOLD) {
-            const bufForBackup = processedBuffer;
+          if (gifSizeBytes > LARGE_GIF_URL_THRESHOLD) {
             const nameForBackup = file.name;
             deferredLocalBackup = async () => {
               try {
+                const bufForBackup = fs.readFileSync(tempGifOut);
                 const sr = await saveFileToLocalFolder(bufForBackup, nameForBackup, 'image/gif');
                 if (sr && sr.success && sr.isNew) {
                   notifyLocalGifSaved(nameForBackup, syncSource);
@@ -1391,7 +1465,8 @@ async function handleDriveFile(file, deleteAfterSync = false, progressCb = null,
             };
             backedUpLocally = false;
           } else {
-            const sr = await saveFileToLocalFolder(processedBuffer, file.name, 'image/gif');
+            const gifBuffer = fs.readFileSync(tempGifOut);
+            const sr = await saveFileToLocalFolder(gifBuffer, file.name, 'image/gif');
             backedUpLocally = (sr && sr.success && sr.isNew) || false;
             if (backedUpLocally) notifyLocalGifSaved(file.name, syncSource);
             if (!backedUpLocally && sr && !sr.success) {
@@ -1399,11 +1474,23 @@ async function handleDriveFile(file, deleteAfterSync = false, progressCb = null,
             }
           }
         }
+        notifyRecordingTaskUpdate(recordingTaskId, {
+          stage: 'gif-ready',
+          filename: file.name,
+          gifCacheId: gifCacheId || null
+        });
       } catch (convErr) {
         if (isManualSyncCancelledError(convErr) || (convErr && convErr.code === 'CONVERSION_ABORTED')) {
           throw convErr;
         }
         console.error(`   ❌ [Video→GIF] 共享链路失败 (${((Date.now() - convStartTime) / 1000).toFixed(1)}秒): ${convErr.message}`);
+        if (recordingTaskId) {
+          recordingTaskStore.updateStage(recordingTaskId, 'failed', {
+            progress: 100,
+            lastError: convErr.message || String(convErr)
+          });
+          notifyRecordingTaskUpdate(recordingTaskId, { stage: 'failed' });
+        }
         if (ws && ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ type: 'file-skipped', filename: file.name, reason: 'video', gifCacheId, driveFileId: file.id }));
         }
@@ -1417,7 +1504,12 @@ async function handleDriveFile(file, deleteAfterSync = false, progressCb = null,
     }
     
     if (conversionOk) {
-      // 视频→GIF 转换完成，processedBuffer 已设好，跳过所有格式处理直接进入发送
+      emitProgress('done', 100, { isVideo: true, stageDetail: 'gif-ready-for-import' });
+      console.log(`   🗂️ [Drive同步] 录屏任务已转为后台导入任务: ${file.name}${recordingTaskId ? ` (${recordingTaskId})` : ''}`);
+      if (!deleteAfterSync && deferredLocalBackup) {
+        setImmediate(() => { deferredLocalBackup(); });
+      }
+      return;
     } else if (isGif) {
       // 原始 GIF 文件处理
       // 原始 GIF：统一走自动导入流程（不再按 100MB 强制手动）
